@@ -227,6 +227,8 @@ class TvRemoteService extends ChangeNotifier {
   HttpServer? _lanHttpServer;
   RawDatagramSocket? _lanUdpSocket;
   DateTime? _lastFirestore429Time;
+  String? _localTvIp;
+  String? get localTvIp => _localTvIp;
 
   String? _targetTvLanHost;
   String? get targetTvLanHost => _targetTvLanHost;
@@ -352,8 +354,28 @@ class TvRemoteService extends ChangeNotifier {
     });
   }
 
+  Future<void> _detectLocalTvIp() async {
+    try {
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLinkLocal: false,
+      );
+      for (final iface in interfaces) {
+        for (final addr in iface.addresses) {
+          if (!addr.isLoopback && !addr.address.startsWith('127.')) {
+            _localTvIp = addr.address;
+            break;
+          }
+        }
+        if (_localTvIp != null) break;
+      }
+      debugPrint('📍 [TvRemoteService] IP LAN de Smart TV detectada: $_localTvIp');
+    } catch (_) {}
+  }
+
   Future<void> _startLanServer() async {
     if (InutilAuthService.instance.isOnlineValidationDisabled) return;
+    await _detectLocalTvIp();
     try {
       _lanHttpServer?.close(force: true);
       _lanHttpServer = await HttpServer.bind(InternetAddress.anyIPv4, lanHttpPort);
@@ -484,7 +506,7 @@ class TvRemoteService extends ChangeNotifier {
       online: true,
       tvDeviceId: InutilAuthService.instance.deviceId,
       tvName: 'Smart TV',
-      lanHost: _targetTvLanHost ?? '',
+      lanHost: _localTvIp ?? _targetTvLanHost ?? '',
       isPlaying: isPlaying,
       title: title,
       subtitle: subtitle,
@@ -507,6 +529,7 @@ class TvRemoteService extends ChangeNotifier {
       online: true,
       tvDeviceId: InutilAuthService.instance.deviceId,
       tvName: 'Smart TV',
+      lanHost: _localTvIp ?? _targetTvLanHost ?? '',
       updatedAt: DateTime.now(),
     );
     await _publishTvState(_tvState);
@@ -516,13 +539,26 @@ class TvRemoteService extends ChangeNotifier {
     final uid = _uid;
     if (uid == null || uid.isEmpty) return;
     if (InutilAuthService.instance.isOnlineValidationDisabled) return;
+    if (_lastFirestore429Time != null &&
+        DateTime.now().difference(_lastFirestore429Time!).inSeconds < 60) {
+      return;
+    }
     try {
-      await InutilFirestoreService.instance.setDocument(
+      final ok = await InutilFirestoreService.instance.setDocument(
         'users/$uid/tv_remote/state',
         state.toFirestore(),
         merge: false,
       );
-    } catch (_) {}
+      if (!ok) {
+        _lastFirestore429Time = DateTime.now();
+      }
+    } catch (e) {
+      final err = e.toString();
+      if (err.contains('429') || err.contains('RESOURCE_EXHAUSTED')) {
+        _lastFirestore429Time = DateTime.now();
+        debugPrint('⏳ [TvRemoteService] Firestore 429 en publishTvState. Pausando sincronización cloud 60s.');
+      }
+    }
   }
 
   Future<void> _pollIncomingCommand() async {
@@ -785,14 +821,34 @@ class TvRemoteService extends ChangeNotifier {
 
       // 2. Fallback a Firestore si LAN no está disponible
       final uid = _uid;
-      if (uid != null && uid.isNotEmpty && !InutilAuthService.instance.isOnlineValidationDisabled) {
-        final doc = await InutilFirestoreService.instance
-            .getDocument('users/$uid/tv_remote/state');
-        final next = doc != null
-            ? TvPlaybackState.fromFirestore(doc)
-            : const TvPlaybackState();
-        _tvState = next;
-        notifyListeners();
+      if (uid != null &&
+          uid.isNotEmpty &&
+          !InutilAuthService.instance.isOnlineValidationDisabled) {
+        if (_lastFirestore429Time != null &&
+            DateTime.now().difference(_lastFirestore429Time!).inSeconds < 60) {
+          return;
+        }
+        try {
+          final doc = await InutilFirestoreService.instance
+              .getDocument('users/$uid/tv_remote/state');
+          if (doc != null) {
+            final next = TvPlaybackState.fromFirestore(doc);
+            if (next.lanHost.isNotEmpty && _targetTvLanHost != next.lanHost) {
+              _targetTvLanHost = next.lanHost;
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setString(_prefTvLanHostKey, next.lanHost);
+              unawaited(refreshTvStateNow());
+            }
+            _tvState = next;
+            notifyListeners();
+          }
+        } catch (e) {
+          final err = e.toString();
+          if (err.contains('429') || err.contains('RESOURCE_EXHAUSTED')) {
+            _lastFirestore429Time = DateTime.now();
+            debugPrint('⏳ [TvRemoteService] Firestore 429 en refreshTvState. Pausando 60s.');
+          }
+        }
       }
     } catch (_) {
     } finally {
@@ -884,6 +940,20 @@ class TvRemoteService extends ChangeNotifier {
       'play_channel',
       payload: {'channel': channel.toJson()},
     );
+  }
+
+  /// Pausa inmediatamente la reproducción en la Smart TV.
+  Future<bool> sendPause() => sendCommand('pause');
+
+  /// Reanuda la reproducción en la Smart TV.
+  Future<bool> sendPlay() => sendCommand('play');
+
+  /// Detiene por completo la reproducción en la Smart TV y limpia el estado activo.
+  Future<bool> sendStop() async {
+    final ok = await sendCommand('stop');
+    _tvState = _tvState.copyWith(isPlaying: false);
+    notifyListeners();
+    return ok;
   }
 
   /// Envía dirección D-Pad a la Smart TV ('up', 'down', 'left', 'right', 'center').

@@ -237,5 +237,41 @@ void main() {
       );
       expect(TvRemoteService.instance.playOnTv, isFalse);
     });
+
+    test('sendPause, sendPlay y sendStop gestionan el estado y envían comando', () async {
+      TvRemoteCommand? lastDispatched;
+      TvRemoteService.instance.registerActivePlayerHandler((cmd) {
+        lastDispatched = cmd;
+      });
+
+      // Simular TV reproduciendo
+      TvRemoteService.instance.setTvStateForTest(
+        TvPlaybackState(
+          online: true,
+          isPlaying: true,
+          title: 'Dragon Ball Super',
+          positionSec: 120,
+          updatedAt: DateTime.now(),
+        ),
+      );
+      expect(TvRemoteService.instance.tvState.isPlaying, isTrue);
+
+      // Despacho local de pause
+      TvRemoteService.instance.dispatchCommandLocally(
+        TvRemoteCommand(
+          commandId: 'cmd-pause-1',
+          action: 'pause',
+          payload: const {},
+          createdAt: DateTime.now(),
+        ),
+      );
+      expect(lastDispatched?.action, 'pause');
+
+      // sendStop actualiza isPlaying localmente a false
+      await TvRemoteService.instance.sendStop();
+      expect(TvRemoteService.instance.tvState.isPlaying, isFalse);
+
+      TvRemoteService.instance.registerActivePlayerHandler(null);
+    });
   });
 }

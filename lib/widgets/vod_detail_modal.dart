@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
@@ -202,6 +203,12 @@ class _VodDetailModalState extends State<VodDetailModal> {
     int initialEpisodeIndex = 0,
     Duration? resumePosition,
   }) {
+    // Si la Smart TV estaba reproduciendo contenido, la detenemos para que
+    // no se reproduzca simultáneamente en la TV y en el móvil (cero duplicidad).
+    if (!TvModeService.of(context) && TvRemoteService.instance.isTvOnline) {
+      unawaited(TvRemoteService.instance.sendStop());
+    }
+
     final item = _item;
     final directPlayables = <Playable>[];
     if (episode != null && episode.sources.isNotEmpty) {
@@ -260,8 +267,8 @@ class _VodDetailModalState extends State<VodDetailModal> {
       SnackBar(
         content: Text(
           ok
-              ? 'Reproduciendo ${_item.title} en Smart TV 📺'
-              : 'No se pudo enviar a la Smart TV',
+              ? 'Enviando ${_item.title} a Smart TV 📺'
+              : 'No se pudo conectar con la Smart TV',
         ),
         duration: const Duration(seconds: 2),
         action: SnackBarAction(
@@ -270,7 +277,10 @@ class _VodDetailModalState extends State<VodDetailModal> {
         ),
       ),
     );
-    if (ok) TvRemoteSheet.show(context);
+    if (ok) {
+      unawaited(TvRemoteService.instance.refreshTvStateNow());
+      TvRemoteSheet.show(context);
+    }
   }
 
   Future<void> _sendEpisodeToTv(VodEpisode ep, int globalIndex) async {
@@ -292,8 +302,8 @@ class _VodDetailModalState extends State<VodDetailModal> {
       SnackBar(
         content: Text(
           ok
-              ? 'Reproduciendo T${ep.seasonNumber}·E${ep.episodeNumber} (${ep.title.isNotEmpty ? ep.title : "Ep. ${ep.episodeNumber}"}) en Smart TV 📺'
-              : 'No se pudo enviar a la Smart TV',
+              ? 'Enviando T${ep.seasonNumber}·E${ep.episodeNumber} (${ep.title.isNotEmpty ? ep.title : "Ep. ${ep.episodeNumber}"}) a Smart TV 📺'
+              : 'No se pudo conectar con la Smart TV',
         ),
         duration: const Duration(seconds: 2),
         action: SnackBarAction(
@@ -302,15 +312,25 @@ class _VodDetailModalState extends State<VodDetailModal> {
         ),
       ),
     );
-    if (ok) TvRemoteSheet.show(context);
+    if (ok) {
+      unawaited(TvRemoteService.instance.refreshTvStateNow());
+      TvRemoteSheet.show(context);
+    }
   }
 
   void _playMainAction() {
     final saved = _history.progressFor(_item.id);
-    final resumePos =
-        (saved != null && saved.positionSec > 10 && !saved.finished)
+    final tvState = TvRemoteService.instance.tvState;
+    // Si la TV estaba reproduciendo este contenido, transferimos su segundo exacto al celular
+    final isSameContentOnTv = tvState.isPlaying &&
+        (tvState.title.toLowerCase().contains(_item.title.toLowerCase()) ||
+            _item.title.toLowerCase().contains(tvState.title.toLowerCase()));
+
+    final resumePos = (isSameContentOnTv && tvState.positionSec > 5)
+        ? Duration(seconds: tvState.positionSec)
+        : ((saved != null && saved.positionSec > 10 && !saved.finished)
             ? Duration(seconds: saved.positionSec.round())
-            : null;
+            : null);
 
     if (!TvModeService.of(context) && TvRemoteService.instance.playOnTv) {
       if (_item.isSeries) {
@@ -599,8 +619,32 @@ class _VodDetailModalState extends State<VodDetailModal> {
                                         borderRadius:
                                             const BorderRadius.horizontal(
                                                 left: Radius.circular(24)),
-                                        onTap: () => TvRemoteService.instance
-                                            .setPlayOnTv(false),
+                                        onTap: () async {
+                                          final wasOnTv =
+                                              TvRemoteService.instance.playOnTv;
+                                          await TvRemoteService.instance
+                                              .setPlayOnTv(false);
+                                          if (wasOnTv) {
+                                            final tvState =
+                                                TvRemoteService.instance.tvState;
+                                            if (tvState.isPlaying) {
+                                              await TvRemoteService.instance
+                                                  .sendPause();
+                                            }
+                                            if (context.mounted) {
+                                              ScaffoldMessenger.of(context)
+                                                  .showSnackBar(
+                                                const SnackBar(
+                                                  content: Text(
+                                                    '📱 Cambiado a ver en Móvil (TV en pausa)',
+                                                  ),
+                                                  duration:
+                                                      Duration(seconds: 2),
+                                                ),
+                                              );
+                                            }
+                                          }
+                                        },
                                         child: Container(
                                           padding: const EdgeInsets.symmetric(
                                               horizontal: 11, vertical: 7),
@@ -645,8 +689,22 @@ class _VodDetailModalState extends State<VodDetailModal> {
                                         borderRadius:
                                             const BorderRadius.horizontal(
                                                 right: Radius.circular(24)),
-                                        onTap: () => TvRemoteService.instance
-                                            .setPlayOnTv(true),
+                                        onTap: () async {
+                                          await TvRemoteService.instance
+                                              .setPlayOnTv(true);
+                                          if (context.mounted) {
+                                            ScaffoldMessenger.of(context)
+                                                .showSnackBar(
+                                              const SnackBar(
+                                                content: Text(
+                                                  '📺 Conexión persistente: Ahora se reproducirá en Smart TV',
+                                                ),
+                                                duration:
+                                                    Duration(seconds: 2),
+                                              ),
+                                            );
+                                          }
+                                        },
                                         child: Container(
                                           padding: const EdgeInsets.symmetric(
                                               horizontal: 11, vertical: 7),

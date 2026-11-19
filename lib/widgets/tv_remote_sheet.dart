@@ -707,21 +707,18 @@ class _TvRemoteSheetState extends State<TvRemoteSheet>
                 onTap: () =>
                     _send('seek_relative', payload: {'seconds': 10}, feedback: '+10 s'),
               ),
-              // ⏭ Episodio siguiente
-              if (hasEpisodes)
+              // ⏭ Episodio siguiente o Detener
+              if (hasEpisodes && hasNext)
                 _mediaBtn(
                   icon: Icons.skip_next_rounded,
                   label: 'Siguiente',
-                  onTap: hasNext
-                      ? () => _send('next_episode', feedback: 'Episodio siguiente')
-                      : null,
-                )
-              else
-                _mediaBtn(
-                  icon: Icons.stop_rounded,
-                  label: 'Cerrar',
-                  onTap: () => _send('stop', feedback: 'Detenido en TV'),
+                  onTap: () => _send('next_episode', feedback: 'Episodio siguiente'),
                 ),
+              _mediaBtn(
+                icon: Icons.stop_rounded,
+                label: 'Cerrar',
+                onTap: () => _send('stop', feedback: 'Detenido en TV'),
+              ),
             ],
           ),
 

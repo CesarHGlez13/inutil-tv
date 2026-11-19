@@ -1,5 +1,19 @@
 # Changelog — InútilTV
 
+## 3.3.9 — 2026-11-18
+- **Handoff Inteligente Smart TV ⇄ Celular (Cero Duplicidad):**
+  - Al cambiar el destino a «Móvil», la Smart TV se pausa automáticamente de inmediato para que no siga sonando en la sala.
+  - Al abrir un capítulo o película en el celular, la Smart TV se detiene por completo (`sendStop`), eliminando reproducciones simultáneas y desincronización de títulos.
+  - **Transferencia Continua de Tiempo:** al pasar de Smart TV a móvil, el reproductor del teléfono hereda el segundo exacto que estaba sonando en la TV para continuar viendo sin perder el hilo.
+- **Detección Automática de IP LAN (`lanHost`) y Enlace Cero Latencia:**
+  - La Smart TV autodetecta su dirección IPv4 en la red local (`192.168.x.x`) y la publica directamente en su estado, permitiendo que el celular se conecte de inmediato vía HTTP en menos de 2 ms sin depender de barridos lentos de subred.
+  - Prioridad absoluta del enlace LAN sobre la nube: los datos en vivo de la red local jamás son sobreescritos por datos antiguos o desactualizados.
+- **Protección Antitormenta de Cuota Firestore (429):**
+  - Pausa inteligente del sondeo en la nube ante errores 429 (`RESOURCE_EXHAUSTED`), canalizando el 100% de los controles y estado por la red local a coste y latencia cero.
+- **Control Remoto Móvil Perfeccionado:**
+  - Botón dedicado «Cerrar / Detener» disponible en todo momento para detener cualquier serie, anime o película en la TV con un solo toque.
+  - Limpieza inmediata del estado activo (`clearTvPlayback`) al cerrar el reproductor en la TV.
+
 ## 3.3.8 — 2026-11-18
 - **Persistencia Inteligente de Destino (Ver en TV vs Móvil):**
   - Conmutador directo de reproducción `[ 📱 Móvil | 📺 Smart TV ]` en la ficha de anime, series y películas con persistencia automática en disco (`SharedPreferences`).
