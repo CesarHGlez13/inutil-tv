@@ -322,6 +322,11 @@ class _PlayerScreenState extends State<PlayerScreen>
       _showControls = false;
       TvRemoteService.instance.registerActivePlayerHandler(_handleRemoteCommand);
       unawaited(_syncRemoteTvState());
+    } else {
+      // En celular: si la TV estaba reproduciendo, la detenemos de inmediato para evitar sonido duplicado
+      if (TvRemoteService.instance.isTvOnline) {
+        unawaited(TvRemoteService.instance.sendStop());
+      }
     }
 
     _subs.add(SleepTimerService.instance.onExpired.listen((reason) {

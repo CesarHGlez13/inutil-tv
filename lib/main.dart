@@ -514,6 +514,12 @@ class _MainScaffoldState extends State<MainScaffold> {
                 tabsStack,
                 if (!isImmersive)
                   Positioned(
+                    right: 18,
+                    bottom: (MediaQuery.paddingOf(context).bottom > 0 ? 6 : 12) + 70,
+                    child: _buildFloatingRemoteFab(context),
+                  ),
+                if (!isImmersive)
+                  Positioned(
                     left: 0,
                     right: 0,
                     bottom: 0,
@@ -1063,6 +1069,85 @@ class _MainScaffoldState extends State<MainScaffold> {
           ),
         ],
       ),
+    );
+  }
+
+  /// Botón circular flotante de Control Remoto Smart TV (FAB).
+  /// Permite abrir y cerrar el mando con un toque desde cualquier lugar del móvil.
+  Widget _buildFloatingRemoteFab(BuildContext context) {
+    return ListenableBuilder(
+      listenable: TvRemoteService.instance,
+      builder: (context, _) {
+        final online = TvRemoteService.instance.isTvOnline;
+        final playing = TvRemoteService.instance.tvState.isPlaying;
+
+        return Tooltip(
+          message: TvRemoteSheet.isOpen
+              ? 'Cerrar control remoto'
+              : (online ? 'Abrir control remoto Smart TV' : 'Vincular Smart TV con QR'),
+          child: TvFocusable(
+            onTap: () => TvRemoteSheet.show(context),
+            borderRadius: BorderRadius.circular(28),
+            child: Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFF131318).withValues(alpha: 0.90),
+                border: Border.all(
+                  color: online
+                      ? const Color(0xFF18C75A).withValues(alpha: 0.85)
+                      : Colors.white.withValues(alpha: 0.18),
+                  width: online ? 2.0 : 1.2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: online
+                        ? const Color(0xFF18C75A).withValues(alpha: 0.35)
+                        : Colors.black.withValues(alpha: 0.35),
+                    blurRadius: online ? 14 : 8,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Icon(
+                    Icons.settings_remote_rounded,
+                    size: 25,
+                    color: online ? const Color(0xFF18C75A) : Colors.white70,
+                  ),
+                  if (online)
+                    Positioned(
+                      top: 9,
+                      right: 9,
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: playing
+                              ? const Color(0xFF18C75A)
+                              : const Color(0xFF38BDF8),
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: (playing
+                                      ? const Color(0xFF18C75A)
+                                      : const Color(0xFF38BDF8))
+                                  .withValues(alpha: 0.85),
+                              blurRadius: 4,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 

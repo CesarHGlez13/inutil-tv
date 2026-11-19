@@ -24,19 +24,42 @@ import 'fast_artwork.dart';
 class TvRemoteSheet extends StatefulWidget {
   const TvRemoteSheet({super.key});
 
-  static Future<void> show(BuildContext context) {
+  static bool _isOpen = false;
+  static bool get isOpen => _isOpen;
+  static BuildContext? _activeContext;
+
+  static Future<void> show(BuildContext context) async {
+    if (_isOpen && _activeContext != null && _activeContext!.mounted) {
+      Navigator.of(_activeContext!).pop();
+      return;
+    }
+    _isOpen = true;
     TvRemoteService.instance.refreshTvStateNow();
-    return showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Theme.of(context).brightness == Brightness.dark
-          ? AppColors.carbonSurface
-          : Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (_) => const TvRemoteSheet(),
-    );
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Theme.of(context).brightness == Brightness.dark
+            ? AppColors.carbonSurface
+            : Colors.white,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        builder: (modalCtx) {
+          _activeContext = modalCtx;
+          return const TvRemoteSheet();
+        },
+      );
+    } finally {
+      _isOpen = false;
+      _activeContext = null;
+    }
+  }
+
+  static void close() {
+    if (_isOpen && _activeContext != null && _activeContext!.mounted) {
+      Navigator.of(_activeContext!).pop();
+    }
   }
 
   @override

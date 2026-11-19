@@ -1,5 +1,14 @@
 # Changelog — InútilTV
 
+## 3.3.12 — 2026-11-19
+- **Botón Circular Flotante del Control Remoto (FAB):**
+  - Incorporado botón flotante circular de control remoto (`52x52` con icono de mando a distancia) en la pantalla móvil, situado cómodamente sobre la barra de navegación para abrir y cerrar el mando con un solo toque desde cualquier pantalla.
+  - El botón circular indica el estado en vivo de la Smart TV con iluminación verde y punto de actividad pulsante.
+  - Integrado botón circular de mando en la cabecera del modal de detalle junto al botón de cerrar.
+  - Eliminada la barra inferior/SnackBar que bloqueaba los gestos e impedía deslizar hacia arriba.
+- **Pausa y Detención Automática al Cambiar a Móvil:**
+  - Al seleccionar «Móvil» en el selector o al abrir cualquier capítulo/película en el teléfono, la Smart TV se pausa/detiene inmediatamente (`sendPause` / `sendStop`), impidiendo que continúe sonando en la sala.
+
 ## 3.3.11 — 2026-11-19
 - **Detección Inmediata de Smart TV Cerrada (Cero Falso Positivo):**
   - Implementado `WidgetsBindingObserver` en `TvRemoteService`: cuando la app en la Smart TV se cierra, minimiza o va a segundo plano (`paused`, `detached`, `hidden`), notifica inmediatamente su estado como desconectada (`online: false`) y cierra sus sockets.

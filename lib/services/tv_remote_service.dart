@@ -241,12 +241,18 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
   bool get playOnTv => _playOnTv && isTvOnline;
 
   Future<void> setPlayOnTv(bool value) async {
+    final wasOnTv = _playOnTv;
     _playOnTv = value;
     notifyListeners();
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_prefPlayOnTvKey, value);
     } catch (_) {}
+
+    // Si el usuario cambió el destino a "Móvil", pausamos la TV de inmediato para evitar que siga sonando
+    if (wasOnTv && !value && isTvOnline) {
+      unawaited(sendPause());
+    }
   }
 
   Future<void> togglePlayOnTv() => setPlayOnTv(!_playOnTv);
