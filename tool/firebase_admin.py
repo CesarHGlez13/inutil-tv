@@ -460,7 +460,7 @@ function renderTable() {
     const isAdm = u.role === 'admin';
     const stBadge = isAdm ? '<span class="badge badge-admin">ADMIN</span>' : (u.status === 'active' ? '<span class="badge badge-active">ACTIVA</span>' : (u.status === 'pending' ? '<span class="badge badge-pending">PENDIENTE</span>' : '<span class="badge badge-blocked">SUSPENDIDA</span>'));
     const expText = u.accountExpiresAt ? (u.accountExpiresAt.startsWith('209') ? '💎 Permanente' : u.accountExpiresAt.substring(0, 10)) : 'Sin fecha';
-    const devs = [u.pairedTvDeviceId ? 'TV' : null, u.currentPhoneDeviceId ? 'Móvil' : null].filter(Boolean).join(' + ') || 'Ninguno';
+    const devs = [u.currentSmartTvDeviceId ? '📺 TV' : null, u.currentTvDeviceId ? '📱 Móvil TV' : null, u.currentPhoneDeviceId ? '🎧 Music' : null].filter(Boolean).join(' · ') || 'Ninguno';
 
     tr.innerHTML = `
       <td><strong>${u.displayName || 'Usuario'}</strong><br><small style="color:var(--sub)">${u.email}</small></td>
