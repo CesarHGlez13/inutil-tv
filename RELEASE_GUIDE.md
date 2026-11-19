@@ -20,6 +20,13 @@
    La TV Box Onn 4K de prueba se encuentra en `192.168.100.17:5555`. No asumas que funciona; compruébalo con ADB, mide la CPU y toma captura de pantalla.
 4. **Publicación y Distribución Doble:**  
    Toda actualización debe subirse a **GitHub Releases** (que actualiza `release.json` para la detección OTA) y enviarse al chat de **Telegram** de Cesar (`1002362473`).
+5. **Commit ANTES del pipeline, y tag clavado en el commit del build:**  
+   Commitea los cambios de la versión **antes** de lanzar el pipeline. `tool/publish_release.sh` fija el tag `vX.Y.Z` contra `HEAD` y lo empuja explícitamente (`push -f origin <sha>:refs/tags/vX.Y.Z`) antes de crear la Release. Si se deja que `gh release create` cree el tag, GitHub lo coloca en la punta del branch por defecto del remoto; cuando el `git push` va después del publish el tag queda apuntando al código de la versión anterior (pasó en v3.3.13: el tag señalaba el commit de v3.3.12). Al terminar, empujar la rama y verificar:
+
+   ```bash
+   git push origin main --follow-tags
+   git ls-remote --tags origin 'refs/tags/vX.Y.Z^{}'   # debe coincidir con `git rev-parse HEAD`
+   ```
 
 ---
 

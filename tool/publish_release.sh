@@ -183,11 +183,26 @@ FILES_ARGS=()
 for key in "${!FILES[@]}"; do FILES_ARGS+=("${FILES[$key]}"); done
 FILES_ARGS+=("$MANIFEST")
 
+# El tag tiene que señalar EXACTAMENTE el commit del que salieron estos APKs.
+# Se crea/fuerza y se empuja ANTES de la Release: si se deja a `gh release
+# create`, GitHub crea el tag desde la punta del branch por defecto del remoto,
+# que va por detrás cuando el push va después del publish (en v3.3.13 el tag
+# quedó apuntando al commit de v3.3.12). Empujar el par <commit,tag> sube
+# también el commit si todavía no estaba en el remoto.
+COMMIT_REF="$(git -C "$PROY" rev-parse HEAD)"
+echo "Commit de origen del build: $COMMIT_REF"
+git -C "$PROY" tag -f -a "$TAG" "$COMMIT_REF" -m "InútilTV $TAG" >/dev/null
+if git -C "$PROY" push -f origin "$COMMIT_REF:refs/tags/$TAG" >/dev/null 2>&1; then
+  echo "Tag $TAG -> $COMMIT_REF"
+else
+  echo "AVISO: no se pudo crear/mover el tag $TAG en el remoto (sin credenciales de push?). La Release usará la punta por defecto de la rama."
+fi
+
 if gh release view "$TAG" --repo "$RELEASE_REPO" >/dev/null 2>&1; then
   gh release upload "$TAG" "${FILES_ARGS[@]}" --clobber --repo "$RELEASE_REPO"
 else
   gh release create "$TAG" "${FILES_ARGS[@]}" --repo "$RELEASE_REPO" \
-    --title "InútilTV $TAG" --notes-file "$NOTES_MD"
+    --target "$COMMIT_REF" --title "InútilTV $TAG" --notes-file "$NOTES_MD"
 fi
 echo "OK GitHub Release: https://github.com/$RELEASE_REPO/releases/tag/$TAG"
 
