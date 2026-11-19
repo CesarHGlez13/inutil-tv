@@ -9,6 +9,10 @@
 - **El botón dice dónde va a reproducir:**
   - El CTA del hero cambia solo de `▶ Reproducir` a `📡 Reproducir en TV` según el destino activo (escucha a `TvRemoteService`), y el modal usa la misma redacción en vez de «Ver en Smart TV».
 - **Falso aviso de actualización pendiente corregido:** `lib/constants/app_info.dart` seguía en `3.3.13` mientras `pubspec.yaml` ya estaba en `3.3.14`; ese desface es exactamente lo que hacía que la app anunciara una actualización inexistente tras instalar la nueva. El test `test/v2_upgrades_and_ota_test.dart` ya lo vigila.
+- **«Detener» ahora sí sale del contenido en la Smart TV:**
+  - `stop` no tenía rama en el manejador de navegación del sistema, así que el comando simplemente no hacía nada y la TV seguía reproduciendo.
+  - Encontrada además una carrera de registro: al enviar contenido, el `popUntil` + `push` del reproductor nuevo hace que el `dispose()` del reproductor viejo corra ~300 ms **después** del `initState()` del nuevo y borraba su handler, dejando `stop`, `pausa`, `play`, `seek` y volumen mudos justo después de un casting. Ahora el desregistro es condicional por identidad (`unregisterActivePlayerHandler`).
+  - Verificado en la Onn 4K con 3.3.14: reproduciendo a 44 s, `stop` deja `isPlaying:false`, título vacío y posición 0 sin deriva; `pausa` congela la posición.
 - Tests nuevos en `test/v3_3_14_play_on_tv_target_test.dart` (tabla de verdad del destino, estado real del servicio con la TV caída y guardias de código fuente).
 
 ## 3.3.13 — 2026-11-19
