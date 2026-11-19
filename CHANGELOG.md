@@ -1,6 +1,10 @@
 # Changelog — InútilTV
 
-## 3.3.9 — 2026-11-18
+## 3.3.10 — 2026-11-19
+- **Sincronización Total de Versión y Corrección de Bucle OTA:**
+  - Corregida la constante interna `AppInfo.appVersion` a `3.3.10` en estricta sincronización con `pubspec.yaml` (eliminando el falso diálogo de actualización pendiente en inicio).
+  - Integrado test unitario de validación estricta para impedir desfasajes futuros entre `pubspec.yaml` y `app_info.dart`.
+  - Handoff inteligente celular ⇄ Smart TV verificado con detención automática de reproducción duplicada.
 - **Handoff Inteligente Smart TV ⇄ Celular (Cero Duplicidad):**
   - Al cambiar el destino a «Móvil», la Smart TV se pausa automáticamente de inmediato para que no siga sonando en la sala.
   - Al abrir un capítulo o película en el celular, la Smart TV se detiene por completo (`sendStop`), eliminando reproducciones simultáneas y desincronización de títulos.

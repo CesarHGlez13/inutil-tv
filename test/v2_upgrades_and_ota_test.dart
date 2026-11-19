@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:tubotv/constants/app_info.dart';
 import 'package:tubotv/models/models.dart';
 import 'package:tubotv/services/app_settings_service.dart';
 import 'package:tubotv/services/inutil_update_service.dart';
@@ -24,6 +25,17 @@ void main() {
   });
 
   group('OTA & Force OTA (Kill Switch)', () {
+    test('AppInfo.appVersion está estrictamente sincronizada con pubspec.yaml', () {
+      final pubspecFile = File('pubspec.yaml');
+      expect(pubspecFile.existsSync(), isTrue);
+      final pubspecContent = pubspecFile.readAsStringSync();
+      final match = RegExp(r'^version:\s*([0-9]+\.[0-9]+\.[0-9]+)', multiLine: true).firstMatch(pubspecContent);
+      expect(match, isNotNull, reason: 'pubspec.yaml debe definir version: X.Y.Z');
+      final pubspecVersion = match!.group(1);
+      expect(AppInfo.appVersion, pubspecVersion,
+          reason: 'Si AppInfo.appVersion no coincide con pubspec.yaml, la app mostrará un falso diálogo de actualización a los usuarios.');
+    });
+
     test('detecta actualización disponible, ABI y kill switch correctamente', () {
       final info = InutilTvReleaseInfo(
         currentVersion: '2.0.0',
