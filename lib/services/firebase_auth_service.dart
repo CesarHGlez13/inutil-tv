@@ -878,9 +878,8 @@ class InutilAuthService extends ChangeNotifier {
           'accountExpiresAt': isAdminSeed ? DateTime(2099, 12, 31) : null,
           'accountDurationDays': isAdminSeed ? 9999 : 0,
           'currentPhoneDeviceId': '',
-          'currentTvDeviceId': (isAdminSeed || _isSmartTvSlot) ? '' : deviceId,
-          'currentSmartTvDeviceId':
-              (isAdminSeed || !_isSmartTvSlot) ? '' : deviceId,
+          'currentTvDeviceId': _isSmartTvSlot ? '' : deviceId,
+          'currentSmartTvDeviceId': _isSmartTvSlot ? deviceId : '',
           'phoneSwitchCount': 0,
           'phoneSwitchMonth': '',
           'createdAt': DateTime.now(),
@@ -900,9 +899,8 @@ class InutilAuthService extends ChangeNotifier {
             status: isAdminSeed ? 'active' : 'pending',
             isActive: isAdminSeed,
             accountExpiresAt: isAdminSeed ? DateTime(2099, 12, 31) : null,
-            currentTvDeviceId: (isAdminSeed || _isSmartTvSlot) ? '' : deviceId,
-            currentSmartTvDeviceId:
-                (isAdminSeed || !_isSmartTvSlot) ? '' : deviceId,
+            currentTvDeviceId: _isSmartTvSlot ? '' : deviceId,
+            currentSmartTvDeviceId: _isSmartTvSlot ? deviceId : '',
           );
           await _saveSession();
         }
@@ -993,7 +991,7 @@ class InutilAuthService extends ChangeNotifier {
   /// de Inútil Music ni la otra ranura (permite 1 celular + 1 Smart TV).
   Future<void> _claimTvDevice() async {
     final user = _currentUser;
-    if (user == null || user.isAdmin || !user.licenseValid) return;
+    if (user == null || !user.licenseValid) return;
 
     final isTvSlot = _isSmartTvSlot;
     final fieldName =
