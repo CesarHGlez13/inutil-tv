@@ -273,5 +273,26 @@ void main() {
 
       TvRemoteService.instance.registerActivePlayerHandler(null);
     });
+
+    test('didChangeAppLifecycleState en TV marca offline inmediatamente al ir a segundo plano o cerrarse', () async {
+      await TvModeService.instance.setManualOverride(true);
+      TvRemoteService.instance.setTvStateForTest(
+        TvPlaybackState(
+          online: true,
+          isPlaying: true,
+          updatedAt: DateTime.now(),
+        ),
+      );
+      expect(TvRemoteService.instance.tvState.online, isTrue);
+
+      // El usuario minimiza o cierra la app en la TV
+      TvRemoteService.instance.didChangeAppLifecycleState(AppLifecycleState.paused);
+      expect(TvRemoteService.instance.tvState.online, isFalse);
+      expect(TvRemoteService.instance.tvState.isPlaying, isFalse);
+      expect(TvRemoteService.instance.isTvOnline, isFalse);
+      expect(TvRemoteService.instance.playOnTv, isFalse);
+
+      await TvModeService.instance.setManualOverride(null);
+    });
   });
 }

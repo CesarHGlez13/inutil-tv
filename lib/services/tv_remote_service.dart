@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
@@ -90,11 +91,11 @@ class TvPlaybackState {
   }
 
   /// Se considera conectada si reportó presencia en línea dentro de los últimos
-  /// 300 segundos (tolerancia amplia para desfases de reloj entre celular y Smart TV Box).
+  /// 180 segundos (tolerancia para desfases de reloj entre celular y Smart TV Box).
   bool get isReachable {
     if (!online || updatedAt == null) return false;
     final diffSec = DateTime.now().difference(updatedAt!).inSeconds.abs();
-    return diffSec <= 300;
+    return diffSec <= 180;
   }
 
   bool get hasActiveMedia => title.isNotEmpty;
@@ -205,7 +206,7 @@ class TvRemoteCommand {
 /// 1. Enlace Directo LAN Ultra-Rápido (HTTP en 38443 / UDP en 38444): latencia <5ms
 ///    y cero dependencia de Firestore cuando ambos están en la misma red WiFi.
 /// 2. Enlace Cloud Firestore: respaldo automático fuera del hogar o redes corporativas.
-class TvRemoteService extends ChangeNotifier {
+class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
   TvRemoteService._();
   static final TvRemoteService instance = TvRemoteService._();
 
@@ -293,6 +294,10 @@ class TvRemoteService extends ChangeNotifier {
     if (uid == null || uid.isEmpty) return;
 
     _started = true;
+    try {
+      WidgetsBinding.instance.addObserver(this);
+    } catch (_) {}
+
     if (TvModeService.instance.isTv) {
       _startTvReceiver();
     } else {
@@ -300,8 +305,48 @@ class TvRemoteService extends ChangeNotifier {
     }
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!TvModeService.instance.isTv) return;
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.hidden) {
+      _handleTvBackgrounded();
+    } else if (state == AppLifecycleState.resumed) {
+      _handleTvResumed();
+    }
+  }
+
+  void _handleTvBackgrounded() {
+    debugPrint('🌙 [TvRemoteService] Smart TV app en pausa/fondo. Notificando estado OFFLINE...');
+    _tvHeartbeatTimer?.cancel();
+    _tvCommandPollTimer?.cancel();
+    try {
+      _lanHttpServer?.close(force: true);
+    } catch (_) {}
+    _lanHttpServer = null;
+    try {
+      _lanUdpSocket?.close();
+    } catch (_) {}
+    _lanUdpSocket = null;
+    _tvState = _tvState.copyWith(
+      online: false,
+      isPlaying: false,
+      updatedAt: DateTime.now(),
+    );
+    unawaited(_publishTvState(_tvState));
+  }
+
+  void _handleTvResumed() {
+    debugPrint('☀️ [TvRemoteService] Smart TV app reanudada. Notificando estado ONLINE...');
+    _startTvReceiver();
+  }
+
   void stop() {
     _started = false;
+    try {
+      WidgetsBinding.instance.removeObserver(this);
+    } catch (_) {}
     _tvHeartbeatTimer?.cancel();
     _tvCommandPollTimer?.cancel();
     _mobilePollTimer?.cancel();
@@ -323,6 +368,7 @@ class TvRemoteService extends ChangeNotifier {
             online: false,
             tvDeviceId: InutilAuthService.instance.deviceId,
             tvName: 'Smart TV',
+            updatedAt: DateTime.now(),
           ),
         ),
       );
@@ -790,6 +836,8 @@ class TvRemoteService extends ChangeNotifier {
     if (_pollingState) return;
     _pollingState = true;
     try {
+      bool lanCheckedAndFailed = false;
+
       // 1. Intentar enlace directo por LAN de ultra-baja latencia
       if (_targetTvLanHost != null) {
         HttpClient? client;
@@ -811,6 +859,27 @@ class TvRemoteService extends ChangeNotifier {
           }
         } catch (e) {
           debugPrint('⚠️ [TvRemoteService] Falló refresco LAN con $_targetTvLanHost: $e');
+          lanCheckedAndFailed = true;
+
+          // Si el puerto fue rechazado directamente (ECONNREFUSED / Connection refused),
+          // significa que el dispositivo responde en la red pero la app InútilTV en la TV está CERRADA.
+          final errStr = e.toString().toLowerCase();
+          final isRefused = (e is SocketException &&
+                  (e.osError?.errorCode == 111 ||
+                      errStr.contains('connection refused'))) ||
+              errStr.contains('connection refused');
+
+          if (isRefused) {
+            debugPrint(
+                '🛑 [TvRemoteService] Smart TV activa en LAN pero app CERRADA (Connection refused). Marcando desconectada.');
+            _tvState = _tvState.copyWith(
+              online: false,
+              isPlaying: false,
+              updatedAt: DateTime.now(),
+            );
+            notifyListeners();
+            return;
+          }
           unawaited(discoverTvLan());
         } finally {
           client?.close(force: true);
@@ -826,6 +895,10 @@ class TvRemoteService extends ChangeNotifier {
           !InutilAuthService.instance.isOnlineValidationDisabled) {
         if (_lastFirestore429Time != null &&
             DateTime.now().difference(_lastFirestore429Time!).inSeconds < 60) {
+          if (lanCheckedAndFailed) {
+            _tvState = _tvState.copyWith(online: false, isPlaying: false);
+            notifyListeners();
+          }
           return;
         }
         try {
@@ -839,7 +912,19 @@ class TvRemoteService extends ChangeNotifier {
               await prefs.setString(_prefTvLanHostKey, next.lanHost);
               unawaited(refreshTvStateNow());
             }
-            _tvState = next;
+
+            // Si se intentó conectar por LAN y falló con el mismo host, no confiamos en
+            // un documento Firestore desactualizado que diga online: true.
+            if (lanCheckedAndFailed &&
+                next.lanHost.isNotEmpty &&
+                next.lanHost == _targetTvLanHost) {
+              _tvState = next.copyWith(online: false, isPlaying: false);
+            } else {
+              _tvState = next;
+            }
+            notifyListeners();
+          } else if (lanCheckedAndFailed) {
+            _tvState = _tvState.copyWith(online: false, isPlaying: false);
             notifyListeners();
           }
         } catch (e) {
@@ -847,8 +932,15 @@ class TvRemoteService extends ChangeNotifier {
           if (err.contains('429') || err.contains('RESOURCE_EXHAUSTED')) {
             _lastFirestore429Time = DateTime.now();
             debugPrint('⏳ [TvRemoteService] Firestore 429 en refreshTvState. Pausando 60s.');
+            if (lanCheckedAndFailed) {
+              _tvState = _tvState.copyWith(online: false, isPlaying: false);
+              notifyListeners();
+            }
           }
         }
+      } else if (lanCheckedAndFailed) {
+        _tvState = _tvState.copyWith(online: false, isPlaying: false);
+        notifyListeners();
       }
     } catch (_) {
     } finally {

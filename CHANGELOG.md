@@ -1,5 +1,11 @@
 # Changelog — InútilTV
 
+## 3.3.11 — 2026-11-19
+- **Detección Inmediata de Smart TV Cerrada (Cero Falso Positivo):**
+  - Implementado `WidgetsBindingObserver` en `TvRemoteService`: cuando la app en la Smart TV se cierra, minimiza o va a segundo plano (`paused`, `detached`, `hidden`), notifica inmediatamente su estado como desconectada (`online: false`) y cierra sus sockets.
+  - Detección LAN instantánea de puerto cerrado (`Connection refused` en 38443) en el celular: si la app en la Smart TV está cerrada, el celular no espera 5 minutos ni depende de cachés viejas en la nube; la marca desconectada en menos de 1 segundo.
+  - Al estar la TV cerrada, el botón principal en el móvil muestra directamente «Reproducir» o «Continuar» en lugar de «Ver en Smart TV», y oculta el selector hasta que la Smart TV vuelva a abrirse.
+
 ## 3.3.10 — 2026-11-19
 - **Sincronización Total de Versión y Corrección de Bucle OTA:**
   - Corregida la constante interna `AppInfo.appVersion` a `3.3.10` en estricta sincronización con `pubspec.yaml` (eliminando el falso diálogo de actualización pendiente en inicio).
