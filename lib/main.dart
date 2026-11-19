@@ -19,6 +19,7 @@ import 'services/artwork_cache_service.dart';
 import 'services/firebase_auth_service.dart';
 import 'services/inutil_cloud_backup_service.dart';
 import 'services/inutil_promo_popup_service.dart';
+import 'services/liquid_nav_metrics.dart';
 import 'services/my_list_service.dart';
 import 'services/network_config_service.dart';
 import 'services/offline_vault_service.dart';
@@ -36,15 +37,6 @@ import 'widgets/inutil_support_popup.dart';
 import 'widgets/inutil_update_gate.dart';
 import 'widgets/tv_focusable.dart';
 import 'widgets/tv_remote_sheet.dart';
-
-/// Altura visible de la barra de navegación flotante (cápsula de 5 secciones
-/// + botón circular de Búsqueda de 56 dp). Medido sobre captura real en
-/// Xiaomi (1080x2400 @420dpi): 142 px físicos ≈ 54 dp → 58 dp con holgura.
-const double _kLiquidNavHeight = 58;
-
-/// Separación vertical entre la barra de navegación y el FAB del control
-/// remoto, para que nunca queden "empalmados".
-const double _kFabNavGap = 14;
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -527,7 +519,7 @@ class _MainScaffoldState extends State<MainScaffold> {
                     // El FAB del control remoto NUNCA puede quedar por debajo
                     // de la barra flotante (Inicio / En vivo / Buscar): se
                     // apila encima del botón circular de Búsqueda.
-                    bottom: _liquidNavTopOffset(context),
+                    bottom: liquidNavTopOffset(context),
                     child: _buildFloatingRemoteFab(context),
                   ),
                 if (!isImmersive)
@@ -1019,23 +1011,7 @@ class _MainScaffoldState extends State<MainScaffold> {
 
   /// Cápsula inferior flotante Liquid Glass + botón circular de Búsqueda
   /// (misma silueta icónica que Inútil Music).
-  /// Margen inferior real de la barra flotante: es el `SafeArea(minimum:)`
-  /// aplicado en [_buildFloatingLiquidNav], es decir `max(mínimo, inset)`
-  /// (en MIUI/HyperOS con barra de gestos el inset puede superar los 40 dp).
-  double _liquidNavBottomInset(BuildContext context) {
-    final inset = MediaQuery.paddingOf(context).bottom;
-    final minimum = inset > 0 ? 6.0 : 12.0;
-    return inset > minimum ? inset : minimum;
-  }
-
-  /// Distancia desde el borde inferior de la pantalla hasta el borde superior
-  /// de la barra flotante. Se usa para anclar el FAB del control remoto
-  /// SIEMPRE por encima de la barra, sin solapar el botón de Búsqueda.
-  double _liquidNavTopOffset(BuildContext context) =>
-      _liquidNavBottomInset(context) + _kLiquidNavHeight + _kFabNavGap;
-
   Widget _buildFloatingLiquidNav(BuildContext context) {
-    final bottomInset = MediaQuery.paddingOf(context).bottom;
     final accent = AppColors.accentFor(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final inactiveColor = isDark
@@ -1044,7 +1020,14 @@ class _MainScaffoldState extends State<MainScaffold> {
 
     return SafeArea(
       top: false,
-      minimum: EdgeInsets.fromLTRB(14, 0, 14, bottomInset > 0 ? 6 : 12),
+      // `liquidNavBottomInset` es la única fuente de verdad del margen
+      // inferior: el FAB del control remoto se ancla con la misma fórmula.
+      minimum: EdgeInsets.fromLTRB(
+        kLiquidNavSideMargin,
+        0,
+        kLiquidNavSideMargin,
+        liquidNavBottomInset(context),
+      ),
       child: Row(
         children: [
           // Cápsula principal con las 5 secciones

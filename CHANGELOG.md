@@ -1,5 +1,12 @@
 # Changelog — InútilTV
 
+## 3.3.13 — 2026-11-19
+- **FAB del Control Remoto Anclado Sobre la Barra de Navegación:**
+  - Corregido el FAB circular del mando, que en móviles con barra de gestos (MIUI/HyperOS reporta ~46-49 dp de inset real) quedaba por debajo de la barra flotante Inicio / En vivo / Buscar y empalmado encima del botón circular de Buscar.
+  - El anclaje ya no usa un número fijo: calcula el margen inferior real de la barra (`max(mínimo, inset)` del `SafeArea`) + altura de la barra + holgura de 14 dp, así que el FAB sube tanto como suba la barra.
+  - Métricas extraídas a `services/liquid_nav_metrics.dart` como única fuente de verdad compartida por la barra flotante y el FAB, para que nadie vuelva a enderezar una de las dos por su cuenta.
+  - Test unitario de regresión (`test/v3_3_13_fab_nav_clearance_test.dart`) con los insets medidos en el Xiaomi 25082RN14A (45.7 dp y 48.8 dp) que además verifica que `main.dart` siga usando las métricas compartidas.
+
 ## 3.3.12 — 2026-11-19
 - **Botón Circular Flotante del Control Remoto (FAB):**
   - Incorporado botón flotante circular de control remoto (`52x52` con icono de mando a distancia) en la pantalla móvil, situado cómodamente sobre la barra de navegación para abrir y cerrar el mando con un solo toque desde cualquier pantalla.
