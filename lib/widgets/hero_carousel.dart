@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 
 import '../models/models.dart';
 import '../services/artwork_cache_service.dart';
+import '../services/play_target.dart';
+import '../services/tv_remote_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_ui.dart';
 import 'fast_artwork.dart';
@@ -140,7 +142,8 @@ class _HeroCarouselState extends State<HeroCarousel>
                 _pause();
               } else if (n is ScrollEndNotification) {
                 _resumeTimer?.cancel();
-                _resumeTimer = Timer(const Duration(milliseconds: 2500), _resume);
+                _resumeTimer =
+                    Timer(const Duration(milliseconds: 2500), _resume);
               }
               return false;
             },
@@ -188,287 +191,304 @@ class _HeroCarouselState extends State<HeroCarousel>
 
     return RepaintBoundary(
       child: Container(
-      margin: const EdgeInsets.symmetric(horizontal: appPagePaddingHorizontal),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        color: AppColors.carbonElevated,
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.1),
-          width: 0.8,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isActive ? 0.48 : 0.25),
-            blurRadius: isActive ? 18 : 10,
-            offset: const Offset(0, 8),
+        margin:
+            const EdgeInsets.symmetric(horizontal: appPagePaddingHorizontal),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          color: AppColors.carbonElevated,
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.1),
+            width: 0.8,
           ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (image.isNotEmpty)
-              AnimatedBuilder(
-                animation: _kenBurns,
-                builder: (context, child) {
-                  final t = (isActive && widget.active) ? _kenBurns.value : 0.02;
-                  return Transform.scale(
-                    scale: 1.0 + 0.07 * t,
-                    alignment: Alignment.center,
-                    child: child,
-                  );
-                },
-                child: FastArtwork(
-                  url: image,
-                  tier: ArtworkTier.backdrop,
-                  cacheWidth: 860,
-                  fit: BoxFit.cover,
-                  errorWidget: _buildFallback(
-                    portada: item.poster == image ? '' : item.poster,
-                  ),
-                ),
-              )
-            else
-              _buildFallback(portada: item.poster),
-
-            // Gradiente editorial suave hacia negro carbón
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.black.withValues(alpha: 0.18),
-                    Colors.black.withValues(alpha: 0.22),
-                    Colors.black.withValues(alpha: 0.78),
-                    const Color(0xFF070709).withValues(alpha: 0.96),
-                  ],
-                  stops: const [0.0, 0.35, 0.72, 1.0],
-                ),
-              ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isActive ? 0.48 : 0.25),
+              blurRadius: isActive ? 18 : 10,
+              offset: const Offset(0, 8),
             ),
-
-            // Contenido superpuesto
-            Positioned(
-              left: 18,
-              right: 18,
-              bottom: 18,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.14),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.2),
-                            width: 0.6,
-                          ),
-                        ),
-                        child: Text(
-                          item.isSeries
-                              ? (item.isAnime ? 'ANIME' : 'SERIE')
-                              : 'DESTACADO',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.8,
-                          ),
-                        ),
-                      ),
-                      if (item.rating.isNotEmpty &&
-                          item.rating != '0.0' &&
-                          !(item.provider == 'jkanime' && item.rating == '8.8')) ...[
-                        const SizedBox(width: 8),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.star_rounded,
-                              size: 13,
-                              color: AppColors.ratingGold,
-                            ),
-                            const SizedBox(width: 3),
-                            Text(
-                              item.rating,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                      if (item.year.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        Text(
-                          item.year,
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.75),
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                      if (item.duration.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        Text(
-                          item.duration,
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.7),
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    item.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.5,
-                      height: 1.12,
-                    ),
-                  ),
-                  if (item.overview.isNotEmpty) ...[
-                    const SizedBox(height: 5),
-                    Text(
-                      item.overview,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.72),
-                        fontSize: 12,
-                        height: 1.32,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      // CTA Principal Blanco Puro (estética exacta Inútil Music)
-                      TvFocusable(
-                        onTap: () => widget.onPlay(item),
-                        borderRadius: BorderRadius.circular(24),
-                        focusColor: const Color(0xFF38BDF8),
-                        focusScale: 1.05,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: AppColors.playbackPrimaryBackground,
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 18,
-                            vertical: 10,
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.play_arrow_rounded,
-                                color: AppColors.playbackPrimaryForeground,
-                                size: 20,
-                              ),
-                              SizedBox(width: 5),
-                              Text(
-                                'Reproducir',
-                                style: TextStyle(
-                                  color: AppColors.playbackPrimaryForeground,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      // CTA Secundario vidrio sutil
-                      TvFocusable(
-                        onTap: () => widget.onDetails(item),
-                        borderRadius: BorderRadius.circular(24),
-                        focusColor: const Color(0xFF38BDF8),
-                        focusScale: 1.05,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(24),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.2),
-                              width: 0.8,
-                            ),
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 10,
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.info_outline_rounded,
-                                color: Colors.white,
-                                size: 16,
-                              ),
-                              SizedBox(width: 6),
-                              Text(
-                                'Detalles',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-            if (widget.featured.length > 1)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                height: 2,
-                child: ColoredBox(
-                  color: Colors.white.withValues(alpha: 0.08),
-                  child: AnimatedBuilder(
-                    animation: _kenBurns,
-                    builder: (context, _) => Align(
-                      alignment: Alignment.centerLeft,
-                      child: FractionallySizedBox(
-                        widthFactor: isActive ? _kenBurns.value : 0.0,
-                        child: ColoredBox(color: accent.withValues(alpha: 0.85)),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
           ],
         ),
-      ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (image.isNotEmpty)
+                AnimatedBuilder(
+                  animation: _kenBurns,
+                  builder: (context, child) {
+                    final t =
+                        (isActive && widget.active) ? _kenBurns.value : 0.02;
+                    return Transform.scale(
+                      scale: 1.0 + 0.07 * t,
+                      alignment: Alignment.center,
+                      child: child,
+                    );
+                  },
+                  child: FastArtwork(
+                    url: image,
+                    tier: ArtworkTier.backdrop,
+                    cacheWidth: 860,
+                    fit: BoxFit.cover,
+                    errorWidget: _buildFallback(
+                      portada: item.poster == image ? '' : item.poster,
+                    ),
+                  ),
+                )
+              else
+                _buildFallback(portada: item.poster),
+
+              // Gradiente editorial suave hacia negro carbón
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.18),
+                      Colors.black.withValues(alpha: 0.22),
+                      Colors.black.withValues(alpha: 0.78),
+                      const Color(0xFF070709).withValues(alpha: 0.96),
+                    ],
+                    stops: const [0.0, 0.35, 0.72, 1.0],
+                  ),
+                ),
+              ),
+
+              // Contenido superpuesto
+              Positioned(
+                left: 18,
+                right: 18,
+                bottom: 18,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.2),
+                              width: 0.6,
+                            ),
+                          ),
+                          child: Text(
+                            item.isSeries
+                                ? (item.isAnime ? 'ANIME' : 'SERIE')
+                                : 'DESTACADO',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.8,
+                            ),
+                          ),
+                        ),
+                        if (item.rating.isNotEmpty &&
+                            item.rating != '0.0' &&
+                            !(item.provider == 'jkanime' &&
+                                item.rating == '8.8')) ...[
+                          const SizedBox(width: 8),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.star_rounded,
+                                size: 13,
+                                color: AppColors.ratingGold,
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                item.rating,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                        if (item.year.isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            item.year,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.75),
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                        if (item.duration.isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            item.duration,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.7),
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      item.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.5,
+                        height: 1.12,
+                      ),
+                    ),
+                    if (item.overview.isNotEmpty) ...[
+                      const SizedBox(height: 5),
+                      Text(
+                        item.overview,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.72),
+                          fontSize: 12,
+                          height: 1.32,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        // CTA Principal Blanco Puro (estética exacta Inútil Music)
+                        TvFocusable(
+                          onTap: () => widget.onPlay(item),
+                          borderRadius: BorderRadius.circular(24),
+                          focusColor: const Color(0xFF38BDF8),
+                          focusScale: 1.05,
+                          // El CTA anuncia el destino real: con "Destino: TV"
+                          // activo el contenido arranca en la Smart TV, y el
+                          // botón lo dice en lugar de prometer un play local.
+                          child: ListenableBuilder(
+                            listenable: TvRemoteService.instance,
+                            builder: (context, _) {
+                              final toTv = PlayTarget.isTvDestination(context);
+                              return Container(
+                                decoration: BoxDecoration(
+                                  color: AppColors.playbackPrimaryBackground,
+                                  borderRadius: BorderRadius.circular(24),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 18,
+                                  vertical: 10,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      toTv
+                                          ? Icons.cast_rounded
+                                          : Icons.play_arrow_rounded,
+                                      color:
+                                          AppColors.playbackPrimaryForeground,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 5),
+                                    Text(
+                                      toTv ? 'Reproducir en TV' : 'Reproducir',
+                                      style: const TextStyle(
+                                        color:
+                                            AppColors.playbackPrimaryForeground,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        // CTA Secundario vidrio sutil
+                        TvFocusable(
+                          onTap: () => widget.onDetails(item),
+                          borderRadius: BorderRadius.circular(24),
+                          focusColor: const Color(0xFF38BDF8),
+                          focusScale: 1.05,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.2),
+                                width: 0.8,
+                              ),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 10,
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.info_outline_rounded,
+                                  color: Colors.white,
+                                  size: 16,
+                                ),
+                                SizedBox(width: 6),
+                                Text(
+                                  'Detalles',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              if (widget.featured.length > 1)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: 2,
+                  child: ColoredBox(
+                    color: Colors.white.withValues(alpha: 0.08),
+                    child: AnimatedBuilder(
+                      animation: _kenBurns,
+                      builder: (context, _) => Align(
+                        alignment: Alignment.centerLeft,
+                        child: FractionallySizedBox(
+                          widthFactor: isActive ? _kenBurns.value : 0.0,
+                          child:
+                              ColoredBox(color: accent.withValues(alpha: 0.85)),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

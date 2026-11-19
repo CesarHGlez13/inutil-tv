@@ -4,7 +4,7 @@ class AppInfo {
   const AppInfo._();
 
   static const String appName = 'InútilTV';
-  static const String appVersion = '3.3.13';
+  static const String appVersion = '3.3.14';
   static const String creatorName = 'César';
   static const String supportEmail = 'cesarmaster133@gmail.com';
 

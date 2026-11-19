@@ -154,7 +154,8 @@ class _MainScaffoldState extends State<MainScaffold> {
     // aparezcan vacíos si la red del usuario no deja entrar a los servidores.
     unawaited(VodCatalogService().initialize());
     TvRemoteService.instance.registerTvLaunchHandler(_handleRemoteTvLaunch);
-    TvRemoteService.instance.registerSystemNavigationHandler(_handleRemoteNavigation);
+    TvRemoteService.instance
+        .registerSystemNavigationHandler(_handleRemoteNavigation);
     TvRemoteService.instance.start();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_runPostAuthExperience());
@@ -185,7 +186,8 @@ class _MainScaffoldState extends State<MainScaffold> {
       if (rawItem is! Map<String, dynamic>) return;
       final item = VodItem.fromJson(rawItem);
       final rawEp = cmd.payload['episode'];
-      final ep = rawEp is Map<String, dynamic> ? VodEpisode.fromJson(rawEp) : null;
+      final ep =
+          rawEp is Map<String, dynamic> ? VodEpisode.fromJson(rawEp) : null;
       final posSec = (cmd.payload['positionSec'] as num?)?.toInt() ?? 0;
 
       nav.push(
@@ -265,8 +267,8 @@ class _MainScaffoldState extends State<MainScaffold> {
       );
       ServicesBinding.instance.keyEventManager.handleKeyData(
         ui.KeyData(
-          timeStamp:
-              Duration(milliseconds: DateTime.now().millisecondsSinceEpoch + 15),
+          timeStamp: Duration(
+              milliseconds: DateTime.now().millisecondsSinceEpoch + 15),
           type: ui.KeyEventType.up,
           physical: 0,
           logical: key.keyId,
@@ -285,25 +287,29 @@ class _MainScaffoldState extends State<MainScaffold> {
       case 'dpad_up':
         if (FocusManager.instance.primaryFocus == null) _focusTvRail();
         final moved = FocusManager.instance.primaryFocus
-            ?.focusInDirection(TraversalDirection.up) ?? false;
+                ?.focusInDirection(TraversalDirection.up) ??
+            false;
         if (!moved) _simulateKey(LogicalKeyboardKey.arrowUp);
         break;
       case 'dpad_down':
         if (FocusManager.instance.primaryFocus == null) _focusTvRail();
         final moved = FocusManager.instance.primaryFocus
-            ?.focusInDirection(TraversalDirection.down) ?? false;
+                ?.focusInDirection(TraversalDirection.down) ??
+            false;
         if (!moved) _simulateKey(LogicalKeyboardKey.arrowDown);
         break;
       case 'dpad_left':
         if (FocusManager.instance.primaryFocus == null) _focusTvRail();
         final moved = FocusManager.instance.primaryFocus
-            ?.focusInDirection(TraversalDirection.left) ?? false;
+                ?.focusInDirection(TraversalDirection.left) ??
+            false;
         if (!moved) _simulateKey(LogicalKeyboardKey.arrowLeft);
         break;
       case 'dpad_right':
         if (FocusManager.instance.primaryFocus == null) _focusTvRail();
         final moved = FocusManager.instance.primaryFocus
-            ?.focusInDirection(TraversalDirection.right) ?? false;
+                ?.focusInDirection(TraversalDirection.right) ??
+            false;
         if (!moved || _tvRailContainerNode.hasFocus) {
           _focusTvContent();
         }
@@ -317,6 +323,11 @@ class _MainScaffoldState extends State<MainScaffold> {
         } else {
           _simulateKey(LogicalKeyboardKey.select);
         }
+        break;
+      // «Detener» desde el mando del celular: sale del contenido y devuelve la
+      // TV a su pantalla, en lugar de quedarse reproduciendo en silencio.
+      case 'stop':
+        Navigator.of(context).popUntil((route) => route.isFirst);
         break;
       case 'back':
         final nav = Navigator.maybeOf(context);
@@ -590,159 +601,159 @@ class _MainScaffoldState extends State<MainScaffold> {
         return KeyEventResult.ignored;
       },
       child: AnimatedContainer(
-          duration: const Duration(milliseconds: 190),
-          curve: Curves.easeOutCubic,
-          width: expanded ? 210 : 80,
-          decoration: BoxDecoration(
-            color: theme.scaffoldBackgroundColor,
-            border: Border(
-              right: BorderSide(
-                color: AppColors.dividerFor(context),
-                width: 0.9,
-              ),
+        duration: const Duration(milliseconds: 190),
+        curve: Curves.easeOutCubic,
+        width: expanded ? 210 : 80,
+        decoration: BoxDecoration(
+          color: theme.scaffoldBackgroundColor,
+          border: Border(
+            right: BorderSide(
+              color: AppColors.dividerFor(context),
+              width: 0.9,
             ),
           ),
-          padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 10),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final showLabels = constraints.maxWidth >= 135;
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Marca InútilTV
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 2, 4, 18),
-                    child: Row(
-                      mainAxisAlignment: showLabels
-                          ? MainAxisAlignment.start
-                          : MainAxisAlignment.center,
-                      children: [
-                        if (showLabels) ...[
-                          Flexible(
-                            child: Text(
-                              'Inútil',
-                              maxLines: 1,
-                              overflow: TextOverflow.fade,
-                              softWrap: false,
-                              style: appTabTitleStyle(context).copyWith(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -0.8,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 5),
-                        ],
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 7,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: accent,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 10),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final showLabels = constraints.maxWidth >= 135;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Marca InútilTV
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 2, 4, 18),
+                  child: Row(
+                    mainAxisAlignment: showLabels
+                        ? MainAxisAlignment.start
+                        : MainAxisAlignment.center,
+                    children: [
+                      if (showLabels) ...[
+                        Flexible(
                           child: Text(
-                            'TV',
-                            style: TextStyle(
-                              color: AppColors.onAccentFor(context),
-                              fontSize: 12,
+                            'Inútil',
+                            maxLines: 1,
+                            overflow: TextOverflow.fade,
+                            softWrap: false,
+                            style: appTabTitleStyle(context).copyWith(
+                              fontSize: 22,
                               fontWeight: FontWeight.w900,
-                              letterSpacing: 0.4,
+                              letterSpacing: -0.8,
                             ),
                           ),
                         ),
+                        const SizedBox(width: 5),
+                      ],
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: accent,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'TV',
+                          style: TextStyle(
+                            color: AppColors.onAccentFor(context),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.4,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Acceso rápido a Búsqueda
+                _tvRailItem(
+                  context,
+                  label: 'Buscar',
+                  glyph: InutilGlyph.search,
+                  selected: false,
+                  expanded: showLabels,
+                  accent: accent,
+                  headingColor: headingColor,
+                  subColor: subColor,
+                  onTap: _openSearch,
+                ),
+                const SizedBox(height: 6),
+
+                // Secciones principales
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (var i = 0; i < _tabs.length; i++) ...[
+                          _tvRailItem(
+                            context,
+                            label: _tabs[i].label,
+                            glyph: _tabs[i].glyph,
+                            selected: _navIndex == i,
+                            expanded: showLabels,
+                            accent: accent,
+                            headingColor: headingColor,
+                            subColor: subColor,
+                            autofocus: i == 0 && _navIndex == 0,
+                            onTap: () {
+                              if (_navIndex == i) {
+                                _focusTvContent();
+                              } else {
+                                _selectTab(i);
+                              }
+                            },
+                          ),
+                          const SizedBox(height: 4),
+                        ],
                       ],
                     ),
                   ),
+                ),
 
-                  // Acceso rápido a Búsqueda
-                  _tvRailItem(
-                    context,
-                    label: 'Buscar',
-                    glyph: InutilGlyph.search,
-                    selected: false,
-                    expanded: showLabels,
-                    accent: accent,
-                    headingColor: headingColor,
-                    subColor: subColor,
-                    onTap: _openSearch,
-                  ),
-                  const SizedBox(height: 6),
+                Divider(color: AppColors.dividerFor(context), height: 18),
 
-                  // Secciones principales
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          for (var i = 0; i < _tabs.length; i++) ...[
-                            _tvRailItem(
-                              context,
-                              label: _tabs[i].label,
-                              glyph: _tabs[i].glyph,
-                              selected: _navIndex == i,
-                              expanded: showLabels,
-                              accent: accent,
-                              headingColor: headingColor,
-                              subColor: subColor,
-                              autofocus: i == 0 && _navIndex == 0,
-                              onTap: () {
-                                if (_navIndex == i) {
-                                  _focusTvContent();
-                                } else {
-                                  _selectTab(i);
-                                }
-                              },
-                            ),
-                            const SizedBox(height: 4),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
+                // Descargas con badge
+                ListenableBuilder(
+                  listenable: OfflineVaultService.instance,
+                  builder: (context, _) {
+                    final vault = OfflineVaultService.instance;
+                    final count = vault.activeCount > 0
+                        ? vault.activeCount
+                        : vault.completedCount;
+                    return _tvRailItem(
+                      context,
+                      label: count > 0 ? 'Descargas ($count)' : 'Descargas',
+                      glyph: InutilGlyph.download,
+                      selected: false,
+                      expanded: showLabels,
+                      accent: accent,
+                      headingColor: headingColor,
+                      subColor: subColor,
+                      onTap: _openDownloads,
+                    );
+                  },
+                ),
+                const SizedBox(height: 4),
 
-                  Divider(color: AppColors.dividerFor(context), height: 18),
-
-                  // Descargas con badge
-                  ListenableBuilder(
-                    listenable: OfflineVaultService.instance,
-                    builder: (context, _) {
-                      final vault = OfflineVaultService.instance;
-                      final count = vault.activeCount > 0
-                          ? vault.activeCount
-                          : vault.completedCount;
-                      return _tvRailItem(
-                        context,
-                        label: count > 0 ? 'Descargas ($count)' : 'Descargas',
-                        glyph: InutilGlyph.download,
-                        selected: false,
-                        expanded: showLabels,
-                        accent: accent,
-                        headingColor: headingColor,
-                        subColor: subColor,
-                        onTap: _openDownloads,
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 4),
-
-                  // Ajustes
-                  _tvRailItem(
-                    context,
-                    label: 'Ajustes',
-                    glyph: InutilGlyph.settings,
-                    selected: false,
-                    expanded: showLabels,
-                    accent: accent,
-                    headingColor: headingColor,
-                    subColor: subColor,
-                    onTap: _openSettings,
-                  ),
-                ],
-              );
-            },
-          ),
+                // Ajustes
+                _tvRailItem(
+                  context,
+                  label: 'Ajustes',
+                  glyph: InutilGlyph.settings,
+                  selected: false,
+                  expanded: showLabels,
+                  accent: accent,
+                  headingColor: headingColor,
+                  subColor: subColor,
+                  onTap: _openSettings,
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -783,7 +794,8 @@ class _MainScaffoldState extends State<MainScaffold> {
             mainAxisAlignment:
                 expanded ? MainAxisAlignment.start : MainAxisAlignment.center,
             children: [
-              InutilIcon(glyph, size: 21, color: fg, filled: selected || focused),
+              InutilIcon(glyph,
+                  size: 21, color: fg, filled: selected || focused),
               if (expanded) ...[
                 const SizedBox(width: 12),
                 Expanded(
@@ -889,9 +901,8 @@ class _MainScaffoldState extends State<MainScaffold> {
                         child: InutilIcon(
                           InutilGlyph.liveTv,
                           size: 20,
-                          color: online
-                              ? const Color(0xFF18C75A)
-                              : headingColor,
+                          color:
+                              online ? const Color(0xFF18C75A) : headingColor,
                         ),
                       ),
                       if (online)
@@ -920,8 +931,9 @@ class _MainScaffoldState extends State<MainScaffold> {
                 listenable: OfflineVaultService.instance,
                 builder: (context, _) {
                   final vault = OfflineVaultService.instance;
-                  final badgeCount =
-                      vault.activeCount > 0 ? vault.activeCount : vault.completedCount;
+                  final badgeCount = vault.activeCount > 0
+                      ? vault.activeCount
+                      : vault.completedCount;
                   final isActive = vault.activeCount > 0;
                   return Stack(
                     clipBehavior: Clip.none,
@@ -1094,7 +1106,9 @@ class _MainScaffoldState extends State<MainScaffold> {
         return Tooltip(
           message: TvRemoteSheet.isOpen
               ? 'Cerrar control remoto'
-              : (online ? 'Abrir control remoto Smart TV' : 'Vincular Smart TV con QR'),
+              : (online
+                  ? 'Abrir control remoto Smart TV'
+                  : 'Vincular Smart TV con QR'),
           child: TvFocusable(
             onTap: () => TvRemoteSheet.show(context),
             borderRadius: BorderRadius.circular(28),

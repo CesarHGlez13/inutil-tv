@@ -237,10 +237,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       widget.channelList != null && widget.channelList!.isNotEmpty;
 
   bool get _isLiveChannelMode =>
-      _hasChannels &&
-      !widget.isVod &&
-      widget.vodItem == null &&
-      !_hasEpisodes;
+      _hasChannels && !widget.isVod && widget.vodItem == null && !_hasEpisodes;
 
   bool get _isVodMode =>
       !_isLiveChannelMode &&
@@ -320,7 +317,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (TvModeService.instance.isTv) {
       // En Smart TV arrancamos en pantalla completa limpia (sin iconos encima)
       _showControls = false;
-      TvRemoteService.instance.registerActivePlayerHandler(_handleRemoteCommand);
+      TvRemoteService.instance
+          .registerActivePlayerHandler(_handleRemoteCommand);
       unawaited(_syncRemoteTvState());
     } else {
       // En celular: si la TV estaba reproduciendo, la detenemos de inmediato para evitar sonido duplicado
@@ -397,7 +395,8 @@ class _PlayerScreenState extends State<PlayerScreen>
           ? (isVod ? '16MiB' : '10MiB')
           : (settings.ultraBuffer ? '64MiB' : '32MiB'),
       'demuxer-max-back-bytes': isTv ? '6MiB' : '16MiB',
-      'demuxer-readahead-secs': isTv ? (isVod ? '20' : '8') : (isVod ? '60' : '12'),
+      'demuxer-readahead-secs':
+          isTv ? (isVod ? '20' : '8') : (isVod ? '60' : '12'),
       'network-timeout': '15',
       'stream-lavf-o':
           'reconnect=1,reconnect_streamed=1,reconnect_delay_max=5,multiple_requests=1',
@@ -567,7 +566,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       Future.delayed(const Duration(milliseconds: 350), () {
         if (!mounted) return;
         final dur = _player.state.duration;
-        if (dur == Duration.zero || target < dur - const Duration(seconds: 10)) {
+        if (dur == Duration.zero ||
+            target < dur - const Duration(seconds: 10)) {
           _player.seek(target);
           _showHudToast('Reanudando en ${_fmt(target)}');
         }
@@ -909,7 +909,8 @@ class _PlayerScreenState extends State<PlayerScreen>
 
     // 1. ¿Ya está PRECARGADO en segundo plano? ¡Salto instantáneo <300 ms!
     if (item != null) {
-      final preloaded = NextEpisodePreloader.instance.consumeIfReady(item.id, ep);
+      final preloaded =
+          NextEpisodePreloader.instance.consumeIfReady(item.id, ep);
       if (preloaded != null && preloaded.sources.isNotEmpty) {
         setState(() {
           _episodeIndex = index;
@@ -1278,7 +1279,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         break;
       case 'seek_absolute':
         final posSec = (cmd.payload['positionSec'] as num?)?.toInt() ?? 0;
-        final target = Duration(seconds: posSec.clamp(0, _player.state.duration.inSeconds));
+        final target = Duration(
+            seconds: posSec.clamp(0, _player.state.duration.inSeconds));
         _player.seek(target);
         _showHudToast('${_fmtDuration(target)} ⏩');
         unawaited(_syncRemoteTvState());
@@ -1287,7 +1289,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         final spd = (cmd.payload['speed'] as num?)?.toDouble() ?? 1.0;
         final clamped = spd.clamp(0.25, 3.0);
         _player.setRate(clamped);
-        _showHudToast('${clamped == clamped.truncateToDouble() ? clamped.toInt() : clamped}x ⏩');
+        _showHudToast(
+            '${clamped == clamped.truncateToDouble() ? clamped.toInt() : clamped}x ⏩');
         unawaited(_syncRemoteTvState());
         break;
       case 'prev_episode':
@@ -1415,7 +1418,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     _playPauseFocusNode.dispose();
     _scrubberFocusNode.dispose();
     if (TvModeService.instance.isTv) {
-      TvRemoteService.instance.registerActivePlayerHandler(null);
+      // Solo desregistra si el handler sigue siendo el suyo: cuando el celular
+      // lanza contenido, este dispose llega después del initState del
+      // reproductor nuevo y le robaba el control remoto (stop/pausa/volumen).
+      TvRemoteService.instance.unregisterActivePlayerHandler(
+        _handleRemoteCommand,
+      );
       unawaited(TvRemoteService.instance.clearTvPlayback());
     }
     DeviceControlService.setKeepScreenOn(false);
@@ -1738,7 +1746,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                             vertical: 8,
                           ),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF121318).withValues(alpha: 0.8),
+                            color:
+                                const Color(0xFF121318).withValues(alpha: 0.8),
                             borderRadius: BorderRadius.circular(20),
                             border: Border.all(
                               color: Colors.white.withValues(alpha: 0.14),
@@ -1930,9 +1939,11 @@ class _PlayerScreenState extends State<PlayerScreen>
             child: Opacity(
               opacity: 0.28,
               child: FastArtwork(
-                url: widget.posterUrl.startsWith('http') ? widget.posterUrl : '',
-                localFilePath:
-                    widget.posterUrl.startsWith('http') ? null : widget.posterUrl,
+                url:
+                    widget.posterUrl.startsWith('http') ? widget.posterUrl : '',
+                localFilePath: widget.posterUrl.startsWith('http')
+                    ? null
+                    : widget.posterUrl,
                 tier: ArtworkTier.backdrop,
                 cacheWidth: 540,
                 fit: BoxFit.cover,
@@ -2466,9 +2477,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                               style: TextStyle(
                                 color: active ? Colors.white : Colors.white70,
                                 fontSize: 13.5,
-                                fontWeight: active
-                                    ? FontWeight.w800
-                                    : FontWeight.w600,
+                                fontWeight:
+                                    active ? FontWeight.w800 : FontWeight.w600,
                               ),
                             ),
                           ),
@@ -3087,7 +3097,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF34D399).withValues(alpha: 0.2),
+                            color:
+                                const Color(0xFF34D399).withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: const Text(
@@ -3144,7 +3155,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                   const SizedBox(width: 8),
                   TextButton(
                     onPressed: () => _cancelNextEpisodeCountdown(dismiss: true),
-                    style: TextButton.styleFrom(foregroundColor: Colors.white70),
+                    style:
+                        TextButton.styleFrom(foregroundColor: Colors.white70),
                     child: const Text('Cancelar'),
                   ),
                 ],
@@ -3295,7 +3307,10 @@ class _PlayerScreenState extends State<PlayerScreen>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   title,
-                  if (subtitle != null) ...[const SizedBox(height: 2), subtitle],
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    subtitle
+                  ],
                 ],
               ),
             ),

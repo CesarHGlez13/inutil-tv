@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../constants/app_info.dart';
@@ -6,6 +8,8 @@ import '../services/artwork_cache_service.dart';
 import '../services/firebase_auth_service.dart';
 import '../services/my_list_service.dart';
 import '../services/offline_vault_service.dart';
+import '../services/play_target.dart';
+import '../services/tv_remote_service.dart';
 import '../services/watch_history.dart';
 import '../services/xuper_service.dart';
 import '../theme/app_colors.dart';
@@ -677,6 +681,28 @@ class _HomeTabState extends State<HomeTab> {
       return;
     }
 
+    // "Destino: TV" activo → la película arranca en la Smart TV, no aquí.
+    if (PlayTarget.isTvDestination(context)) {
+      unawaited(_playVodOnTv(item, initialPosition: initialPosition));
+      return;
+    }
+
+    _openVodPlayer(item, initialPosition: initialPosition);
+  }
+
+  Future<void> _playVodOnTv(VodItem item, {Duration? initialPosition}) async {
+    final ok = await PlayTarget.sendVod(item, position: initialPosition);
+    if (!mounted) return;
+    PlayTarget.report(context, ok: ok);
+    if (ok) {
+      unawaited(TvRemoteService.instance.refreshTvStateNow());
+    } else {
+      // Sin TV que responda no dejamos al usuario sin reproducción.
+      _openVodPlayer(item, initialPosition: initialPosition);
+    }
+  }
+
+  void _openVodPlayer(VodItem item, {Duration? initialPosition}) {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => PlayerScreen(
@@ -723,6 +749,28 @@ class _HomeTabState extends State<HomeTab> {
 
   void _playLiveDirect(Channel ch) {
     if (ch.sources.isEmpty) return;
+
+    // "Destino: TV" activo → la señal sintoniza en la Smart TV.
+    if (PlayTarget.isTvDestination(context)) {
+      unawaited(_playLiveOnTv(ch));
+      return;
+    }
+
+    _openLivePlayer(ch);
+  }
+
+  Future<void> _playLiveOnTv(Channel ch) async {
+    final ok = await PlayTarget.sendChannel(ch);
+    if (!mounted) return;
+    PlayTarget.report(context, ok: ok);
+    if (ok) {
+      unawaited(TvRemoteService.instance.refreshTvStateNow());
+    } else {
+      _openLivePlayer(ch);
+    }
+  }
+
+  void _openLivePlayer(Channel ch) {
     final list = _sportsChannels.any((c) => c.id == ch.id)
         ? _sportsChannels
         : _mexicoChannels;

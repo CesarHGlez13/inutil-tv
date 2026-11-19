@@ -128,7 +128,9 @@ class TvPlaybackState {
     final rawUpdated = data['updatedAt'];
     final updated = rawUpdated is DateTime
         ? rawUpdated
-        : (rawUpdated != null ? DateTime.tryParse(rawUpdated.toString()) : null);
+        : (rawUpdated != null
+            ? DateTime.tryParse(rawUpdated.toString())
+            : null);
     return TvPlaybackState(
       online: (data['online'] as bool?) ?? false,
       tvDeviceId: (data['tvDeviceId'] ?? '').toString(),
@@ -283,9 +285,31 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
     _launchHandler = handler;
   }
 
-  void registerActivePlayerHandler(void Function(TvRemoteCommand cmd)? handler) {
+  void registerActivePlayerHandler(
+      void Function(TvRemoteCommand cmd)? handler) {
     _activePlayerHandler = handler;
   }
+
+  /// Quita el handler del reproductor **solo** si sigue siendo el de [handler].
+  ///
+  /// Al lanzar contenido desde el celular se hace `popUntil(isFirst)` + `push`
+  /// de un `PlayerScreen` nuevo: el `dispose()` del reproductor viejo corre
+  /// DESPUÉS del `initState()` del nuevo (la transición inversa termina ~300 ms
+  /// tarde). Sin esta comprobación el viejo borraba el registro del nuevo y el
+  /// reproductor se quedaba sin handler: `stop`, `pause`, `play`, `seek` y
+  /// `volume_delta` dejaban de responder en la TV.
+  void unregisterActivePlayerHandler(
+    void Function(TvRemoteCommand cmd)? handler,
+  ) {
+    if (identical(_activePlayerHandler, handler)) {
+      _activePlayerHandler = null;
+    }
+  }
+
+  /// Permite comprobar en tests quién tiene registrado el reproductor.
+  @visibleForTesting
+  bool isPlayerHandlerRegisteredFor(void Function(TvRemoteCommand cmd) h) =>
+      identical(_activePlayerHandler, h);
 
   void registerSystemNavigationHandler(
       void Function(TvRemoteCommand cmd)? handler) {
@@ -324,7 +348,8 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _handleTvBackgrounded() {
-    debugPrint('🌙 [TvRemoteService] Smart TV app en pausa/fondo. Notificando estado OFFLINE...');
+    debugPrint(
+        '🌙 [TvRemoteService] Smart TV app en pausa/fondo. Notificando estado OFFLINE...');
     _tvHeartbeatTimer?.cancel();
     _tvCommandPollTimer?.cancel();
     try {
@@ -344,7 +369,8 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _handleTvResumed() {
-    debugPrint('☀️ [TvRemoteService] Smart TV app reanudada. Notificando estado ONLINE...');
+    debugPrint(
+        '☀️ [TvRemoteService] Smart TV app reanudada. Notificando estado ONLINE...');
     _startTvReceiver();
   }
 
@@ -421,7 +447,8 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
         }
         if (_localTvIp != null) break;
       }
-      debugPrint('📍 [TvRemoteService] IP LAN de Smart TV detectada: $_localTvIp');
+      debugPrint(
+          '📍 [TvRemoteService] IP LAN de Smart TV detectada: $_localTvIp');
     } catch (_) {}
   }
 
@@ -430,8 +457,10 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
     await _detectLocalTvIp();
     try {
       _lanHttpServer?.close(force: true);
-      _lanHttpServer = await HttpServer.bind(InternetAddress.anyIPv4, lanHttpPort);
-      debugPrint('🚀 [TvRemoteService] Servidor LAN TV iniciado en puerto $lanHttpPort');
+      _lanHttpServer =
+          await HttpServer.bind(InternetAddress.anyIPv4, lanHttpPort);
+      debugPrint(
+          '🚀 [TvRemoteService] Servidor LAN TV iniciado en puerto $lanHttpPort');
       _lanHttpServer!.listen(_handleLanHttpRequest, onError: (e) {
         debugPrint('⚠️ [TvRemoteService] Error en HttpServer LAN: $e');
       });
@@ -441,7 +470,8 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
 
     try {
       _lanUdpSocket?.close();
-      _lanUdpSocket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, lanUdpPort);
+      _lanUdpSocket =
+          await RawDatagramSocket.bind(InternetAddress.anyIPv4, lanUdpPort);
       _lanUdpSocket!.broadcastEnabled = true;
       _lanUdpSocket!.listen((RawSocketEvent event) {
         if (event == RawSocketEvent.read) {
@@ -450,15 +480,18 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
             try {
               final msg = utf8.decode(dg.data, allowMalformed: true).trim();
               if (msg.startsWith('INUTIL_TV_DISCOVER')) {
-                final reply = utf8.encode('INUTIL_TV_ONLINE|$lanHttpPort|${_tvState.tvName}|${_tvState.tvDeviceId}');
+                final reply = utf8.encode(
+                    'INUTIL_TV_ONLINE|$lanHttpPort|${_tvState.tvName}|${_tvState.tvDeviceId}');
                 _lanUdpSocket?.send(reply, dg.address, dg.port);
-                debugPrint('📡 [TvRemoteService] Descubrimiento UDP respondido a ${dg.address.address}:${dg.port}');
+                debugPrint(
+                    '📡 [TvRemoteService] Descubrimiento UDP respondido a ${dg.address.address}:${dg.port}');
               }
             } catch (_) {}
           }
         }
       });
-      debugPrint('📡 [TvRemoteService] Socket UDP LAN listo en puerto $lanUdpPort');
+      debugPrint(
+          '📡 [TvRemoteService] Socket UDP LAN listo en puerto $lanUdpPort');
     } catch (e) {
       debugPrint('⚠️ [TvRemoteService] No se pudo iniciar UDP LAN: $e');
     }
@@ -466,7 +499,8 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _handleLanHttpRequest(HttpRequest req) async {
     req.response.headers.add('Access-Control-Allow-Origin', '*');
-    req.response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    req.response.headers
+        .add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     req.response.headers.add('Access-Control-Allow-Headers', 'Content-Type');
 
     if (req.method == 'OPTIONS') {
@@ -491,7 +525,8 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
     if (req.method == 'GET' && path == '/api/tv/state') {
       req.response.headers.contentType = ContentType.json;
       final map = _tvState.toFirestore();
-      map['updatedAt'] = (_tvState.updatedAt ?? DateTime.now()).toIso8601String();
+      map['updatedAt'] =
+          (_tvState.updatedAt ?? DateTime.now()).toIso8601String();
       req.response.write(jsonEncode({
         'ok': true,
         'state': map,
@@ -503,7 +538,8 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
     if (req.method == 'POST' && path == '/api/tv/command') {
       try {
         final bodyStr = await utf8.decoder.bind(req).join();
-        final Map<String, dynamic> json = bodyStr.isNotEmpty ? jsonDecode(bodyStr) : {};
+        final Map<String, dynamic> json =
+            bodyStr.isNotEmpty ? jsonDecode(bodyStr) : {};
         final action = json['action']?.toString() ?? '';
         final payload = (json['payload'] as Map<String, dynamic>?) ?? {};
         final cmdId = json['commandId']?.toString() ?? _uuid.v4();
@@ -516,7 +552,8 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
             createdAt: DateTime.now(),
           );
           _lastHandledCommandId = cmd.commandId;
-          debugPrint('⚡ [TvRemoteService] Comando LAN recibido en TV: $action (id: $cmdId)');
+          debugPrint(
+              '⚡ [TvRemoteService] Comando LAN recibido en TV: $action (id: $cmdId)');
           dispatchCommandLocally(cmd);
         }
 
@@ -608,7 +645,8 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
       final err = e.toString();
       if (err.contains('429') || err.contains('RESOURCE_EXHAUSTED')) {
         _lastFirestore429Time = DateTime.now();
-        debugPrint('⏳ [TvRemoteService] Firestore 429 en publishTvState. Pausando sincronización cloud 60s.');
+        debugPrint(
+            '⏳ [TvRemoteService] Firestore 429 en publishTvState. Pausando sincronización cloud 60s.');
       }
     }
   }
@@ -634,13 +672,15 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
       _lastHandledCommandId = cmd.commandId;
-      debugPrint('📺 [TvRemoteService] Comando recibido en TV: ${cmd.action} (id: ${cmd.commandId})');
+      debugPrint(
+          '📺 [TvRemoteService] Comando recibido en TV: ${cmd.action} (id: ${cmd.commandId})');
       dispatchCommandLocally(cmd);
     } catch (e) {
       final err = e.toString();
       if (err.contains('429') || err.contains('RESOURCE_EXHAUSTED')) {
         _lastFirestore429Time = DateTime.now();
-        debugPrint('⏳ [TvRemoteService] Firestore 429 detectado. Pausando sondeo cloud por 45s (LAN activo).');
+        debugPrint(
+            '⏳ [TvRemoteService] Firestore 429 detectado. Pausando sondeo cloud por 45s (LAN activo).');
       } else {
         debugPrint('⚠️ [TvRemoteService] Error al recibir comando: $e');
       }
@@ -667,7 +707,8 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
   void dispatchCommandLocally(TvRemoteCommand cmd) {
     if (cmd.action == 'play_vod' || cmd.action == 'play_channel') {
       _launchHandler?.call(cmd);
-    } else if (_activePlayerHandler != null && _playerActions.contains(cmd.action)) {
+    } else if (_activePlayerHandler != null &&
+        _playerActions.contains(cmd.action)) {
       _activePlayerHandler?.call(cmd);
     } else if (_activePlayerHandler != null &&
         (cmd.action == 'back' || cmd.action == 'stop')) {
@@ -721,7 +762,8 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
       if (await _pingLanHost(knownTvHost)) {
         _targetTvLanHost = knownTvHost;
         await prefs.setString(_prefTvLanHostKey, knownTvHost);
-        debugPrint('🎯 [TvRemoteService] TV confirmada en host local conocido: $knownTvHost');
+        debugPrint(
+            '🎯 [TvRemoteService] TV confirmada en host local conocido: $knownTvHost');
         _discoveringLan = false;
         notifyListeners();
         return;
@@ -754,7 +796,8 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
           socket.send(probeMsg, InternetAddress('192.168.100.255'), lanUdpPort);
         } catch (_) {}
         try {
-          final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4);
+          final interfaces =
+              await NetworkInterface.list(type: InternetAddressType.IPv4);
           for (final iface in interfaces) {
             for (final addr in iface.addresses) {
               final parts = addr.address.split('.');
@@ -775,7 +818,8 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
         if (foundHost != null) {
           _targetTvLanHost = foundHost;
           await prefs.setString(_prefTvLanHostKey, foundHost);
-          debugPrint('🎯 [TvRemoteService] TV descubierta vía broadcast UDP: $foundHost');
+          debugPrint(
+              '🎯 [TvRemoteService] TV descubierta vía broadcast UDP: $foundHost');
           _discoveringLan = false;
           notifyListeners();
           return;
@@ -796,7 +840,24 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
             final parts = addr.address.split('.');
             if (parts.length == 4) {
               final prefix = '${parts[0]}.${parts[1]}.${parts[2]}';
-              final candidates = [17, 2, 3, 4, 5, 10, 15, 16, 18, 20, 23, 24, 25, 30, 50, 100];
+              final candidates = [
+                17,
+                2,
+                3,
+                4,
+                5,
+                10,
+                15,
+                16,
+                18,
+                20,
+                23,
+                24,
+                25,
+                30,
+                50,
+                100
+              ];
               final futures = candidates.map((c) => _pingLanHost('$prefix.$c'));
               final results = await Future.wait(futures);
               for (int i = 0; i < results.length; i++) {
@@ -804,7 +865,8 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
                   final found = '$prefix.${candidates[i]}';
                   _targetTvLanHost = found;
                   await prefs.setString(_prefTvLanHostKey, found);
-                  debugPrint('🎯 [TvRemoteService] TV descubierta vía barrido LAN: $found');
+                  debugPrint(
+                      '🎯 [TvRemoteService] TV descubierta vía barrido LAN: $found');
                   _discoveringLan = false;
                   notifyListeners();
                   return;
@@ -822,8 +884,10 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
   Future<bool> _pingLanHost(String host) async {
     HttpClient? client;
     try {
-      client = HttpClient()..connectionTimeout = const Duration(milliseconds: 500);
-      final req = await client.getUrl(Uri.parse('http://$host:$lanHttpPort/api/tv/ping'));
+      client = HttpClient()
+        ..connectionTimeout = const Duration(milliseconds: 500);
+      final req = await client
+          .getUrl(Uri.parse('http://$host:$lanHttpPort/api/tv/ping'));
       final resp = await req.close().timeout(const Duration(milliseconds: 700));
       if (resp.statusCode == HttpStatus.ok) {
         final body = await utf8.decoder.bind(resp).join();
@@ -848,9 +912,12 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
       if (_targetTvLanHost != null) {
         HttpClient? client;
         try {
-          client = HttpClient()..connectionTimeout = const Duration(milliseconds: 1000);
-          final req = await client.getUrl(Uri.parse('http://$_targetTvLanHost:$lanHttpPort/api/tv/state'));
-          final resp = await req.close().timeout(const Duration(milliseconds: 1200));
+          client = HttpClient()
+            ..connectionTimeout = const Duration(milliseconds: 1000);
+          final req = await client.getUrl(
+              Uri.parse('http://$_targetTvLanHost:$lanHttpPort/api/tv/state'));
+          final resp =
+              await req.close().timeout(const Duration(milliseconds: 1200));
           if (resp.statusCode == HttpStatus.ok) {
             final body = await utf8.decoder.bind(resp).join();
             final map = jsonDecode(body) as Map<String, dynamic>;
@@ -864,7 +931,8 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
             }
           }
         } catch (e) {
-          debugPrint('⚠️ [TvRemoteService] Falló refresco LAN con $_targetTvLanHost: $e');
+          debugPrint(
+              '⚠️ [TvRemoteService] Falló refresco LAN con $_targetTvLanHost: $e');
           lanCheckedAndFailed = true;
 
           // Si el puerto fue rechazado directamente (ECONNREFUSED / Connection refused),
@@ -937,7 +1005,8 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
           final err = e.toString();
           if (err.contains('429') || err.contains('RESOURCE_EXHAUSTED')) {
             _lastFirestore429Time = DateTime.now();
-            debugPrint('⏳ [TvRemoteService] Firestore 429 en refreshTvState. Pausando 60s.');
+            debugPrint(
+                '⏳ [TvRemoteService] Firestore 429 en refreshTvState. Pausando 60s.');
             if (lanCheckedAndFailed) {
               _tvState = _tvState.copyWith(online: false, isPlaying: false);
               notifyListeners();
@@ -964,17 +1033,21 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
     if (_targetTvLanHost != null) {
       HttpClient? client;
       try {
-        client = HttpClient()..connectionTimeout = const Duration(milliseconds: 1000);
-        final req = await client.postUrl(Uri.parse('http://$_targetTvLanHost:$lanHttpPort/api/tv/command'));
+        client = HttpClient()
+          ..connectionTimeout = const Duration(milliseconds: 1000);
+        final req = await client.postUrl(
+            Uri.parse('http://$_targetTvLanHost:$lanHttpPort/api/tv/command'));
         req.headers.contentType = ContentType.json;
         req.write(jsonEncode({
           'commandId': cmdId,
           'action': action,
           'payload': payload,
         }));
-        final resp = await req.close().timeout(const Duration(milliseconds: 1200));
+        final resp =
+            await req.close().timeout(const Duration(milliseconds: 1200));
         if (resp.statusCode == HttpStatus.ok) {
-          debugPrint('⚡ [TvRemote] Comando $action enviado por LAN a $_targetTvLanHost en <5ms');
+          debugPrint(
+              '⚡ [TvRemote] Comando $action enviado por LAN a $_targetTvLanHost en <5ms');
           Future.delayed(const Duration(milliseconds: 250), () {
             unawaited(refreshTvStateNow());
           });
@@ -1055,8 +1128,7 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Envía dirección D-Pad a la Smart TV ('up', 'down', 'left', 'right', 'center').
-  Future<bool> sendDpad(String direction) =>
-      sendCommand('dpad_$direction');
+  Future<bool> sendDpad(String direction) => sendCommand('dpad_$direction');
 
   /// Envía botón Volver / Atrás a la Smart TV.
   Future<bool> sendBack() => sendCommand('back');

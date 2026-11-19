@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 
 import '../models/models.dart';
 import '../services/artwork_cache_service.dart';
+import '../services/play_target.dart';
+import '../services/tv_remote_service.dart';
 import '../services/vod_catalog_service.dart';
 import '../services/xuper_service.dart';
 import '../theme/app_colors.dart';
@@ -186,6 +188,28 @@ class _SearchScreenState extends State<SearchScreen> {
 
   void _playChannel(Channel ch) {
     if (ch.sources.isEmpty) return;
+
+    // "Destino: TV" activo → la señal sintoniza en la Smart TV.
+    if (PlayTarget.isTvDestination(context)) {
+      unawaited(_playChannelOnTv(ch));
+      return;
+    }
+
+    _openChannelPlayer(ch);
+  }
+
+  Future<void> _playChannelOnTv(Channel ch) async {
+    final ok = await PlayTarget.sendChannel(ch);
+    if (!mounted) return;
+    PlayTarget.report(context, ok: ok);
+    if (ok) {
+      unawaited(TvRemoteService.instance.refreshTvStateNow());
+    } else {
+      _openChannelPlayer(ch);
+    }
+  }
+
+  void _openChannelPlayer(Channel ch) {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => PlayerScreen(
@@ -333,7 +357,6 @@ class _SearchScreenState extends State<SearchScreen> {
               },
             ),
           ),
-
           if (_filteredChannels.isNotEmpty) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(
@@ -434,7 +457,6 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
             ),
           ],
-
           if (_selectedFilter != 'Canales TV') ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(

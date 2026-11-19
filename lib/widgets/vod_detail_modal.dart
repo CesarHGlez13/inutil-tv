@@ -281,9 +281,10 @@ class _VodDetailModalState extends State<VodDetailModal> {
     final isCurrentEpisode = saved != null &&
         saved.seasonNumber == ep.seasonNumber &&
         saved.episodeNumber == ep.episodeNumber;
-    final posSec = (isCurrentEpisode && saved.positionSec > 10 && !saved.finished)
-        ? saved.positionSec.round()
-        : 0;
+    final posSec =
+        (isCurrentEpisode && saved.positionSec > 10 && !saved.finished)
+            ? saved.positionSec.round()
+            : 0;
 
     final ok = await TvRemoteService.instance.sendVodToTv(
       _item,
@@ -541,7 +542,7 @@ class _VodDetailModalState extends State<VodDetailModal> {
                                 ? (item.isSeries
                                     ? 'Ver T${saved.seasonNumber}·E${saved.episodeNumber} en TV'
                                     : 'Continuar en TV')
-                                : 'Ver en Smart TV';
+                                : 'Reproducir en TV';
                           } else {
                             mainLabel = canResume
                                 ? (item.isSeries
@@ -590,7 +591,8 @@ class _VodDetailModalState extends State<VodDetailModal> {
                                             : Icons.play_arrow_rounded,
                                         color: playOnTv
                                             ? Colors.black
-                                            : AppColors.playbackPrimaryForeground,
+                                            : AppColors
+                                                .playbackPrimaryForeground,
                                         size: 21,
                                       ),
                                       const SizedBox(width: 6),
@@ -599,7 +601,8 @@ class _VodDetailModalState extends State<VodDetailModal> {
                                         style: TextStyle(
                                           color: playOnTv
                                               ? Colors.black
-                                              : AppColors.playbackPrimaryForeground,
+                                              : AppColors
+                                                  .playbackPrimaryForeground,
                                           fontWeight: FontWeight.w800,
                                           fontSize: 13.5,
                                         ),
@@ -613,7 +616,8 @@ class _VodDetailModalState extends State<VodDetailModal> {
                                 // Selector táctil persistente de destino: Móvil vs TV
                                 Container(
                                   decoration: BoxDecoration(
-                                    color: AppColors.elevatedSurfaceFor(context),
+                                    color:
+                                        AppColors.elevatedSurfaceFor(context),
                                     borderRadius: BorderRadius.circular(24),
                                     border: Border.all(
                                       color: playOnTv
@@ -633,7 +637,8 @@ class _VodDetailModalState extends State<VodDetailModal> {
                                         onTap: () async {
                                           await TvRemoteService.instance
                                               .setPlayOnTv(false);
-                                          unawaited(TvRemoteService.instance.sendPause());
+                                          unawaited(TvRemoteService.instance
+                                              .sendPause());
                                           if (context.mounted) {
                                             ScaffoldMessenger.of(context)
                                                 .showSnackBar(
@@ -641,8 +646,7 @@ class _VodDetailModalState extends State<VodDetailModal> {
                                                 content: Text(
                                                   '📱 Cambiado a ver en Móvil (Smart TV pausada)',
                                                 ),
-                                                duration:
-                                                    Duration(seconds: 2),
+                                                duration: Duration(seconds: 2),
                                               ),
                                             );
                                           }
@@ -666,9 +670,11 @@ class _VodDetailModalState extends State<VodDetailModal> {
                                                 Icons.smartphone_rounded,
                                                 size: 15,
                                                 color: !playOnTv
-                                                    ? AppColors.accentFor(context)
-                                                    : AppColors.contentSubtitleFor(
-                                                        context),
+                                                    ? AppColors.accentFor(
+                                                        context)
+                                                    : AppColors
+                                                        .contentSubtitleFor(
+                                                            context),
                                               ),
                                               const SizedBox(width: 4),
                                               Text(
@@ -679,8 +685,9 @@ class _VodDetailModalState extends State<VodDetailModal> {
                                                   color: !playOnTv
                                                       ? AppColors.accentFor(
                                                           context)
-                                                      : AppColors.contentSubtitleFor(
-                                                          context),
+                                                      : AppColors
+                                                          .contentSubtitleFor(
+                                                              context),
                                                 ),
                                               ),
                                             ],
@@ -701,8 +708,7 @@ class _VodDetailModalState extends State<VodDetailModal> {
                                                 content: Text(
                                                   '📺 Conexión persistente: Ahora se reproducirá en Smart TV',
                                                 ),
-                                                duration:
-                                                    Duration(seconds: 2),
+                                                duration: Duration(seconds: 2),
                                               ),
                                             );
                                           }
@@ -727,8 +733,9 @@ class _VodDetailModalState extends State<VodDetailModal> {
                                                 size: 15,
                                                 color: playOnTv
                                                     ? const Color(0xFF18C75A)
-                                                    : AppColors.contentSubtitleFor(
-                                                        context),
+                                                    : AppColors
+                                                        .contentSubtitleFor(
+                                                            context),
                                               ),
                                               const SizedBox(width: 4),
                                               Text(
@@ -738,8 +745,9 @@ class _VodDetailModalState extends State<VodDetailModal> {
                                                   fontWeight: FontWeight.w800,
                                                   color: playOnTv
                                                       ? const Color(0xFF18C75A)
-                                                      : AppColors.contentSubtitleFor(
-                                                          context),
+                                                      : AppColors
+                                                          .contentSubtitleFor(
+                                                              context),
                                                 ),
                                               ),
                                             ],
@@ -751,71 +759,71 @@ class _VodDetailModalState extends State<VodDetailModal> {
                                 ),
                               ],
                               const SizedBox(width: 10),
-                          OutlinedButton.icon(
-                            onPressed: () async {
-                              final added = await _myList.toggle(item);
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      added
-                                          ? 'Agregado a Mi Lista'
-                                          : 'Quitado de Mi Lista',
-                                    ),
-                                    duration: const Duration(seconds: 1),
+                              OutlinedButton.icon(
+                                onPressed: () async {
+                                  final added = await _myList.toggle(item);
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          added
+                                              ? 'Agregado a Mi Lista'
+                                              : 'Quitado de Mi Lista',
+                                        ),
+                                        duration: const Duration(seconds: 1),
+                                      ),
+                                    );
+                                  }
+                                },
+                                icon: Icon(
+                                  inMyList
+                                      ? Icons.bookmark_added_rounded
+                                      : Icons.bookmark_add_outlined,
+                                  color: inMyList ? accent : Colors.white,
+                                  size: 18,
+                                ),
+                                label: Text(
+                                  inMyList ? 'En Mi Lista' : 'Mi Lista',
+                                  style: TextStyle(
+                                    color: inMyList ? accent : Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 12.5,
                                   ),
-                                );
-                              }
-                            },
-                            icon: Icon(
-                              inMyList
-                                  ? Icons.bookmark_added_rounded
-                                  : Icons.bookmark_add_outlined,
-                              color: inMyList ? accent : Colors.white,
-                              size: 18,
-                            ),
-                            label: Text(
-                              inMyList ? 'En Mi Lista' : 'Mi Lista',
-                              style: TextStyle(
-                                color: inMyList ? accent : Colors.white,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 12.5,
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  backgroundColor:
+                                      Colors.black.withValues(alpha: 0.56),
+                                  side: BorderSide(
+                                    color: inMyList
+                                        ? accent.withValues(alpha: 0.7)
+                                        : Colors.white.withValues(alpha: 0.25),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 15,
+                                    vertical: 11,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(24),
+                                  ),
+                                ),
                               ),
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              backgroundColor:
-                                  Colors.black.withValues(alpha: 0.56),
-                              side: BorderSide(
-                                color: inMyList
-                                    ? accent.withValues(alpha: 0.7)
-                                    : Colors.white.withValues(alpha: 0.25),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 15,
-                                vertical: 11,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(24),
-                              ),
-                            ),
-                          ),
-                          if (!item.isSeries) ...[
-                            const SizedBox(width: 10),
-                            _buildMovieDownloadButton(
-                              context,
-                              item,
-                              movieDl,
-                              accent,
-                            ),
-                          ],
-                        ],
-                      );
-                    },
+                              if (!item.isSeries) ...[
+                                const SizedBox(width: 10),
+                                _buildMovieDownloadButton(
+                                  context,
+                                  item,
+                                  movieDl,
+                                  accent,
+                                ),
+                              ],
+                            ],
+                          );
+                        },
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
-            ],
-          ),
 
               Padding(
                 padding: const EdgeInsets.all(16),
@@ -837,8 +845,7 @@ class _VodDetailModalState extends State<VodDetailModal> {
                             '★ ${item.rating}',
                             fg: AppColors.ratingGold,
                           ),
-                        if (item.year.isNotEmpty)
-                          _metaChip(context, item.year),
+                        if (item.year.isNotEmpty) _metaChip(context, item.year),
                         if (item.duration.isNotEmpty)
                           _metaChip(context, item.duration),
                         if (item.isSeries)
@@ -853,7 +860,8 @@ class _VodDetailModalState extends State<VodDetailModal> {
                     if (item.genre.isNotEmpty) ...[
                       const SizedBox(height: 10),
                       Text(
-                        item.genre.replaceAll(RegExp(r'^[🎬📺⚡🔥🎞️✨🧸]+\s*'), ''),
+                        item.genre
+                            .replaceAll(RegExp(r'^[🎬📺⚡🔥🎞️✨🧸]+\s*'), ''),
                         style: TextStyle(
                           color: subColor,
                           fontSize: 12.5,
@@ -874,7 +882,6 @@ class _VodDetailModalState extends State<VodDetailModal> {
                         height: 1.48,
                       ),
                     ),
-
                     if (item.isSeries) ...[
                       const SizedBox(height: 22),
                       Row(
@@ -968,7 +975,6 @@ class _VodDetailModalState extends State<VodDetailModal> {
                           ),
                         ],
                       ),
-
                       if (totalChunks > 1) ...[
                         const SizedBox(height: 8),
                         SizedBox(
@@ -1015,7 +1021,6 @@ class _VodDetailModalState extends State<VodDetailModal> {
                           ),
                         ),
                       ],
-
                       const SizedBox(height: 10),
                       if (visibleEpisodes.isEmpty && !_loadingEpisodes)
                         Container(
@@ -1042,7 +1047,6 @@ class _VodDetailModalState extends State<VodDetailModal> {
                           ],
                         ),
                     ],
-
                     if (widget.recommendations.isNotEmpty) ...[
                       const SizedBox(height: 24),
                       Text(
@@ -1055,7 +1059,8 @@ class _VodDetailModalState extends State<VodDetailModal> {
                         child: ListView.separated(
                           scrollDirection: Axis.horizontal,
                           itemCount: widget.recommendations.length,
-                          separatorBuilder: (_, __) => const SizedBox(width: 12),
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(width: 12),
                           itemBuilder: (_, idx) {
                             final sim = widget.recommendations[idx];
                             return PosterCard(
@@ -1107,7 +1112,8 @@ class _VodDetailModalState extends State<VodDetailModal> {
         if (!TvModeService.of(context) && TvRemoteService.instance.playOnTv) {
           _sendEpisodeToTv(ep, globalIndex);
         } else {
-          if (!TvModeService.of(context) && TvRemoteService.instance.isTvOnline) {
+          if (!TvModeService.of(context) &&
+              TvRemoteService.instance.isTvOnline) {
             unawaited(TvRemoteService.instance.sendStop());
           }
           _openPlayer(
@@ -1280,7 +1286,8 @@ class _VodDetailModalState extends State<VodDetailModal> {
       fg = const Color(0xFF18C75A);
       borderColor = const Color(0xFF18C75A).withValues(alpha: 0.65);
     } else if (isActive) {
-      label = dl!.status == DownloadStatus.resolving ? 'Preparando...' : '$pct%';
+      label =
+          dl!.status == DownloadStatus.resolving ? 'Preparando...' : '$pct%';
       fg = accent;
       borderColor = accent.withValues(alpha: 0.7);
     } else if (isPaused) {
@@ -1309,7 +1316,8 @@ class _VodDetailModalState extends State<VodDetailModal> {
             );
           }
         } else if (isDone) {
-          await _showCompletedDownloadActions(context, dl, () => _playMainAction());
+          await _showCompletedDownloadActions(
+              context, dl, () => _playMainAction());
         } else if (isActive) {
           await _vault.pauseDownload(dl.id);
         } else {
@@ -1527,7 +1535,8 @@ class _VodDetailModalState extends State<VodDetailModal> {
   ) async {
     final next3 = seasonEpisodes
         .where((e) =>
-            _vault.findCompletedEpisode(_item.id, e.seasonNumber, e.episodeNumber) ==
+            _vault.findCompletedEpisode(
+                _item.id, e.seasonNumber, e.episodeNumber) ==
             null)
         .take(3)
         .toList();

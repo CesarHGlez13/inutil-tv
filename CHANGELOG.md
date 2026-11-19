@@ -1,5 +1,16 @@
 # Changelog — InútilTV
 
+## 3.3.14 — 2026-11-19
+- **Todo se reproduce en la Smart TV cuando el destino es la TV:**
+  - Creado `services/play_target.dart`, compuerta única de «Destino: TV». Antes solo el modal de detalle consultaba la preferencia, así que el botón **Reproducir** del hero, «Seguir viendo», las tarjetas de canales y los resultados de búsqueda abrían el reproductor del teléfono aunque tuvieras la TV seleccionada.
+  - Ahora `home_tab` (hero / Seguir viendo / canales en vivo) y `search_screen` (canales) envían el contenido a la TV con `PlayTarget.sendVod` / `PlayTarget.sendChannel`. Si la TV no responde, la app reproduce localmente en lugar de dejar al usuario sin nada.
+  - Confirmación flotante no bloqueante de 2 s: «▶ Reproduciendo en tu Smart TV» o «La Smart TV no respondió · reproduciendo aquí».
+  - Las **descargas siguen reproduciéndose en el teléfono** a propósito: la TV no puede leer el almacenamiento del celular.
+- **El botón dice dónde va a reproducir:**
+  - El CTA del hero cambia solo de `▶ Reproducir` a `📡 Reproducir en TV` según el destino activo (escucha a `TvRemoteService`), y el modal usa la misma redacción en vez de «Ver en Smart TV».
+- **Falso aviso de actualización pendiente corregido:** `lib/constants/app_info.dart` seguía en `3.3.13` mientras `pubspec.yaml` ya estaba en `3.3.14`; ese desface es exactamente lo que hacía que la app anunciara una actualización inexistente tras instalar la nueva. El test `test/v2_upgrades_and_ota_test.dart` ya lo vigila.
+- Tests nuevos en `test/v3_3_14_play_on_tv_target_test.dart` (tabla de verdad del destino, estado real del servicio con la TV caída y guardias de código fuente).
+
 ## 3.3.13 — 2026-11-19
 - **FAB del Control Remoto Anclado Sobre la Barra de Navegación:**
   - Corregido el FAB circular del mando, que en móviles con barra de gestos (MIUI/HyperOS reporta ~46-49 dp de inset real) quedaba por debajo de la barra flotante Inicio / En vivo / Buscar y empalmado encima del botón circular de Buscar.
