@@ -659,8 +659,24 @@ class TvRemoteService extends ChangeNotifier {
         });
 
         final probeMsg = utf8.encode('INUTIL_TV_DISCOVER');
-        socket.send(probeMsg, InternetAddress('255.255.255.255'), lanUdpPort);
-        socket.send(probeMsg, InternetAddress('192.168.100.255'), lanUdpPort);
+        try {
+          socket.send(probeMsg, InternetAddress('255.255.255.255'), lanUdpPort);
+        } catch (_) {}
+        try {
+          socket.send(probeMsg, InternetAddress('192.168.100.255'), lanUdpPort);
+        } catch (_) {}
+        try {
+          final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4);
+          for (final iface in interfaces) {
+            for (final addr in iface.addresses) {
+              final parts = addr.address.split('.');
+              if (parts.length == 4) {
+                final bcast = '${parts[0]}.${parts[1]}.${parts[2]}.255';
+                socket.send(probeMsg, InternetAddress(bcast), lanUdpPort);
+              }
+            }
+          }
+        } catch (_) {}
 
         final foundHost = await completer.future.timeout(
           const Duration(milliseconds: 1000),
