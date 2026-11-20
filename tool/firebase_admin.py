@@ -38,7 +38,11 @@ from pathlib import Path
 
 PROJECT_ID = "inutil-music-app"
 API_KEY = "AIzaSyBLg1eN_N7Djc8X1Kri5MQFS-bnS2vVv-c"
-FIRESTORE_URL = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents"
+# FB_API_BASE permite enrutar las lecturas/escrituras de Firestore del panel por el
+# relay del S7 (cache SQLite en el telefono => cero cuota despues de la primera vez).
+# Por defecto va directo a Google. Auth (AUTH_URL) NUNCA pasa por el relay.
+FIRESTORE_URL = (f"{os.environ.get('FB_API_BASE', 'https://firestore.googleapis.com')}"
+                 f"/v1/projects/{PROJECT_ID}/databases/(default)/documents")
 AUTH_URL = "https://identitytoolkit.googleapis.com/v1"
 CONFIGSTORE_PATH = Path("/home/cesar/.config/configstore/firebase-tools.json")
 TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
@@ -46,6 +50,105 @@ TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 # Es el mismo par cliente_id/secret con el que el CLI refresca su token.
 CLI_OAUTH_CLIENT_ID = "563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com"
 CLI_OAUTH_CLIENT_SECRET = "j9iVZfS8kkCEFUPaAeJV0sAi"
+
+# --- Invalidacion de las capas de cache (relay S7 + Worker cloud) -----------
+# El panel y el CLI escriben DIRECTO a Google: `FB_API_BASE` no viene por defecto,
+# asi que `FIRESTORE_URL` es `firestore.googleapis.com` y AUTH_URL nunca pasa por
+# relay. Consecuencia medida: un cambio de licencia/estado hecho desde el panel
+# queda INVISIBLE para las apps hasta que caduca el cache del tier por el que
+# leen (hot_ttl/cache permanente en el S7, `CACHE_TTL=60` en el Worker).
+# `relay_invalidate()` avisa a las dos capas despues de CADA escritura:
+# `POST /admin/invalidate {"path": ...}` + `X-Admin-Secret`, el MISMO contrato y
+# el MISMO secreto en las dos capas. Verificado en vivo el 2026-11-20 con la
+# llave del S7 (`/data/adb/relay/secrets/admin_secret.txt`, copiada a
+# `~/.config/inutil_relay/admin_secret.txt` chmod 600): `{"ok":true,
+# "docs_deleted_purged":0}` en `users/__probe_inexistent__` tanto en
+# `http://192.168.100.27:8080/admin/invalidate` como en
+# `https://inutil-cloud-relay.scada-xiaomi-server.workers.dev/admin/invalidate`,
+# y `401` con la llave equivocada.
+# Todo error se traga y se loguea a stderr: purgar es una optimizacion y nunca
+# debe tumbar ni interrumpir una escritura que ya se pago en Google.
+# Variables de entorno:
+#   RELAY_INVALIDATE=0             no avisar a ninguna capa
+#   RELAY_INVALIDATE_BASES=a,b     cambiar las capas avisadas
+#   RELAY_ADMIN_SECRET / _FILE     cambiar la llave
+RELAY_INVALIDATE_ENABLED = os.environ.get("RELAY_INVALIDATE", "1").strip() != "0"
+RELAY_INVALIDATE_BASES = [b.strip().rstrip("/")
+                          for b in os.environ.get("RELAY_INVALIDATE_BASES", "").split(",")
+                          if b.strip()]
+if not RELAY_INVALIDATE_BASES:
+    # Las dos capas tal como estan desplegadas hoy: tier 1 = relay del S7 (LAN),
+    # tier 2 = Worker cloud. Que una de las dos no responda es NORMAL (el PC
+    # puede estar fuera de la LAN) y no es un error: se loguea y listo.
+    RELAY_INVALIDATE_BASES = ["http://192.168.100.27:8080",
+                              "https://inutil-cloud-relay.scada-xiaomi-server.workers.dev"]
+ADMIN_SECRET_FILE_DEFAULT = "/home/cesar/.config/inutil_relay/admin_secret.txt"
+RELAY_ADMIN_SECRET = os.environ.get("RELAY_ADMIN_SECRET", "").strip()
+if not RELAY_ADMIN_SECRET:
+    _secret_path = os.environ.get("RELAY_ADMIN_SECRET_FILE",
+                                 ADMIN_SECRET_FILE_DEFAULT).strip()
+    try:
+        if _secret_path and os.path.exists(_secret_path):
+            RELAY_ADMIN_SECRET = open(_secret_path, encoding="utf-8").read().strip()
+    except Exception:
+        pass
+
+def fs_doc_path(url):
+    """`<FIRESTORE_URL>/users/<uid>?updateMask...` -> `users/<uid>`; None si la
+    URL no es un documento Firestore. Las tablas `docs` de las dos capas guardan
+    el path RELATIVO (`users/<uid>`), no el path de Google completo, por eso se
+    recorta el prefijo: `relay.py` lo hace con su `BASE_PREFIX` (`relay.py:122`)
+    y el Worker con el suyo.
+    Un path de Firestore alterna coleccion/documento, asi que un numero IMPAR
+    de renglones es una coleccion (`users`, `users/uid/tv_remote`) y no tiene
+    sentido purgarla como documento: se devuelve None y quien quiera purgar
+    una coleccion entera usa la clave `collection` del propio endpoint."""
+    if not url.startswith(FIRESTORE_URL):
+        return None
+    tail = url[len(FIRESTORE_URL):].split("?")[0].strip("/").rstrip("/")
+    segs = [s for s in tail.split("/") if s]
+    if not segs or len(segs) % 2:
+        return None
+    return "/".join(segs)
+
+def relay_invalidate(path, skip=None, log=True):
+    """Purga `path` del cache de cada capa de `RELAY_INVALIDATE_BASES`.
+    `skip` = bases por las que la escritura YA paso (si el panel escribio con
+    `FB_API_BASE` apuntando a una capa, purgar esa misma capa le costaria una
+    lectura pagada de mas). Devuelve {base: codigo o error} y NUNCA lanza: quien
+    llama ya pago su escritura en Google y no puede revertirla."""
+    if not RELAY_INVALIDATE_ENABLED or not path:
+        return {}
+    skip = skip or set()
+    body = json.dumps({"path": path}).encode("utf-8")
+    out = {}
+    for base in RELAY_INVALIDATE_BASES:
+        if base in skip:
+            continue
+        try:
+            req = urllib.request.Request(
+                f"{base}/admin/invalidate", data=body, method="POST",
+                headers={"Content-Type": "application/json",
+                         "X-Admin-Secret": RELAY_ADMIN_SECRET,
+                         # Medido 2026-11-20 14:30: con el User-Agent que pone
+                         # urllib (`Python-urllib/3.x`) Cloudflare responde
+                         # `error code: 1010` + 403 (regla de firma de
+                         # navegador), y el aviso se pierde. Con cualquier otro
+                         # UA — incluso `python-requests/2.32.3` — responde
+                         # `200 {"ok":true,...}`. Se manda un UA descriptivo
+                         # propio para no depender de ese detalle.
+                         "User-Agent": "Mozilla/5.0 (compatible; InutilAdminPanel/1.0; /admin/invalidate)"})
+            with urllib.request.urlopen(req, timeout=4) as response:
+                out[base] = response.status
+        except urllib.error.HTTPError as e:
+            out[base] = f"HTTP {e.code}"
+        except Exception as e:
+            out[base] = str(e)
+        if log and out[base] not in (200, 204):
+            # 401 = falta la llave (o es otra); lo demas es red. Ninguno debe
+            # detener el panel, pero ninguno debe pasar desapercibido.
+            print(f"[relay-invalidate] {base} -> {out[base]}", file=sys.stderr)
+    return out
 
 def load_configstore():
     if CONFIGSTORE_PATH.exists():
@@ -113,7 +216,21 @@ def make_request(url, method="GET", data=None, token=None):
     if isinstance(res, dict) and res.get("code") == 401 and not explicit_token:
         fresh = get_auth_token(force_refresh=True)
         if fresh and fresh != token:
-            return _do_request(url, method=method, data=data, token=fresh)
+            res = _do_request(url, method=method, data=data, token=fresh)
+    # Escritura pagada -> avisar a las capas de cache. Antes de esto el panel
+    # escribia y las apps seguian viendo el documento VIEJO hasta que caducaba
+    # el TTL del tier por donde leian (S7: cache permanente salvo app_config;
+    # Worker: 60 s). Se avisa solo si la escritura salio bien: un PATCH que
+    # Google rechazo no dejo nada que purgar.
+    if method in ("PATCH", "POST", "DELETE") and not (isinstance(res, dict)
+                                                       and "error" in res):
+        doc = fs_doc_path(url)
+        if doc:
+            # Si la escritura ya paso por una de las capas (`FB_API_BASE`
+            # apuntando a ella), esa capa ya actualizo su propio cache: no hay
+            # que purgarla, porque purgarla le costaria una lectura pagada.
+            relay_invalidate(doc, skip={b for b in RELAY_INVALIDATE_BASES
+                                        if FIRESTORE_URL.startswith(b)})
     return res
 
 def _do_request(url, method="GET", data=None, token=None):
