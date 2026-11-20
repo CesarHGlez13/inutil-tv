@@ -56,6 +56,14 @@ class FirebaseConfig {
         defaultValue: '$projectId.firebasestorage.app',
       );
 
+  /// Host del relay propio (el S7 Edge, `relay.py`). Vacío = Firebase real.
+  /// Solo redirige FIRESTORE; el Auth sigue en Firebase real (decisión del
+  /// plan: auth en Firebase, lecturas/datos en el servidor propio).
+  static const String relayHost =
+      String.fromEnvironment('FB_RELAY_HOST', defaultValue: '');
+  static const String relayPort =
+      String.fromEnvironment('FB_RELAY_PORT', defaultValue: '8080');
+
   // Endpoints REST oficiales de Google Cloud / Firebase
   static String get authBaseUrl => useEmulator
       ? 'http://$emulatorHost:$emulatorAuthPort/identitytoolkit.googleapis.com/v1'
@@ -66,9 +74,14 @@ class FirebaseConfig {
       ? 'http://$emulatorHost:$emulatorAuthPort/securetoken.googleapis.com/v1/token'
       : 'https://securetoken.googleapis.com/v1/token';
 
-  static String get firestoreBaseUrl => useEmulator
-      ? 'http://$emulatorHost:$emulatorFirestorePort/v1/projects/$projectId/databases/(default)/documents'
-      : 'https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents';
+  static String get firestoreBaseUrl {
+    if (relayHost.isNotEmpty) {
+      return 'http://$relayHost:$relayPort/v1/projects/$projectId/databases/(default)/documents';
+    }
+    return useEmulator
+        ? 'http://$emulatorHost:$emulatorFirestorePort/v1/projects/$projectId/databases/(default)/documents'
+        : 'https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents';
+  }
 
   /// El emulador de Auth ignora la clave, pero el endpoint exige el parámetro.
   static String get keyParam => useEmulator ? 'key=emulator' : 'key=$apiKey';
