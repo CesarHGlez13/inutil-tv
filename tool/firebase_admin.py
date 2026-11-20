@@ -22,6 +22,7 @@ Uso Panel Web Profesional:
     -> Abre http://localhost:8088 con interfaz gráfica moderna Liquid Glass.
 """
 import argparse
+import base64
 import datetime
 import http.server
 import json
@@ -36,23 +37,82 @@ API_KEY = "AIzaSyBLg1eN_N7Djc8X1Kri5MQFS-bnS2vVv-c"
 FIRESTORE_URL = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents"
 AUTH_URL = "https://identitytoolkit.googleapis.com/v1"
 CONFIGSTORE_PATH = Path("/home/cesar/.config/configstore/firebase-tools.json")
+TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
+# Cliente OAuth público del propio firebase-tools (fuente: firebase-tools/lib/api.js).
+# Es el mismo par cliente_id/secret con el que el CLI refresca su token.
+CLI_OAUTH_CLIENT_ID = "563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com"
+CLI_OAUTH_CLIENT_SECRET = "j9iVZfS8kkCEFUPaAeJV0sAi"
 
-def get_auth_token():
+def load_configstore():
     if CONFIGSTORE_PATH.exists():
         try:
             with open(CONFIGSTORE_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            tokens = data.get("tokens", {})
-            token = tokens.get("access_token")
-            if token:
-                return token
+                return json.load(f)
         except Exception:
             pass
-    return None
+    return {}
+
+def _refresh_oauth_token(refresh_token):
+    """Refresca el access_token con el refresh_token del CLI (flujo OAuth estándar)."""
+    body = urllib.parse.urlencode({
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": CLI_OAUTH_CLIENT_ID,
+        "client_secret": CLI_OAUTH_CLIENT_SECRET,
+    }).encode()
+    req = urllib.request.Request(
+        TOKEN_ENDPOINT, data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            return json.loads(response.read().decode("utf-8")).get("access_token")
+    except Exception:
+        return None
+
+# Cache de proceso: token recién refrescado (no se toca el configstore del CLI).
+_refreshed_token_cache = {"token": None}
+
+def get_auth_token(force_refresh=False):
+    data = load_configstore()
+    tokens = data.get("tokens", {}) or {}
+    if not isinstance(tokens, dict):
+        tokens = {}
+    # El CLI guarda el token plano; se acepta también el formato agrupado por origen.
+    grouped = tokens.get("firebase") if isinstance(tokens.get("firebase"), dict) else None
+    access_token = (grouped or tokens).get("access_token")
+    refresh_token = (grouped or tokens).get("refresh_token")
+    expires_at = (grouped or tokens).get("expires_at")
+
+    def _expired(value):
+        try:
+            # firebase-tools guarda expires_at en epoch de milisegundos.
+            return float(value) / 1000.0 <= datetime.datetime.now().timestamp() + 60
+        except (TypeError, ValueError):
+            return False
+
+    if not force_refresh and access_token and not _expired(expires_at):
+        return access_token
+    if force_refresh and _refreshed_token_cache["token"]:
+        return _refreshed_token_cache["token"]
+    if refresh_token:
+        fresh = _refresh_oauth_token(refresh_token)
+        if fresh:
+            _refreshed_token_cache["token"] = fresh
+            return fresh
+    return access_token
 
 def make_request(url, method="GET", data=None, token=None):
-    if not token:
-        token = get_auth_token()
+    explicit_token = token
+    token = explicit_token or get_auth_token()
+    res = _do_request(url, method=method, data=data, token=token)
+    # Token revocado/expirado en el servidor: un reintento con token fresco.
+    if isinstance(res, dict) and res.get("code") == 401 and not explicit_token:
+        fresh = get_auth_token(force_refresh=True)
+        if fresh and fresh != token:
+            return _do_request(url, method=method, data=data, token=fresh)
+    return res
+
+def _do_request(url, method="GET", data=None, token=None):
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -202,8 +262,11 @@ def find_user(identifier):
 def update_user_fields(uid, updates):
     # 1. Actualizar Firebase Auth (Claims / Disabled)
     auth_data = {"localId": uid}
+    auth_mask = []
     if "isActive" in updates:
         auth_data["disableUser"] = not updates["isActive"]
+        # Sin fieldMask, un disableUser=false se ignora (valor por defecto del proto).
+        auth_mask.append("disableUser")
 
     claims = {}
     if "role" in updates:
@@ -214,9 +277,14 @@ def update_user_fields(uid, updates):
         claims["accountExpiresAt"] = updates["accountExpiresAt"]
     if claims:
         auth_data["customAttributes"] = json.dumps(claims)
+        auth_mask.append("customAttributes")
+    if auth_mask:
+        auth_data["fieldMask"] = auth_mask
 
     auth_url = f"https://identitytoolkit.googleapis.com/v1/projects/{PROJECT_ID}/accounts:update"
     auth_res = make_request(auth_url, method="POST", data=auth_data)
+    if "error" in auth_res:
+        return auth_res
 
     # 2. Actualizar Firestore (Best effort si hay cuota)
     encoded = encode_firestore_fields(updates)
@@ -333,6 +401,100 @@ def cmd_rol(args):
         print(f"❌ Error: {res['error']}")
     else:
         print(f"✅ Rol de {user.get('email')} actualizado a '{role}'.")
+
+def _set_vigencia(usuario, days=None, permanente=False, label=""):
+    user = find_user(usuario)
+    if not user:
+        print(f"❌ Usuario no encontrado: {usuario}")
+        return
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if permanente:
+        exp, days = "2099-12-31T23:59:59Z", 36500
+    else:
+        days = days or 30
+        exp = (now + datetime.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    res = update_user_fields(user["uid"], {
+        "status": "active",
+        "isActive": True,
+        "accountExpiresAt": exp,
+        "accountDurationDays": days,
+        "lastValidatedAt": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    })
+    if isinstance(res, dict) and "error" in res:
+        print(f"❌ Error: {res['error']}")
+    else:
+        print(f"✅ {label} {user.get('email')} → {'💎 Permanente' if permanente else f'+{days} días'} ({exp[:10]}).")
+
+def cmd_renovar(args):
+    _set_vigencia(args.usuario, days=args.dias, label="Renovada vigencia de")
+
+def cmd_permanente(args):
+    _set_vigencia(args.usuario, permanente=True, label="Licencia PERMANENTE para")
+
+def _set_status(usuario, status, is_active, label):
+    user = find_user(usuario)
+    if not user:
+        print(f"❌ Usuario no encontrado: {usuario}")
+        return
+    res = update_user_fields(user["uid"], {"status": status, "isActive": is_active})
+    if isinstance(res, dict) and "error" in res:
+        print(f"❌ Error: {res['error']}")
+    else:
+        print(f"✅ {label} {user.get('email')}.")
+
+def cmd_suspender(args):
+    _set_status(args.usuario, "blocked", False, "Usuario SUSPENDIDO:")
+
+def cmd_activar(args):
+    _set_status(args.usuario, "active", True, "Usuario ACTIVADO:")
+
+def cmd_crear(args):
+    # batchCreate (uploadAccount): password en Base64, localId generado aquí.
+    # OJO: customAttributes en el cuerpo de batchCreate rompe el endpoint (400);
+    # se fijan después con accounts:update + fieldMask.
+    import secrets
+    import string as _string
+    new_uid = "".join(secrets.choice(_string.ascii_letters + _string.digits) for _ in range(28))
+    user = {"localId": new_uid, "email": args.email,
+            "password": base64.b64encode(args.password.encode()).decode()}
+    if args.nombre:
+        user["displayName"] = args.nombre
+    days = args.dias if args.dias is not None else 30
+    exp = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    res = make_request(f"{AUTH_URL}/projects/{PROJECT_ID}/accounts:batchCreate",
+                       method="POST", data={"users": [user]})
+    if "error" in res or res.get("errors"):
+        print(f"❌ Error al crear: {res.get('error') or res.get('errors')}")
+        return
+    claims = {"role": "user", "status": "active", "accountExpiresAt": exp}
+    upd = make_request(f"{AUTH_URL}/projects/{PROJECT_ID}/accounts:update", method="POST",
+                       data={"localId": new_uid, "customAttributes": json.dumps(claims),
+                             "fieldMask": ["customAttributes"]})
+    if "error" in upd:
+        print(f"⚠️ Usuario creado (uid {new_uid}) pero los claims NO se guardaron: {upd['error'][:80]}")
+        return
+    print(f"✅ Usuario creado: {args.email} (uid {new_uid}) vigencia +{days} días ({exp[:10]}).")
+
+def cmd_eliminar(args):
+    user = find_user(args.usuario)
+    if not user:
+        print(f"❌ Usuario no encontrado: {args.usuario}")
+        return
+    uid = user["uid"]
+    # batchDelete exige cuenta deshabilitada antes de borrar.
+    dis = make_request(f"{AUTH_URL}/projects/{PROJECT_ID}/accounts:update",
+                       method="POST", data={"localId": uid, "disableUser": True})
+    if "error" in dis:
+        print(f"❌ Error al deshabilitar antes de borrar: {dis['error']}")
+        return
+    res = make_request(f"{AUTH_URL}/projects/{PROJECT_ID}/accounts:batchDelete",
+                       method="POST", data={"localIds": [uid]})
+    if "error" in res or res.get("errors"):
+        print(f"❌ Error al eliminar de Auth: {res.get('error') or res.get('errors')}")
+        return
+    fs = make_request(f"{FIRESTORE_URL}/users/{uid}", method="DELETE")
+    note = "" if "error" not in fs else f" (Firestore pendiente: {fs['error'][:60]})"
+    print(f"✅ Usuario {user.get('email')} ELIMINADO de Auth.{note}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PANEL WEB LOCAL MODERNO
@@ -611,6 +773,28 @@ def main():
     ap_rol.add_argument("usuario", help="Email o UID del usuario")
     ap_rol.add_argument("rol", choices=["admin", "user"], help="Nuevo rol")
 
+    ap_renovar = subparsers.add_parser("renovar", help="Renueva la vigencia de un usuario")
+    ap_renovar.add_argument("usuario", help="Email o UID del usuario")
+    ap_renovar.add_argument("--dias", type=int, default=30, help="Días a sumar (default: 30)")
+
+    ap_perm = subparsers.add_parser("permanente", help="Conceder licencia PERMANENTE")
+    ap_perm.add_argument("usuario", help="Email o UID del usuario")
+
+    ap_susp = subparsers.add_parser("suspender", help="Suspender usuario")
+    ap_susp.add_argument("usuario", help="Email o UID del usuario")
+
+    ap_act = subparsers.add_parser("activar", help="Reactivar usuario")
+    ap_act.add_argument("usuario", help="Email o UID del usuario")
+
+    ap_crear = subparsers.add_parser("crear", help="Crear usuario con contraseña")
+    ap_crear.add_argument("email", help="Correo del usuario")
+    ap_crear.add_argument("password", help="Contraseña (mínimo 6 caracteres)")
+    ap_crear.add_argument("--nombre", help="Nombre para mostrar")
+    ap_crear.add_argument("--dias", type=int, default=30, help="Días de vigencia (default: 30)")
+
+    ap_elim = subparsers.add_parser("eliminar", help="Eliminar usuario de Auth")
+    ap_elim.add_argument("usuario", help="Email o UID del usuario")
+
     ap_web = subparsers.add_parser("web", help="Inicia el Panel Web de Administración local")
     ap_web.add_argument("--port", type=int, default=8088, help="Puerto HTTP (default: 8088)")
 
@@ -624,6 +808,18 @@ def main():
         cmd_liberar(args)
     elif args.command == "rol":
         cmd_rol(args)
+    elif args.command == "renovar":
+        cmd_renovar(args)
+    elif args.command == "permanente":
+        cmd_permanente(args)
+    elif args.command == "suspender":
+        cmd_suspender(args)
+    elif args.command == "activar":
+        cmd_activar(args)
+    elif args.command == "crear":
+        cmd_crear(args)
+    elif args.command == "eliminar":
+        cmd_eliminar(args)
     elif args.command == "web":
         cmd_web(args)
 
