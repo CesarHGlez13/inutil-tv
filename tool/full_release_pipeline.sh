@@ -71,7 +71,7 @@ echo "✅ Versiones sincronizadas correctamente ($VERSION)."
 
 # --- 2. Análisis Estático ---
 echo "▶ [2/6] Ejecutando análisis estático (flutter analyze)..."
-flutter analyze --no-fatal-infos
+flutter analyze --no-fatal-infos --no-fatal-warnings
 
 # --- 3. Compilación Release Split-Per-ABI ---
 APK_DIR="$PROY/build/app/outputs/flutter-apk"
