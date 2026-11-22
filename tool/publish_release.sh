@@ -208,6 +208,9 @@ echo "OK GitHub Release: https://github.com/$RELEASE_REPO/releases/tag/$TAG"
 
 # --- Sincronizar Firestore app_config/tv_release ---
 TOKEN="${FIREBASE_ACCESS_TOKEN:-}"
+if [ -z "$TOKEN" ]; then
+  TOKEN="$(python3 -c "import sys; sys.path.append('$PROY/tool'); import firebase_admin as fa; print(fa.get_auth_token())" 2>/dev/null || true)"
+fi
 if [ -z "$TOKEN" ] && [ -f "$HOME/.config/configstore/firebase-tools.json" ]; then
   TOKEN="$(python3 - <<'PY'
 import json, pathlib, time
