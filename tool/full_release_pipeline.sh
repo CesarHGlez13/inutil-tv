@@ -116,8 +116,8 @@ if [ "$SKIP_TV_TEST" = "0" ]; then
     echo "⚠️ TV Box no responde en $DEV_TV ni en puerto 5555 (puede estar en suspensión)."
   fi
 
-  # B. Celular Android conectado (arm64-v8a / auto-detección)
-  CONNECTED_DEVS="$(adb devices | grep -E '\s+device$' | grep -v "$DEV_TV" | awk '{print $1}' || true)"
+  # B. Celular Android conectado (arm64-v8a / auto-detección, excluyendo relay S7)
+  CONNECTED_DEVS="$(adb devices | grep -E '\s+device$' | grep -v "$DEV_TV" | grep -v "ad09160360308ca38a" | awk '{print $1}' || true)"
   for dev_id in $CONNECTED_DEVS; do
     DEV_ABI="$(adb -s "$dev_id" shell getprop ro.product.cpu.abi | tr -d ' \r')"
     DEV_MODEL="$(adb -s "$dev_id" shell getprop ro.product.model | tr -d ' \r')"
