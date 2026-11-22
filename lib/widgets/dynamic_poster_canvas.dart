@@ -168,7 +168,7 @@ Color _secondaryFor(int seed) {
     Color(0xFF38194E),
     Color(0xFF133A26),
     Color(0xFF4A3112),
-    Color(0xFF1E293B),
+    Color(0xFF23252C),
   ];
   return secondary[(seed >> 3) % secondary.length];
 }
