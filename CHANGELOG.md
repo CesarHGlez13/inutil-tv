@@ -1,5 +1,15 @@
 # Changelog — InútilTV
 
+## 3.3.19 — 2026-11-22
+- **Cabecera del modal de detalle en formato lienzo cinematográfico** (diseño pedido por Cesar con 4 capturas de referencia):
+  - **El arte manda:** la cabecera pasa de 248 px fijos a **46% del alto de pantalla** (recortado a 640 px), que es la proporción medida en la referencia (banda de arte ~55% contando el rótulo dentro). Antes el arte era apenas ~10% de la pantalla.
+  - **Entrada desde negro:** el lienzo aparece con un fade de 760 ms y deriva de escala 1.055→1.0, respetando "reducir animaciones" del sistema (ahí se queda estático). Medido sobre las 4 capturas: brillo de la banda superior 14 → 34 → 63 → 88, o sea fade-in progresivo y no un salto.
+  - **El rótulo vive sobre el arte**, centrado y con bloom, como el logo de la referencia. Los proveedores no publican logo real (verificado contra el `__NEXT_DATA__` de PoseidonHD2: cero campos de logo), así que lo sostiene la tipografía display de la app.
+  - **Viñeta más honesta:** el velo superior baja de 0.25 a 0.10 para que el arte se lea (la referencia lo deja casi sin vigneteado arriba).
+  - **Fila de estrellas** al estilo de la referencia: 5 estrellas con medios rellenos sobre la escala del proveedor + `Media: X.X/10`. Sin recuento de votos: los proveedores no lo publican y no se inventa el `(393K)`. Composición de géneros y sinopsis centrada.
+- Se conserva intacto el `LiveCanvasPreview` de v3.3.18 (rotación de stills reales + Ken Burns) como base del lienzo, y todo el cableado funcional del modal (píldora de reproducción, foco de mando, barra inferior, descargas).
+- **Solo InútilTV.** `inutil_music` sigue en `835ad61`, sin tocar por esta versión (su árbol conserva un fichero de test modificado de una sesión anterior, `remote_collection_detail_page_test.dart`; no lo movimos nosotros).
+
 ## 3.3.18 — 2026-11-22
 
 - **Canvas en vivo estilo Spotify (`LiveCanvasPreview`).** Al enfocar una tarjeta con el mando —o manteniendo pulsado en el teléfono— la carátula deja de estar quieta y rota por los stills reales de la obra con crossfade lento y deriva Ken Burns, rematada por el velo de vidrio. El carrusel héroe y la cabecera del modal de detalle lo hacen en autoplay.

@@ -2,8 +2,20 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tubotv/constants/app_info.dart';
 import 'package:tubotv/models/models.dart';
 import 'package:tubotv/widgets/live_canvas_preview.dart';
+
+/// Semver del pubspec (sin el build number). Los pins de versión de esta suite
+/// son dinámicos a propósito: el pin exacto de la versión viva vive en el
+/// test de la versión correspondiente.
+String _pubspecSemver() {
+  final match =
+      RegExp(r'^version:\s*(\d+\.\d+\.\d+)\+', multiLine: true)
+          .firstMatch(File('pubspec.yaml').readAsStringSync());
+  expect(match, isNotNull, reason: 'pubspec.yaml sin línea version: x.y.z+n');
+  return match!.group(1)!;
+}
 
 /// v3.3.18 — Canvas en vivo estilo Spotify.
 ///
@@ -198,20 +210,17 @@ void main() {
   });
 
   group('v3.3.18 — versión sincronizada en los 3 sitios', () {
-    test('pubspec.yaml en 3.3.18+67', () {
-      expect(
-          File('pubspec.yaml').readAsStringSync(),
-          contains(
-            'version: 3.3.18+67',
-          ));
+    // Pins dinámicos: pubspec ↔ app_info deben coincidir siempre (convención
+    // del repo, ver test/v2_upgrades_and_ota_test.dart). El pin exacto de la
+    // versión viva está en el test de la versión nueva.
+    test('AppInfo.appVersion coincide con el semver del pubspec', () {
+      expect(AppInfo.appVersion, _pubspecSemver(),
+          reason: 'app_info.dart desincronizado del pubspec');
     });
 
-    test('lib/constants/app_info.dart en 3.3.18', () {
-      expect(
-          File('lib/constants/app_info.dart').readAsStringSync(),
-          contains(
-            "static const String appVersion = '3.3.18'",
-          ));
+    test('lib/constants/app_info.dart lleva el semver del pubspec', () {
+      expect(File('lib/constants/app_info.dart').readAsStringSync(),
+          contains("static const String appVersion = '${_pubspecSemver()}'"));
     });
 
     test('CHANGELOG.md documenta 3.3.18', () {

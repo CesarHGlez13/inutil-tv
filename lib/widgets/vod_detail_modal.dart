@@ -20,6 +20,14 @@ import 'poster_card.dart';
 import 'tv_focusable.dart';
 import 'tv_remote_sheet.dart';
 
+/// Escala pura de estrellas (0..5) a partir del rating del proveedor (0-10).
+/// Tolerante con comas europeas, vacío y basura ⇒ 0. Pública y sin contexto
+/// para poder probarla sin widget (test/v3_3_19_cinematic_header_test.dart).
+double starsFromRating(String rating) {
+  final score = (double.tryParse(rating.replaceAll(',', '.')) ?? 0).clamp(0.0, 10.0);
+  return score / 2;
+}
+
 /// Modal editorial de ficha VOD de InútilTV v3.0 — alineado con Inútil Music:
 /// - Enriquece automáticamente sinopsis reales en español + portadas HD.
 /// - Botón primario blanco puro (`#FFFFFF` / texto carbón `#07110A`) + botón Mi Lista.
@@ -105,8 +113,44 @@ class VodDetailModal extends StatefulWidget {
   State<VodDetailModal> createState() => _VodDetailModalState();
 }
 
-class _VodDetailModalState extends State<VodDetailModal> {
+class _VodDetailModalState extends State<VodDetailModal>
+    with SingleTickerProviderStateMixin {
   static const _pageChunk = 50;
+
+  /// Revealed del lienzo de cabecera (v3.3.19): el arte entra desde negro con
+  /// un fade lento y una deriva de escala mínima. Medido sobre la referencia
+  /// (4 fotogramas del mismo modal): la banda superior pasa de brillo 14 → 34
+  /// → 63 → 88, o sea un fade-in desde negro, no un salto. Se crea perezosamente
+  /// y sólo si el sistema no pide reducir animaciones.
+  AnimationController? _reveal;
+
+  bool get _reduceMotion =>
+      WidgetsBinding.instance.platformDispatcher.accessibilityFeatures
+          .disableAnimations;
+
+  /// Alto del lienzo: la referencia deja el arte en ~55% de la pantalla con el
+  /// rótulo dentro. Aquí 46% del alto, recortado a 640 px para que en paneles
+  /// grandes el arte no se estire más de lo que resuelve el CDN.
+  double _heroHeight(BuildContext context) {
+    final h = MediaQuery.sizeOf(context).height;
+    return (h * 0.46).clamp(300.0, 640.0);
+  }
+
+  /// Envuelve el arte con el fade-in desde negro + deriva de escala.
+  Widget _revealed(BuildContext context, Widget child) {
+    final t = _reveal;
+    if (t == null) return child;
+    return FadeTransition(
+      opacity: CurvedAnimation(parent: t, curve: Curves.easeOutCubic),
+      child: ScaleTransition(
+        alignment: Alignment.center,
+        scale: Tween<double>(begin: 1.055, end: 1.0).animate(
+          CurvedAnimation(parent: t, curve: Curves.easeOutQuart),
+        ),
+        child: child,
+      ),
+    );
+  }
 
   final _catalog = VodCatalogService();
   final _history = WatchHistory();
@@ -135,6 +179,18 @@ class _VodDetailModalState extends State<VodDetailModal> {
     _myList.load();
     _vault.initialize();
     _initForCurrentItem();
+    if (!_reduceMotion) {
+      _reveal = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 760),
+      )..forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    _reveal?.dispose();
+    super.dispose();
   }
 
   @override
@@ -414,6 +470,7 @@ class _VodDetailModalState extends State<VodDetailModal> {
   Widget build(BuildContext context) {
     final item = _item;
     final image = item.backdrop.isNotEmpty ? item.backdrop : item.poster;
+    final heroH = _heroHeight(context);
     final seasons = _seasons;
     final seasonEpisodes = _episodesForCurrentSeason;
 
@@ -457,28 +514,31 @@ class _VodDetailModalState extends State<VodDetailModal> {
               Stack(
                 children: [
                   SizedBox(
-                    height: 248,
+                    height: heroH,
                     width: double.infinity,
-                    child: _headerStills(item).length >= 2
-                        // Canvas en vivo (v3.3.18): la cabecera del detalle rota
-                        // los stills reales de la obra, igual que el héroe.
-                        ? LiveCanvasPreview(
-                            title: item.title,
-                            posterUrl: item.poster,
-                            backdropUrl: image,
-                            stills: _headerStills(item),
-                            active: true,
-                            radius: 0,
-                          )
-                        : image.isNotEmpty
-                            ? FastArtwork(
-                                url: image,
-                                tier: ArtworkTier.backdrop,
-                                cacheWidth: 900,
-                                fit: BoxFit.cover,
-                                errorWidget: ColoredBox(color: surface),
-                              )
-                            : ColoredBox(color: surface),
+                    child: _revealed(
+                      context,
+                      _headerStills(item).length >= 2
+                          // Canvas en vivo (v3.3.18): la cabecera del detalle rota
+                          // los stills reales de la obra, igual que el héroe.
+                          ? LiveCanvasPreview(
+                              title: item.title,
+                              posterUrl: item.poster,
+                              backdropUrl: image,
+                              stills: _headerStills(item),
+                              active: true,
+                              radius: 0,
+                            )
+                          : image.isNotEmpty
+                              ? FastArtwork(
+                                  url: image,
+                                  tier: ArtworkTier.backdrop,
+                                  cacheWidth: 900,
+                                  fit: BoxFit.cover,
+                                  errorWidget: ColoredBox(color: surface),
+                                )
+                              : ColoredBox(color: surface),
+                    ),
                   ),
                   Positioned.fill(
                     child: DecoratedBox(
@@ -487,12 +547,12 @@ class _VodDetailModalState extends State<VodDetailModal> {
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
                           colors: [
-                            Colors.black.withValues(alpha: 0.25),
+                            Colors.black.withValues(alpha: 0.10),
                             Colors.transparent,
-                            sheetBg.withValues(alpha: 0.9),
+                            Colors.black.withValues(alpha: 0.42),
                             sheetBg,
                           ],
-                          stops: const [0.0, 0.36, 0.85, 1.0],
+                          stops: const [0.0, 0.42, 0.74, 1.0],
                         ),
                       ),
                     ),
@@ -543,6 +603,38 @@ class _VodDetailModalState extends State<VodDetailModal> {
                           size: 20,
                         ),
                         onPressed: () => Navigator.of(context).pop(),
+                      ),
+                    ),
+                  ),
+                  // Rótulo dentro del lienzo (v3.3.19): la referencia mete el
+                  // logo de la obra SOBRE el arte, centrado y con un bloom que
+                  // lo sostiene. Los proveedores no publican logo real (verificado
+                  // contra el `__NEXT_DATA__` de PoseidonHD2: cero campos de logo),
+                  // así que lo sostiene la tipografía display de la app, agrandada.
+                  Positioned(
+                    left: 24,
+                    right: 24,
+                    bottom: 78,
+                    child: Center(
+                      child: Text(
+                        item.title,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: appTabTitleStyle(context).copyWith(
+                          fontSize: TvModeService.of(context) ? 46 : 31,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: TvModeService.of(context) ? -1.0 : -0.65,
+                          color: Colors.white,
+                          shadows: const [
+                            Shadow(
+                              blurRadius: 28,
+                              color: Colors.black87,
+                              offset: Offset(0, 3),
+                            ),
+                            Shadow(blurRadius: 10, color: Colors.black54),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -853,23 +945,16 @@ class _VodDetailModalState extends State<VodDetailModal> {
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Text(
-                      item.title,
-                      style: appTabTitleStyle(context).copyWith(fontSize: 22),
-                    ),
-                    const SizedBox(height: 10),
+                    // Fila de estrellas de la referencia (v3.3.19), centrada.
+                    if (hasRealRating) _starsRow(context, item.rating),
+                    const SizedBox(height: 12),
                     Wrap(
                       spacing: 8,
                       runSpacing: 6,
+                      alignment: WrapAlignment.center,
                       children: [
-                        if (hasRealRating)
-                          _metaChip(
-                            context,
-                            '★ ${item.rating}',
-                            fg: AppColors.ratingGold,
-                          ),
                         if (item.year.isNotEmpty) _metaChip(context, item.year),
                         if (item.duration.isNotEmpty)
                           _metaChip(context, item.duration),
@@ -887,6 +972,7 @@ class _VodDetailModalState extends State<VodDetailModal> {
                       Text(
                         item.genre
                             .replaceAll(RegExp(r'^[🎬📺⚡🔥🎞️✨🧸]+\s*'), ''),
+                        textAlign: TextAlign.center,
                         style: TextStyle(
                           color: subColor,
                           fontSize: 12.5,
@@ -895,12 +981,17 @@ class _VodDetailModalState extends State<VodDetailModal> {
                       ),
                     ],
                     const SizedBox(height: 16),
-                    Text('Sinopsis', style: appListCardTitleStyle(context)),
+                    Text(
+                      'Sinopsis',
+                      textAlign: TextAlign.center,
+                      style: appListCardTitleStyle(context),
+                    ),
                     const SizedBox(height: 6),
                     Text(
                       item.overview.isNotEmpty
                           ? item.overview
                           : 'Título disponible en alta definición con cambio automático de servidor en InútilTV.',
+                      textAlign: TextAlign.center,
                       style: TextStyle(
                         color: headingColor.withValues(alpha: 0.8),
                         fontSize: 13.5,
@@ -1761,6 +1852,44 @@ class _VodDetailModalState extends State<VodDetailModal> {
           fontSize: 11,
           fontWeight: FontWeight.w700,
         ),
+      ),
+    );
+  }
+
+  /// Fila de estrellas al estilo de la referencia (v3.3.19): 5 estrellas sobre
+  /// la escala del proveedor (que viene en 0-10), con medios rellenos. El número
+  /// se muestra tal cual y con `/10`: los proveedores no publican recuento de
+  /// votos, así que no se inventa el `(393K)` de la referencia.
+  Widget _starsRow(BuildContext context, String rating) {
+    final stars = starsFromRating(rating);
+    const gold = AppColors.ratingGold;
+    final dim = AppColors.contentSubtitleFor(context).withValues(alpha: 0.55);
+    final tv = TvModeService.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          for (var i = 0; i < 5; i++)
+            Icon(
+              stars >= i + 1
+                  ? Icons.star_rounded
+                  : stars > i
+                      ? Icons.star_half_rounded
+                      : Icons.star_outline_rounded,
+              size: tv ? 30 : 22,
+              color: stars > i ? gold : dim,
+            ),
+          const SizedBox(width: 10),
+          Text(
+            'Media: $rating/10',
+            style: TextStyle(
+              color: AppColors.contentHeadingFor(context),
+              fontSize: tv ? 20 : 15,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
       ),
     );
   }
