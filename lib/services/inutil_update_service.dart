@@ -11,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../constants/app_info.dart';
 import 'firebase_auth_service.dart';
 import 'firebase_config.dart';
+import 'firebase_firestore_service.dart';
 import 'ota_download_manager.dart';
 
 /// Información de lanzamiento OTA y Kill Switch (OTA forzosa) de InútilTV.
@@ -295,12 +296,28 @@ class InutilUpdateService {
     required String currentVersion,
   }) async {
     try {
-      final res = await http
-          .get(
-            Uri.parse('$_releaseDocumentUrl?${FirebaseConfig.keyParam}'),
-            headers: _headers(),
-          )
-          .timeout(const Duration(seconds: 8));
+      http.Response res;
+      final relayWasUsable = FirebaseConfig.relayUsable;
+      try {
+        res = await http
+            .get(
+              Uri.parse('$_releaseDocumentUrl?${FirebaseConfig.keyParam}'),
+              headers: _headers(),
+            )
+            .timeout(const Duration(seconds: 8));
+      } catch (err) {
+        if (relayWasUsable && InutilFirestoreService.isConnectionFailure(err)) {
+          FirebaseConfig.markRelayUnreachable();
+          res = await http
+              .get(
+                Uri.parse('$_releaseDocumentUrl?${FirebaseConfig.keyParam}'),
+                headers: _headers(),
+              )
+              .timeout(const Duration(seconds: 8));
+        } else {
+          rethrow;
+        }
+      }
       if (res.statusCode == 200) {
         final decoded =
             jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;

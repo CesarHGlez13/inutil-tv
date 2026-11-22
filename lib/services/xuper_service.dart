@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
@@ -8,8 +9,10 @@ import 'artwork_cache_service.dart';
 import 'cuevana_poseidon_service.dart';
 import 'jkanime_service.dart';
 import 'live_tv_sync_service.dart';
+import 'my_list_service.dart';
 import 'pelisflix_service.dart';
 import 'serieskao_service.dart';
+import 'watch_history.dart';
 
 List<Channel> _parseChannelsInIsolate(String jsonStr) {
   final list = json.decode(jsonStr) as List;
@@ -128,18 +131,105 @@ class XuperService extends ChangeNotifier {
     }
   }
 
-  /// Fuerza recarga de estrenos, series, anime y respaldos de TV desde la red.
-  Future<void> refreshLiveCatalog() async {
+  /// Fuerza recarga de estrenos, series, anime y respaldos de TV desde la red,
+  /// refrescando y rotando las recomendaciones personalizadas al estilo Spotify.
+  Future<void> refreshLiveCatalog({bool forceShuffle = false}) async {
     await Future.wait([
-      _refreshLiveCatalogInBackground(),
+      _refreshLiveCatalogInBackground(forceShuffle: forceShuffle),
       _syncLiveTvInBackground(forceRefresh: true),
     ]);
+    if (forceShuffle) {
+      _updateCategories(forceShuffle: true);
+      notifyListeners();
+    }
   }
 
-  void _updateCategories() {
+  void _updateCategories({bool forceShuffle = false}) {
     final map = <String, List<VodItem>>{};
-    if (_trendingMovies.isNotEmpty) {
-      map['Tendencias de la Semana'] = _trendingMovies.take(18).toList();
+
+    final allItems = <VodItem>[
+      ..._trendingMovies,
+      ..._liveMovies,
+      ..._liveSeries,
+      ..._liveAnime,
+      ..._classicMovies,
+    ];
+
+    final seenIds = <String>{};
+    final uniquePool = <VodItem>[];
+    for (final item in allItems) {
+      if (item.id.isNotEmpty && seenIds.add(item.id)) {
+        uniquePool.add(item);
+      }
+    }
+
+    final history = WatchHistory().items;
+    final myList = MyListService.instance.items;
+
+    // 1. Recomendación contextual: "Porque viste [Título]"
+    if (history.isNotEmpty) {
+      final last = history.first;
+      final targetGenres = last.genre
+          .split(RegExp(r'[,/·]'))
+          .map((g) => g.trim().toLowerCase())
+          .where((g) => g.isNotEmpty)
+          .toSet();
+
+      final becauseYouWatched = uniquePool.where((item) {
+        if (item.id == last.id) return false;
+        if (last.isAnime && !item.isAnime) return false;
+        if (targetGenres.isEmpty) {
+          return item.isSeries == last.isSeries;
+        }
+        final itemGenres = item.genre
+            .split(RegExp(r'[,/·]'))
+            .map((g) => g.trim().toLowerCase())
+            .toSet();
+        return itemGenres.intersection(targetGenres).isNotEmpty;
+      }).toList();
+
+      if (becauseYouWatched.length >= 4) {
+        if (forceShuffle) {
+          becauseYouWatched.shuffle();
+        }
+        final displayTitle = last.title.length > 22
+            ? '${last.title.substring(0, 22)}…'
+            : last.title;
+        map['Porque viste $displayTitle'] =
+            becauseYouWatched.take(18).toList();
+      }
+    }
+
+    // 2. Recomendación personalizada: "Especialmente para ti"
+    final recommended = _buildPersonalizedRecommendations(
+      pool: uniquePool,
+      history: history,
+      myList: myList,
+      shuffle: forceShuffle,
+    );
+    if (recommended.isNotEmpty) {
+      map['Especialmente para ti'] = recommended.take(18).toList();
+    }
+
+    // 3. Descubrimiento Dinámico / Joyas Ocultas (rotación dinámica tipo Spotify)
+    final discoveries = List<VodItem>.from(uniquePool);
+    final hourSeed = DateTime.now().hour +
+        (forceShuffle ? DateTime.now().millisecondsSinceEpoch % 1000 : 0);
+    discoveries.shuffle(Random(hourSeed));
+    final existingTitles =
+        map.values.expand((list) => list.map((e) => e.id)).toSet();
+    final freshDiscoveries = discoveries
+        .where((it) => !existingTitles.contains(it.id))
+        .take(16)
+        .toList();
+    if (freshDiscoveries.isNotEmpty) {
+      map['Descubrimientos de la Semana'] = freshDiscoveries;
+    }
+
+    // Categorías canónicas del catálogo
+    final trending = _trendingMovies.isNotEmpty ? _trendingMovies : _liveMovies;
+    if (trending.isNotEmpty) {
+      map['Tendencias de la Semana'] = trending.take(18).toList();
     }
     if (_liveMovies.isNotEmpty) {
       map['Estrenos de Cine'] = _liveMovies.take(18).toList();
@@ -157,10 +247,8 @@ class XuperService extends ChangeNotifier {
 
     // Precargar en disco/RAM las primeras carátulas del Inicio en paralelo
     final posterUrls = <String>[
-      for (final m in _trendingMovies.take(6)) m.poster,
-      for (final m in _liveMovies.take(8)) m.poster,
-      for (final s in _liveSeries.take(6)) s.poster,
-      for (final a in _liveAnime.take(6)) a.poster,
+      for (final list in map.values.take(3))
+        for (final item in list.take(6)) item.poster,
     ];
     unawaited(
       ArtworkCacheService.instance.prefetchUrls(
@@ -170,6 +258,98 @@ class XuperService extends ChangeNotifier {
         limit: 24,
       ),
     );
+  }
+
+  List<VodItem> _buildPersonalizedRecommendations({
+    required List<VodItem> pool,
+    required List<WatchProgress> history,
+    required List<VodItem> myList,
+    required bool shuffle,
+  }) {
+    final finishedIds =
+        history.where((p) => p.finished).map((p) => p.id).toSet();
+    final preferredGenres = <String, int>{};
+
+    for (final h in history) {
+      for (final g in h.genre.split(RegExp(r'[,/·]'))) {
+        final clean = g.trim().toLowerCase();
+        if (clean.isNotEmpty) {
+          preferredGenres[clean] = (preferredGenres[clean] ?? 0) + 2;
+        }
+      }
+    }
+    for (final m in myList) {
+      for (final g in m.genre.split(RegExp(r'[,/·]'))) {
+        final clean = g.trim().toLowerCase();
+        if (clean.isNotEmpty) {
+          preferredGenres[clean] = (preferredGenres[clean] ?? 0) + 1;
+        }
+      }
+    }
+
+    if (preferredGenres.isEmpty) {
+      final mixed = <VodItem>[
+        ..._trendingMovies.take(6),
+        ..._liveSeries.take(6),
+        ..._liveAnime.take(6),
+        ..._classicMovies.take(4),
+      ];
+      if (shuffle) mixed.shuffle();
+      return mixed;
+    }
+
+    final scored =
+        pool.where((item) => !finishedIds.contains(item.id)).map((item) {
+      var score = 0;
+      final genres = item.genre
+          .split(RegExp(r'[,/·]'))
+          .map((g) => g.trim().toLowerCase());
+      for (final g in genres) {
+        score += preferredGenres[g] ?? 0;
+      }
+      if (item.backdrop.isNotEmpty) score += 1;
+      return MapEntry(item, score);
+    }).toList();
+
+    scored.sort((a, b) => b.value.compareTo(a.value));
+    final candidates =
+        scored.where((e) => e.value > 0).map((e) => e.key).toList();
+    if (candidates.isEmpty) {
+      return pool.take(18).toList();
+    }
+    if (shuffle) {
+      final top = candidates.take(30).toList()..shuffle();
+      return top.take(18).toList();
+    }
+    return candidates.take(18).toList();
+  }
+
+  /// Obtiene los títulos destacados para el Hero Carousel de Inicio,
+  /// permitiendo rotación dinámica mediante [seed].
+  List<VodItem> getFeaturedVod({int seed = 0}) {
+    final pool = <VodItem>[
+      ..._trendingMovies,
+      ..._liveMovies,
+      ..._liveSeries,
+      ..._liveAnime,
+    ].where((v) => v.backdrop.isNotEmpty || v.poster.isNotEmpty).toList();
+
+    if (pool.isEmpty) return const [];
+    if (pool.length <= 6) return pool;
+
+    if (seed != 0) {
+      final rotated = List<VodItem>.from(pool);
+      rotated.shuffle(Random(seed));
+      return rotated.take(6).toList();
+    }
+    return [
+      ..._liveMovies.take(3),
+      ..._liveSeries.take(2),
+      ..._liveAnime.take(1),
+    ]
+        .where((v) => v.backdrop.isNotEmpty || v.poster.isNotEmpty)
+        .take(6)
+        .toList();
   }
 
   Future<void> _syncLiveTvInBackground({bool forceRefresh = false}) async {
@@ -187,7 +367,9 @@ class XuperService extends ChangeNotifier {
     }
   }
 
-  Future<void> _refreshLiveCatalogInBackground() async {
+  Future<void> _refreshLiveCatalogInBackground({
+    bool forceShuffle = false,
+  }) async {
     try {
       final cp = CuevanaPoseidonService();
       final sk = SeriesKaoService();
@@ -220,7 +402,7 @@ class XuperService extends ChangeNotifier {
       if (anime.isNotEmpty) _liveAnime = anime;
 
       _liveCatalogLoaded = true;
-      _updateCategories();
+      _updateCategories(forceShuffle: forceShuffle);
       notifyListeners();
     } catch (e) {
       debugPrint('[XuperService] Error cargando VOD en background: $e');

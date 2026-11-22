@@ -17,6 +17,7 @@ import 'screens/tv_screen.dart';
 import 'services/app_settings_service.dart';
 import 'services/artwork_cache_service.dart';
 import 'services/firebase_auth_service.dart';
+import 'services/firebase_config.dart';
 import 'services/inutil_cloud_backup_service.dart';
 import 'services/inutil_promo_popup_service.dart';
 import 'services/liquid_nav_metrics.dart';
@@ -46,6 +47,9 @@ void main() {
   unawaited(NetworkConfigService.instance.load());
   unawaited(TvModeService.instance.initialize());
   MediaKit.ensureInitialized();
+  // Sonda de alcance al relay propio (S7) para que un build horneado con
+  // FB_RELAY_HOST no quede incomunicado si se ejecuta fuera de la LAN.
+  unawaited(FirebaseConfig.probeRelayReachability());
   final imageCache = PaintingBinding.instance.imageCache;
   imageCache.maximumSize = 400;
   imageCache.maximumSizeBytes = 96 * 1024 * 1024;

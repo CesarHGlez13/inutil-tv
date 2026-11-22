@@ -73,9 +73,9 @@ class InutilUser {
   final int phoneSwitchCount;
   final String phoneSwitchMonth;
 
-  /// Administrador por rol en Firebase Firestore o por identidad fundadora.
-  bool get isAdmin =>
-      role == 'admin' || InutilAuthService.isBootstrapAdminEmail(email);
+  /// Administrador solo por rol (Firebase Auth/Firestore). Ya no se decide
+  /// por UID ni por correo hardcodeados: conocer el correo no es un secreto.
+  bool get isAdmin => role == 'admin';
 
   /// Licencia Premium Permanente (año 2090 en adelante o rol admin).
   bool get isPermanent =>
@@ -329,9 +329,9 @@ class InutilAuthService extends ChangeNotifier {
     }
     if (!_tvSessionOk(user)) {
       return _isSmartTvSlot
-          ? 'Otra Smart TV tomó el control de esta cuenta en InútilTV. '
+          ? 'Otro dispositivo (Smart TV) tomó el control de esta cuenta en InútilTV. '
               'Tu cuenta incluye 1 celular y 1 Smart TV a la vez.'
-          : 'Otro celular tomó el control de esta cuenta en InútilTV. '
+          : 'Otro dispositivo (celular) tomó el control de esta cuenta en InútilTV. '
               'Tu cuenta incluye 1 celular y 1 Smart TV a la vez.';
     }
     if (!_licenseFresh()) {

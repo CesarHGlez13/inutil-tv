@@ -1,3 +1,9 @@
+library;
+
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+
 /// Configuración cliente de Firebase compartida por la familia INÚTIL
 /// (Inútil Music e InútilTV).
 ///
@@ -64,6 +70,124 @@ class FirebaseConfig {
   static const String relayPort =
       String.fromEnvironment('FB_RELAY_PORT', defaultValue: '8080');
 
+  // ---------------------------------------------------------------------------
+  // Fallback de alcance del relay (compatible con Inútil Music)
+  // ---------------------------------------------------------------------------
+
+  /// Estado de alcance del relay: `null` = todavía sin medir, `true` = vivo,
+  /// `false` = no respondió a la sonda.
+  static bool? _relayReachable;
+
+  /// "Este equipo debería estar usando el relay y ahora mismo no lo está".
+  static bool _relayRecoveryDesired = false;
+
+  /// `true` sólo cuando hay relay horneado, no estamos en emuladores y la sonda
+  /// lo declaró vivo. Es la única puerta de los endpoints redirigidos.
+  static bool get relayUsable =>
+      relayHost.trim().isNotEmpty && !useEmulator && _relayReachable == true;
+
+  /// Decisión pura de endpoint, expuesta para pruebas: el relay se usa sólo si
+  /// está configurado, fuera de emuladores y alcanzable; de lo contrario se
+  /// devuelve tal cual el endpoint de Google (o del emulador) que le pase el
+  /// llamante.
+  @visibleForTesting
+  static String relayAwareUrl({
+    required String configuredHost,
+    required String configuredPort,
+    required bool emulator,
+    required bool? reachable,
+    required String emulatorUrl,
+    required String googleUrl,
+  }) {
+    if (configuredHost.trim().isEmpty) return googleUrl;
+    if (emulator) return emulatorUrl;
+    if (reachable != true) return googleUrl;
+    return 'http://$configuredHost:$configuredPort'
+        '${Uri.parse(googleUrl).path}';
+  }
+
+  /// Cache en SharedPreferences del último estado medido.
+  static const String relayReachabilityCacheKey =
+      'inutil_tv_relay_reachable_v1';
+
+  /// Sonda de TCP al relay. Devuelve el estado medido y lo deja en el estado
+  /// de clase para que los getters lo respeten de inmediato.
+  ///
+  /// Prueba los puertos `relayPort` y `5555` en paralelo (el segundo es el
+  /// puerto TCP del ADB shell del S7, por si el `relay.py` quedó levantado
+  /// sobre otro número) y abandona al primer handshake.
+  static Future<bool> probeRelayReachability({
+    Duration timeout = const Duration(milliseconds: 1200),
+    List<int>? ports,
+    String? host,
+  }) async {
+    final target = (host ?? relayHost).trim();
+    if (useEmulator || target.isEmpty) {
+      _relayReachable = false;
+      return false;
+    }
+    final candidates = <int>{
+      int.tryParse(relayPort.trim()) ?? 8080,
+      5555,
+    }.toList(growable: false);
+    for (final port in ports ?? candidates) {
+      if (await _canOpen(target, port, timeout)) {
+        _relayReachable = true;
+        _relayRecoveryDesired = false;
+        return true;
+      }
+    }
+    _relayReachable = false;
+    return false;
+  }
+
+  static Future<bool> _canOpen(
+    String host,
+    int port,
+    Duration timeout,
+  ) async {
+    Socket? socket;
+    try {
+      socket = await Socket.connect(host, port, timeout: timeout);
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      try {
+        await socket?.close();
+      } catch (_) {}
+    }
+  }
+
+  /// Marca el relay como caído y a partir de la siguiente petición los
+  /// endpoints vuelven a Google, sin reiniciar la app.
+  static void markRelayUnreachable() {
+    if (_relayReachable == true) _relayRecoveryDesired = true;
+    _relayReachable = false;
+  }
+
+  /// Pide que se re-sondee el relay aunque ahora esté marcado caído.
+  static void noteRelayRecoveryWanted() {
+    if (useEmulator) return;
+    _relayRecoveryDesired = true;
+  }
+
+  /// `true` sólo cuando la sonda declaró el relay caído y este equipo tiene
+  /// relación con él.
+  static bool get relayRecoveryWorthy =>
+      !useEmulator && _relayReachable == false && _relayRecoveryDesired;
+
+  /// Restablece la medición (pruebas y re-sondas programadas).
+  @visibleForTesting
+  static void resetRelayReachability() {
+    _relayReachable = null;
+    _relayRecoveryDesired = false;
+  }
+
+  /// Estado actual conocido, para telemetría y pruebas.
+  @visibleForTesting
+  static bool? get relayReachabilityState => _relayReachable;
+
   // Endpoints REST oficiales de Google Cloud / Firebase
   static String get authBaseUrl => useEmulator
       ? 'http://$emulatorHost:$emulatorAuthPort/identitytoolkit.googleapis.com/v1'
@@ -75,7 +199,7 @@ class FirebaseConfig {
       : 'https://securetoken.googleapis.com/v1/token';
 
   static String get firestoreBaseUrl {
-    if (relayHost.isNotEmpty) {
+    if (relayUsable) {
       return 'http://$relayHost:$relayPort/v1/projects/$projectId/databases/(default)/documents';
     }
     return useEmulator

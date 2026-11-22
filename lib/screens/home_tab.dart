@@ -58,6 +58,7 @@ class _HomeTabState extends State<HomeTab> {
   final _vault = OfflineVaultService.instance;
 
   bool _loading = true;
+  int _featuredSeed = 0;
   List<Channel> _sportsChannels = [];
   List<Channel> _mexicoChannels = [];
   String _quickFilter = 'Todo';
@@ -91,12 +92,14 @@ class _HomeTabState extends State<HomeTab> {
     _loadData();
   }
 
-  Future<void> _loadData() async {
+  Future<void> _loadData() => _refreshHomeData(shuffle: false);
+
+  Future<void> _refreshHomeData({bool shuffle = false}) async {
     await Future.wait([
       _history.load(),
       _myList.load(),
       _vault.initialize(),
-      _service.initialize(),
+      _service.refreshLiveCatalog(forceShuffle: shuffle),
     ]);
     final channels = await _service.getLiveChannels();
     if (!mounted) return;
@@ -119,6 +122,9 @@ class _HomeTabState extends State<HomeTab> {
     setState(() {
       _sportsChannels = sports;
       _mexicoChannels = mex.isNotEmpty ? mex : channels.take(10).toList();
+      if (shuffle) {
+        _featuredSeed = DateTime.now().millisecondsSinceEpoch;
+      }
       _loading = false;
     });
   }
@@ -138,14 +144,17 @@ class _HomeTabState extends State<HomeTab> {
         final resume = _history.items;
         final myListItems = _myList.items;
 
-        final featured = <VodItem>[
-          ...liveMovies.take(4),
-          ...series.take(2),
-          ...anime.take(1),
-        ]
-            .where((v) => v.backdrop.isNotEmpty || v.poster.isNotEmpty)
-            .take(6)
-            .toList();
+        final poolFeatured = _service.getFeaturedVod(seed: _featuredSeed);
+        final featured = poolFeatured.isNotEmpty
+            ? poolFeatured
+            : <VodItem>[
+                ...liveMovies.take(4),
+                ...series.take(2),
+                ...anime.take(1),
+              ]
+                  .where((v) => v.backdrop.isNotEmpty || v.poster.isNotEmpty)
+                  .take(6)
+                  .toList();
 
         final showHero = _quickFilter == 'Todo';
         final showLive = _quickFilter == 'Todo' || _quickFilter == 'En Vivo';
@@ -172,9 +181,7 @@ class _HomeTabState extends State<HomeTab> {
         return RefreshIndicator(
           color: accent,
           backgroundColor: AppColors.elevatedSurfaceFor(context),
-          onRefresh: () async {
-            await _service.refreshLiveCatalog();
-          },
+          onRefresh: () => _refreshHomeData(shuffle: true),
           child: ListView(
             cacheExtent: 700,
             padding: const EdgeInsets.only(top: 10, bottom: 112),
@@ -184,14 +191,55 @@ class _HomeTabState extends State<HomeTab> {
                 padding: const EdgeInsets.symmetric(
                   horizontal: appPagePaddingHorizontal,
                 ),
-                child: Text(
-                  _greetingText(),
-                  key: const ValueKey('home-contextual-greeting'),
-                  style: appSectionTitleStyle(context).copyWith(
-                    fontSize: 21,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.5,
-                  ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _greetingText(),
+                        key: const ValueKey('home-contextual-greeting'),
+                        style: appSectionTitleStyle(context).copyWith(
+                          fontSize: 21,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                    ),
+                    TvFocusable(
+                      key: const ValueKey('home-refresh-recommendations-btn'),
+                      onTap: () async {
+                        await _refreshHomeData(shuffle: true);
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Recomendaciones y catálogo actualizados al instante',
+                            ),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(20),
+                      child: Tooltip(
+                        message: 'Actualizar recomendaciones',
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppColors.elevatedSurfaceFor(context),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: AppColors.cardBorderFor(context),
+                              width: 0.8,
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.refresh_rounded,
+                            size: 18,
+                            color: AppColors.contentSubtitleFor(context),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 10),

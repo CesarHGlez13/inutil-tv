@@ -4,7 +4,7 @@ class AppInfo {
   const AppInfo._();
 
   static const String appName = 'InútilTV';
-  static const String appVersion = '3.3.14';
+  static const String appVersion = '3.3.15';
   static const String creatorName = 'César';
   static const String supportEmail = 'cesarmaster133@gmail.com';
 
@@ -23,11 +23,9 @@ class AppInfo {
       'Familia Inútil · InútilTV & Inútil Music';
 
   static const List<String> whatsNewHighlights = [
-    'Control Remoto 2026: Trackpad gestual multitáctil deslizable',
-    'Keyboard Bridge: Teclado del celular escribe directo en la TV',
-    'Controles de volumen dedicados y feedback visual dinámico',
-    'Scrubbar arrastrable para posición exacta y selector de velocidad',
-    'Botones de episodio anterior y siguiente sincronizados',
-    'Indicador de Smart TV en línea con animación pulsante',
+    'Recomendaciones dinámicas tipo Spotify: riel "Especialmente para ti" y "Porque viste..." adaptativos',
+    'Rotación y refresco instantáneo de descubrimientos con botón dedicado para Smart TV y gestos móviles',
+    'Sonda de alcance y fallback automático de Relay: cero cuelgues ni fallas de Firestore fuera de casa',
+    'Aislamiento estricto de sesiones multi-dispositivo y validación de licencias reforzada',
   ];
 }

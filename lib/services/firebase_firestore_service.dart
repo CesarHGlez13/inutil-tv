@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -44,6 +45,62 @@ class InutilFirestoreService {
       if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
     };
   }
+
+  /// ¿El error es de conexión (el destino nunca respondió) o es una respuesta
+  /// HTTP con código? Sólo los de conexión activan el reintento contra Google:
+  /// un 403/429/500 sí llegó a un servidor y reintentarlo contra otro sería
+  /// ciego (y en el caso del 429 de cuota, contraproducente).
+  @visibleForTesting
+  static bool isConnectionFailure(Object error) {
+    if (error is TimeoutException) return true;
+    if (error is SocketException) return true;
+    if (error is http.ClientException) return true;
+    final text = error.toString().toLowerCase();
+    return text.contains('connection refused') ||
+        text.contains('connection reset') ||
+        text.contains('failed host lookup') ||
+        text.contains('network is unreachable') ||
+        text.contains('broken pipe') ||
+        text.contains('network unreachable');
+  }
+
+  /// Manda una petición de Firestore con red de seguridad del relay del S7.
+  ///
+  /// Si [FirebaseConfig] tenía el relay por alcanzable y la petición muere por
+  /// conexión (`Connection refused`, `SocketException`, `TimeoutException`),
+  /// se marca como caído y se reintenta UNA sola vez: en cuanto
+  /// `markRelayUnreachable()` corre, `firestoreBaseUrl` devuelve el endpoint de
+  /// Google, así que el reintento va directo a la nube sin reiniciar la app y
+  /// sin volver a tocar el relay en el resto de la sesión.
+  Future<http.Response> _sendWithRelayFallback({
+    required String label,
+    required Uri Function() urlBuilder,
+    required Future<http.Response> Function(Uri url) send,
+  }) async {
+    final relayWasUsable = FirebaseConfig.relayUsable;
+    try {
+      return await send(urlBuilder());
+    } catch (error) {
+      if (!relayWasUsable || !isConnectionFailure(error)) rethrow;
+      FirebaseConfig.markRelayUnreachable();
+      debugPrint('Relay del S7 sin respuesta en $label: '
+          'reintento directo a Google.');
+      return await send(urlBuilder());
+    }
+  }
+
+  /// Misma ayuda, expuesta para pruebas.
+  @visibleForTesting
+  Future<http.Response> sendWithRelayFallbackForTest({
+    required String label,
+    required Uri Function() urlBuilder,
+    required Future<http.Response> Function(Uri url) send,
+  }) =>
+      _sendWithRelayFallback(
+        label: label,
+        urlBuilder: urlBuilder,
+        send: send,
+      );
 
   // ---------------------------------------------------------------------------
   // 1. SERIALIZACIÓN FIRESTORE REST (Dart Map <-> Firestore Value Formats)
@@ -149,22 +206,34 @@ class InutilFirestoreService {
     String path, {
     String? overrideToken,
   }) async {
-    final url = Uri.parse('${FirebaseConfig.firestoreBaseUrl}/$path');
-    var response = await http
-        .get(url, headers: _headers(overrideToken: overrideToken))
-        .timeout(const Duration(seconds: 10));
+    var response = await _sendWithRelayFallback(
+      label: 'GET $path',
+      urlBuilder: () => Uri.parse('${FirebaseConfig.firestoreBaseUrl}/$path'),
+      send: (url) => http
+          .get(url, headers: _headers(overrideToken: overrideToken))
+          .timeout(const Duration(seconds: 10)),
+    );
     if (response.statusCode == 401 && overrideToken == null) {
       final refreshed =
           await InutilAuthService.instance.ensureFreshIdToken(force: true);
       if (refreshed) {
-        response = await http
-            .get(url, headers: _headers(overrideToken: overrideToken))
-            .timeout(const Duration(seconds: 10));
+        response = await _sendWithRelayFallback(
+          label: 'GET $path (reauth)',
+          urlBuilder: () =>
+              Uri.parse('${FirebaseConfig.firestoreBaseUrl}/$path'),
+          send: (url) => http
+              .get(url, headers: _headers(overrideToken: overrideToken))
+              .timeout(const Duration(seconds: 10)),
+        );
       }
     }
     if (response.statusCode == 404) return null;
     if (response.statusCode != 200) {
-      throw FirestoreOperationException(path, response.statusCode, response.body);
+      throw FirestoreOperationException(
+        path,
+        response.statusCode,
+        response.body,
+      );
     }
     final json = jsonDecode(response.body) as Map<String, dynamic>;
     return _decodeDocument(json);
@@ -180,26 +249,33 @@ class InutilFirestoreService {
     bool merge = true,
     String? overrideToken,
   }) async {
-    final url = buildPatchUri(path, data.keys, merge: merge);
     final body = jsonEncode(_encodeFields(data));
-    var response = await http
-        .patch(
-          url,
-          headers: _headers(overrideToken: overrideToken),
-          body: body,
-        )
-        .timeout(const Duration(seconds: 10));
+    var response = await _sendWithRelayFallback(
+      label: 'PATCH $path',
+      urlBuilder: () => buildPatchUri(path, data.keys, merge: merge),
+      send: (url) => http
+          .patch(
+            url,
+            headers: _headers(overrideToken: overrideToken),
+            body: body,
+          )
+          .timeout(const Duration(seconds: 10)),
+    );
     if (response.statusCode == 401 && overrideToken == null) {
       final refreshed =
           await InutilAuthService.instance.ensureFreshIdToken(force: true);
       if (refreshed) {
-        response = await http
-            .patch(
-              url,
-              headers: _headers(overrideToken: overrideToken),
-              body: body,
-            )
-            .timeout(const Duration(seconds: 10));
+        response = await _sendWithRelayFallback(
+          label: 'PATCH $path (reauth)',
+          urlBuilder: () => buildPatchUri(path, data.keys, merge: merge),
+          send: (url) => http
+              .patch(
+                url,
+                headers: _headers(overrideToken: overrideToken),
+                body: body,
+              )
+              .timeout(const Duration(seconds: 10)),
+        );
       }
     }
     if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -213,10 +289,13 @@ class InutilFirestoreService {
   }
 
   Future<bool> deleteDocument(String path, {String? overrideToken}) async {
-    final url = Uri.parse('${FirebaseConfig.firestoreBaseUrl}/$path');
-    final response = await http
-        .delete(url, headers: _headers(overrideToken: overrideToken))
-        .timeout(const Duration(seconds: 10));
+    final response = await _sendWithRelayFallback(
+      label: 'DELETE $path',
+      urlBuilder: () => Uri.parse('${FirebaseConfig.firestoreBaseUrl}/$path'),
+      send: (url) => http
+          .delete(url, headers: _headers(overrideToken: overrideToken))
+          .timeout(const Duration(seconds: 10)),
+    );
     return response.statusCode >= 200 && response.statusCode < 300;
   }
 
@@ -240,16 +319,20 @@ class InutilFirestoreService {
       String? pageToken;
 
       do {
-        final base = Uri.parse('${FirebaseConfig.firestoreBaseUrl}/users');
-        final url = base.replace(
-          queryParameters: {
-            'pageSize': '200',
-            if (pageToken != null && pageToken.isNotEmpty) 'pageToken': pageToken,
-          },
+        final response = await _sendWithRelayFallback(
+          label: 'LIST users',
+          urlBuilder: () =>
+              Uri.parse('${FirebaseConfig.firestoreBaseUrl}/users').replace(
+            queryParameters: {
+              'pageSize': '200',
+              if (pageToken != null && pageToken.isNotEmpty)
+                'pageToken': pageToken,
+            },
+          ),
+          send: (url) => http
+              .get(url, headers: _headers())
+              .timeout(const Duration(seconds: 8)),
         );
-        final response = await http
-            .get(url, headers: _headers())
-            .timeout(const Duration(seconds: 8));
         if (response.statusCode != 200) {
           debugPrint(
             '[Firestore] getAllUsers (${response.statusCode}): '

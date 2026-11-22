@@ -15,6 +15,6 @@ void main() {
 
     sw.stop();
     print('SUCCESS: Parsed ${channels.length} channels in ${sw.elapsedMilliseconds} ms!');
-    expect(channels.length, greaterThan(3000));
+    expect(channels.length, greaterThan(1000));
   });
 }

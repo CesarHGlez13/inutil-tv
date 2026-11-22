@@ -1,5 +1,19 @@
 # Changelog — InútilTV
 
+## 3.3.15 — 2026-11-22
+- **Recomendaciones Dinámicas y Personalizadas al Estilo Spotify:**
+  - Incorporado motor de recomendación en `XuperService` con secciones contextuales: `Especialmente para ti` (basado en géneros favoritos y títulos guardados en Mi Lista sin duplicar vistos) y `Porque viste [Título]` (conectando el último título visto con películas, series y anime similares).
+  - Sección rotatoria de `Descubrimientos de la Semana` que re-semilla el catálogo para que la zona de inicio nunca sea estática.
+  - Rotación dinámica del Hero Carousel (`getFeaturedVod(seed)`) en cada inicio o refresco.
+  - Botón de actualización rápida en el encabezado de Inicio para mando a distancia en Smart TV / Android TV y compatibilidad total con gesto pull-to-refresh en teléfonos móviles.
+- **Sonda de Alcance y Fallback Automático del Relay S7 (Compatible con Inútil Music):**
+  - Implementado `probeRelayReachability()` en `FirebaseConfig` y `_sendWithRelayFallback()` en `InutilFirestoreService`.
+  - Cuando la app se compila con `--dart-define=FB_RELAY_HOST=192.168.100.27`, la app sondea la IP del relay por TCP en 1.2s; si el usuario se encuentra fuera de la red local o el relay no responde, conmuta limpiamente a Google Cloud sin colgar peticiones ni fallar el manifiesto de OTA.
+  - Reintento transparente ante caídas del servidor local a mitad de sesión con `markRelayUnreachable()`.
+- **Aislamiento Multi-dispositivo y Seguridad por Rol:**
+  - Estandarizado `InutilUser.isAdmin => role == 'admin'` eliminando bypasses hardcodeados.
+  - Mensajes descriptivos de bloqueo por dispositivo activo (`"Otro dispositivo (Smart TV)..."` / `"Otro dispositivo (celular)..."`).
+
 ## 3.3.14 — 2026-11-19
 - **Todo se reproduce en la Smart TV cuando el destino es la TV:**
   - Creado `services/play_target.dart`, compuerta única de «Destino: TV». Antes solo el modal de detalle consultaba la preferencia, así que el botón **Reproducir** del hero, «Seguir viendo», las tarjetas de canales y los resultados de búsqueda abrían el reproductor del teléfono aunque tuvieras la TV seleccionada.
