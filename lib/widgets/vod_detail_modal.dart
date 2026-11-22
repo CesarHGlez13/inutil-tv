@@ -24,7 +24,8 @@ import 'tv_remote_sheet.dart';
 /// Tolerante con comas europeas, vacío y basura ⇒ 0. Pública y sin contexto
 /// para poder probarla sin widget (test/v3_3_19_cinematic_header_test.dart).
 double starsFromRating(String rating) {
-  final score = (double.tryParse(rating.replaceAll(',', '.')) ?? 0).clamp(0.0, 10.0);
+  final score =
+      (double.tryParse(rating.replaceAll(',', '.')) ?? 0).clamp(0.0, 10.0);
   return score / 2;
 }
 
@@ -124,9 +125,8 @@ class _VodDetailModalState extends State<VodDetailModal>
   /// y sólo si el sistema no pide reducir animaciones.
   AnimationController? _reveal;
 
-  bool get _reduceMotion =>
-      WidgetsBinding.instance.platformDispatcher.accessibilityFeatures
-          .disableAnimations;
+  bool get _reduceMotion => WidgetsBinding
+      .instance.platformDispatcher.accessibilityFeatures.disableAnimations;
 
   /// Alto del lienzo: la referencia deja el arte en ~55% de la pantalla con el
   /// rótulo dentro. Aquí 46% del alto, recortado a 640 px para que en paneles
@@ -134,6 +134,22 @@ class _VodDetailModalState extends State<VodDetailModal>
   double _heroHeight(BuildContext context) {
     final h = MediaQuery.sizeOf(context).height;
     return (h * 0.46).clamp(300.0, 640.0);
+  }
+
+  /// v3.3.20 — Fracción de colapso de la cabecera (0 = lienzo expandido,
+  /// 1 = barra anclada). `FlexibleSpaceBarSettings` es el InheritedWidget que el
+  /// delegate de `SliverAppBar` publica en cada frame de scroll, así que basta
+  /// con depender de él para animar el fade del arte y el crossfade del rótulo
+  /// sin un controller propio. Sin `SliverAppBar` alrededor devuelve 0.
+  double _collapseFraction(BuildContext context) {
+    final settings =
+        context.dependOnInheritedWidgetOfExactType<FlexibleSpaceBarSettings>();
+    if (settings == null) return 0.0;
+    final delta = settings.maxExtent - settings.minExtent;
+    if (delta <= 0) return 0.0;
+    return ((settings.maxExtent - settings.currentExtent) / delta)
+        .clamp(0.0, 1.0)
+        .toDouble();
   }
 
   /// Envuelve el arte con el fade-in desde negro + deriva de escala.
@@ -506,759 +522,853 @@ class _VodDetailModalState extends State<VodDetailModal>
 
         return ClipRRect(
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          child: ListView(
+          child: CustomScrollView(
             controller: widget.scrollController,
-            padding: EdgeInsets.zero,
-            children: [
-              // Cabecera Backdrop HD
-              Stack(
-                children: [
-                  SizedBox(
-                    height: heroH,
-                    width: double.infinity,
-                    child: _revealed(
-                      context,
-                      _headerStills(item).length >= 2
-                          // Canvas en vivo (v3.3.18): la cabecera del detalle rota
-                          // los stills reales de la obra, igual que el héroe.
-                          ? LiveCanvasPreview(
-                              title: item.title,
-                              posterUrl: item.poster,
-                              backdropUrl: image,
-                              stills: _headerStills(item),
-                              active: true,
-                              radius: 0,
-                            )
-                          : image.isNotEmpty
-                              ? FastArtwork(
-                                  url: image,
-                                  tier: ArtworkTier.backdrop,
-                                  cacheWidth: 900,
-                                  fit: BoxFit.cover,
-                                  errorWidget: ColoredBox(color: surface),
-                                )
-                              : ColoredBox(color: surface),
-                    ),
-                  ),
-                  Positioned.fill(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.black.withValues(alpha: 0.10),
-                            Colors.transparent,
-                            Colors.black.withValues(alpha: 0.42),
-                            sheetBg,
-                          ],
-                          stops: const [0.0, 0.42, 0.74, 1.0],
+            slivers: [
+              // ── Cabecera (v3.3.20): SliverAppBar pinned — Collapsing Toolbar.
+              // El lienzo sube y baja con parallax, y la barra de arriba queda
+              // anclada con el rótulo y los iconos fijos (X y remoto), igual que
+              // en las capturas de Black Clover.
+              SliverAppBar(
+                pinned: true,
+                // primary:false ⇒ topPadding 0 y maxExtent == heroH exacto; el
+                // modal vive dentro de un sheet, no bajo la barra de estado.
+                primary: false,
+                expandedHeight: heroH,
+                collapsedHeight: kToolbarHeight,
+                centerTitle: true,
+                backgroundColor: sheetBg,
+                // Rótulo anclado: nace invisible y gana opacidad al colapsar,
+                // mientras el rótulo grande del lienzo hace el crossfade inverso.
+                title: Builder(
+                  builder: (context) {
+                    final k = _collapseFraction(context);
+                    return Opacity(
+                      opacity: Curves.easeIn
+                          .transform(((k - 0.45) / 0.55).clamp(0.0, 1.0)),
+                      child: Text(
+                        item.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: appTabTitleStyle(context).copyWith(
+                          fontSize: TvModeService.of(context) ? 26.0 : 18.0,
+                          fontWeight: FontWeight.w900,
+                          color: headingColor,
                         ),
                       ),
+                    );
+                  },
+                ),
+                // Iconos fijos de la barra anclada (v3.3.20): el remoto y la X
+                // vivían dentro del lienzo; ahora van en `actions`, que es lo
+                // que los mantiene en su sitio cuando la cabecera se encoge.
+                // La X sigue a la izquierda (como siempre en la app) y el remoto
+                // a la derecha: ambos van en la barra ANCLADA, que es lo que los
+                // deja en su sitio cuando la cabecera se encoge.
+                leading: CircleAvatar(
+                  backgroundColor: Colors.black.withValues(alpha: 0.62),
+                  radius: 18,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    tooltip: 'Cerrar',
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: Colors.white,
+                      size: 20,
                     ),
+                    onPressed: () => Navigator.of(context).pop(),
                   ),
-                  Align(
-                    alignment: Alignment.topCenter,
-                    child: Container(
-                      margin: const EdgeInsets.only(top: 10),
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.4),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
+                ),
+                actions: [
                   if (!TvModeService.of(context) &&
                       TvRemoteService.instance.isTvOnline)
-                    Positioned(
-                      top: 12,
-                      right: 56,
-                      child: CircleAvatar(
-                        backgroundColor: Colors.black.withValues(alpha: 0.62),
-                        radius: 18,
-                        child: IconButton(
-                          padding: EdgeInsets.zero,
-                          tooltip: 'Control remoto Smart TV',
-                          icon: const Icon(
-                            Icons.settings_remote_rounded,
-                            color: Color(0xFF18C75A),
-                            size: 19,
-                          ),
-                          onPressed: () => TvRemoteSheet.show(context),
-                        ),
-                      ),
-                    ),
-                  Positioned(
-                    top: 12,
-                    right: 12,
-                    child: CircleAvatar(
+                    CircleAvatar(
                       backgroundColor: Colors.black.withValues(alpha: 0.62),
                       radius: 18,
                       child: IconButton(
                         padding: EdgeInsets.zero,
+                        tooltip: 'Control remoto Smart TV',
                         icon: const Icon(
-                          Icons.close_rounded,
-                          color: Colors.white,
-                          size: 20,
+                          Icons.settings_remote_rounded,
+                          color: Color(0xFF18C75A),
+                          size: 19,
                         ),
-                        onPressed: () => Navigator.of(context).pop(),
+                        onPressed: () => TvRemoteSheet.show(context),
                       ),
                     ),
-                  ),
-                  // Rótulo dentro del lienzo (v3.3.19): la referencia mete el
-                  // logo de la obra SOBRE el arte, centrado y con un bloom que
-                  // lo sostiene. Los proveedores no publican logo real (verificado
-                  // contra el `__NEXT_DATA__` de PoseidonHD2: cero campos de logo),
-                  // así que lo sostiene la tipografía display de la app, agrandada.
-                  Positioned(
-                    left: 24,
-                    right: 24,
-                    bottom: 78,
-                    child: Center(
-                      child: Text(
-                        item.title,
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: appTabTitleStyle(context).copyWith(
-                          fontSize: TvModeService.of(context) ? 46 : 31,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: TvModeService.of(context) ? -1.0 : -0.65,
-                          color: Colors.white,
-                          shadows: const [
-                            Shadow(
-                              blurRadius: 28,
-                              color: Colors.black87,
-                              offset: Offset(0, 3),
-                            ),
-                            Shadow(blurRadius: 10, color: Colors.black54),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  // Botones primarios sobrios (Blanco puro + vidrio + Descarga offline)
-                  Positioned(
-                    bottom: 12,
-                    left: 16,
-                    right: 16,
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: ListenableBuilder(
-                        listenable: TvRemoteService.instance,
-                        builder: (context, _) {
-                          final tvOnline = !TvModeService.of(context) &&
-                              TvRemoteService.instance.isTvOnline;
-                          final playOnTv = !TvModeService.of(context) &&
-                              TvRemoteService.instance.playOnTv;
-
-                          String mainLabel;
-                          if (playOnTv) {
-                            mainLabel = canResume
-                                ? (item.isSeries
-                                    ? 'Ver T${saved.seasonNumber}·E${saved.episodeNumber} en TV'
-                                    : 'Continuar en TV')
-                                : 'Reproducir en TV';
-                          } else {
-                            mainLabel = canResume
-                                ? (item.isSeries
-                                    ? 'Continuar T${saved.seasonNumber}·E${saved.episodeNumber}'
-                                    : 'Continuar')
-                                : (movieDl?.isCompleted == true
-                                    ? 'Ver sin conexión'
-                                    : 'Reproducir');
-                          }
-
-                          return Row(
-                            children: [
-                              TvFocusable(
-                                autofocus: TvModeService.of(context),
-                                onTap: _playMainAction,
-                                borderRadius: BorderRadius.circular(24),
-                                focusColor: const Color(0xFF38BDF8),
-                                focusScale: 1.05,
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: playOnTv
-                                        ? const Color(0xFF18C75A)
-                                        : AppColors.playbackPrimaryBackground,
-                                    borderRadius: BorderRadius.circular(24),
-                                    boxShadow: playOnTv
-                                        ? [
-                                            BoxShadow(
-                                              color: const Color(0xFF18C75A)
-                                                  .withValues(alpha: 0.35),
-                                              blurRadius: 10,
-                                              offset: const Offset(0, 3),
-                                            ),
-                                          ]
-                                        : null,
-                                  ),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 18,
-                                    vertical: 11,
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        playOnTv
-                                            ? Icons.cast_connected_rounded
-                                            : Icons.play_arrow_rounded,
-                                        color: playOnTv
-                                            ? Colors.black
-                                            : AppColors
-                                                .playbackPrimaryForeground,
-                                        size: 21,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        mainLabel,
-                                        style: TextStyle(
-                                          color: playOnTv
-                                              ? Colors.black
-                                              : AppColors
-                                                  .playbackPrimaryForeground,
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: 13.5,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              if (tvOnline) ...[
-                                const SizedBox(width: 10),
-                                // Selector táctil persistente de destino: Móvil vs TV
-                                Container(
-                                  decoration: BoxDecoration(
-                                    color:
-                                        AppColors.elevatedSurfaceFor(context),
-                                    borderRadius: BorderRadius.circular(24),
-                                    border: Border.all(
-                                      color: playOnTv
-                                          ? const Color(0xFF18C75A)
-                                              .withValues(alpha: 0.6)
-                                          : AppColors.cardBorderFor(context),
-                                      width: 1.2,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      InkWell(
-                                        borderRadius:
-                                            const BorderRadius.horizontal(
-                                                left: Radius.circular(24)),
-                                        onTap: () async {
-                                          await TvRemoteService.instance
-                                              .setPlayOnTv(false);
-                                          unawaited(TvRemoteService.instance
-                                              .sendPause());
-                                          if (context.mounted) {
-                                            ScaffoldMessenger.of(context)
-                                                .showSnackBar(
-                                              const SnackBar(
-                                                content: Text(
-                                                  '📱 Cambiado a ver en Móvil (Smart TV pausada)',
-                                                ),
-                                                duration: Duration(seconds: 2),
-                                              ),
-                                            );
-                                          }
-                                        },
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 11, vertical: 7),
-                                          decoration: BoxDecoration(
-                                            color: !playOnTv
-                                                ? AppColors.accentFor(context)
-                                                    .withValues(alpha: 0.2)
-                                                : Colors.transparent,
-                                            borderRadius:
-                                                const BorderRadius.horizontal(
-                                                    left: Radius.circular(24)),
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(
-                                                Icons.smartphone_rounded,
-                                                size: 15,
-                                                color: !playOnTv
-                                                    ? AppColors.accentFor(
-                                                        context)
-                                                    : AppColors
-                                                        .contentSubtitleFor(
-                                                            context),
-                                              ),
-                                              const SizedBox(width: 4),
-                                              Text(
-                                                'Móvil',
-                                                style: TextStyle(
-                                                  fontSize: 11.5,
-                                                  fontWeight: FontWeight.w700,
-                                                  color: !playOnTv
-                                                      ? AppColors.accentFor(
-                                                          context)
-                                                      : AppColors
-                                                          .contentSubtitleFor(
-                                                              context),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                      InkWell(
-                                        borderRadius:
-                                            const BorderRadius.horizontal(
-                                                right: Radius.circular(24)),
-                                        onTap: () async {
-                                          await TvRemoteService.instance
-                                              .setPlayOnTv(true);
-                                          if (context.mounted) {
-                                            ScaffoldMessenger.of(context)
-                                                .showSnackBar(
-                                              const SnackBar(
-                                                content: Text(
-                                                  '📺 Conexión persistente: Ahora se reproducirá en Smart TV',
-                                                ),
-                                                duration: Duration(seconds: 2),
-                                              ),
-                                            );
-                                          }
-                                        },
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 11, vertical: 7),
-                                          decoration: BoxDecoration(
-                                            color: playOnTv
-                                                ? const Color(0xFF18C75A)
-                                                    .withValues(alpha: 0.25)
-                                                : Colors.transparent,
-                                            borderRadius:
-                                                const BorderRadius.horizontal(
-                                                    right: Radius.circular(24)),
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(
-                                                Icons.tv_rounded,
-                                                size: 15,
-                                                color: playOnTv
-                                                    ? const Color(0xFF18C75A)
-                                                    : AppColors
-                                                        .contentSubtitleFor(
-                                                            context),
-                                              ),
-                                              const SizedBox(width: 4),
-                                              Text(
-                                                'TV',
-                                                style: TextStyle(
-                                                  fontSize: 11.5,
-                                                  fontWeight: FontWeight.w800,
-                                                  color: playOnTv
-                                                      ? const Color(0xFF18C75A)
-                                                      : AppColors
-                                                          .contentSubtitleFor(
-                                                              context),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                              const SizedBox(width: 10),
-                              OutlinedButton.icon(
-                                onPressed: () async {
-                                  final added = await _myList.toggle(item);
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                          added
-                                              ? 'Agregado a Mi Lista'
-                                              : 'Quitado de Mi Lista',
-                                        ),
-                                        duration: const Duration(seconds: 1),
-                                      ),
-                                    );
-                                  }
-                                },
-                                icon: Icon(
-                                  inMyList
-                                      ? Icons.bookmark_added_rounded
-                                      : Icons.bookmark_add_outlined,
-                                  color: inMyList ? accent : Colors.white,
-                                  size: 18,
-                                ),
-                                label: Text(
-                                  inMyList ? 'En Mi Lista' : 'Mi Lista',
-                                  style: TextStyle(
-                                    color: inMyList ? accent : Colors.white,
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 12.5,
-                                  ),
-                                ),
-                                style: OutlinedButton.styleFrom(
-                                  backgroundColor:
-                                      Colors.black.withValues(alpha: 0.56),
-                                  side: BorderSide(
-                                    color: inMyList
-                                        ? accent.withValues(alpha: 0.7)
-                                        : Colors.white.withValues(alpha: 0.25),
-                                  ),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 15,
-                                    vertical: 11,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(24),
-                                  ),
-                                ),
-                              ),
-                              if (!item.isSeries) ...[
-                                const SizedBox(width: 10),
-                                _buildMovieDownloadButton(
-                                  context,
-                                  item,
-                                  movieDl,
-                                  accent,
-                                ),
-                              ],
-                            ],
-                          );
-                        },
-                      ),
-                    ),
-                  ),
                 ],
-              ),
-
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    // Fila de estrellas de la referencia (v3.3.19), centrada.
-                    if (hasRealRating) _starsRow(context, item.rating),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      alignment: WrapAlignment.center,
-                      children: [
-                        if (item.year.isNotEmpty) _metaChip(context, item.year),
-                        if (item.duration.isNotEmpty)
-                          _metaChip(context, item.duration),
-                        if (item.isSeries)
-                          _metaChip(
-                            context,
-                            item.isAnime ? 'Anime' : 'Serie',
-                          ),
-                        if (item.isSeries && _episodes.isNotEmpty)
-                          _metaChip(context, '${_episodes.length} episodios'),
-                      ],
-                    ),
-                    if (item.genre.isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        item.genre
-                            .replaceAll(RegExp(r'^[🎬📺⚡🔥🎞️✨🧸]+\s*'), ''),
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: subColor,
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
+                flexibleSpace: FlexibleSpaceBar(
+                  // Parallax nativo: el arte sube más despacio que el scroll y
+                  // se recorta al encogerse el contenedor.
+                  collapseMode: CollapseMode.parallax,
+                  background: Stack(
+                    children: [
+                      SizedBox(
+                        height: heroH,
+                        width: double.infinity,
+                        child: _revealed(
+                          context,
+                          _headerStills(item).length >= 2
+                              // Canvas en vivo (v3.3.18) con la ROTACIÓN apagada
+                              // en la app (v3.3.20): los stills del proveedor son
+                              // w300 de TMDB y en un lienzo de este tamaño se ven
+                              // borrosos, así que `active: false` deja el lienzo
+                              // base estático (tier backdrop, alta calidad) y el
+                              // motor de rotación sigue intacto para datos buenos.
+                              ? LiveCanvasPreview(
+                                  title: item.title,
+                                  posterUrl: item.poster,
+                                  backdropUrl: image,
+                                  stills: _headerStills(item),
+                                  active: false,
+                                  radius: 0,
+                                )
+                              : image.isNotEmpty
+                                  ? FastArtwork(
+                                      url: image,
+                                      tier: ArtworkTier.backdrop,
+                                      cacheWidth: 900,
+                                      fit: BoxFit.cover,
+                                      errorWidget: ColoredBox(color: surface),
+                                    )
+                                  : ColoredBox(color: surface),
                         ),
                       ),
-                    ],
-                    const SizedBox(height: 16),
-                    Text(
-                      'Sinopsis',
-                      textAlign: TextAlign.center,
-                      style: appListCardTitleStyle(context),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      item.overview.isNotEmpty
-                          ? item.overview
-                          : 'Título disponible en alta definición con cambio automático de servidor en InútilTV.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: headingColor.withValues(alpha: 0.8),
-                        fontSize: 13.5,
-                        height: 1.48,
-                      ),
-                    ),
-                    if (item.isSeries) ...[
-                      const SizedBox(height: 22),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                'Episodios',
-                                style: appSectionTitleStyle(context),
-                              ),
-                              if (_loadingEpisodes) ...[
-                                const SizedBox(width: 10),
-                                SizedBox(
-                                  width: 15,
-                                  height: 15,
-                                  child: CircularProgressIndicator(
-                                    color: accent,
-                                    strokeWidth: 2,
-                                  ),
-                                ),
+                      Positioned.fill(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.black.withValues(alpha: 0.10),
+                                Colors.transparent,
+                                Colors.black.withValues(alpha: 0.42),
+                                sheetBg,
                               ],
-                            ],
-                          ),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (seasonEpisodes.isNotEmpty)
-                                TextButton.icon(
-                                  key: const ValueKey('vod-batch-download-btn'),
-                                  onPressed: () => _showBatchDownloadSheet(
-                                    context,
-                                    seasonEpisodes,
-                                  ),
-                                  style: TextButton.styleFrom(
-                                    foregroundColor: accent,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 6,
-                                    ),
-                                    minimumSize: Size.zero,
-                                    tapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                  ),
-                                  icon: InutilIcon(
-                                    InutilGlyph.download,
-                                    size: 16,
-                                    color: accent,
-                                  ),
-                                  label: const Text(
-                                    'Descargar',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ),
-                              if (seasons.length > 1) ...[
-                                const SizedBox(width: 4),
-                                DropdownButton<int>(
-                                  value: seasons.contains(_selectedSeason)
-                                      ? _selectedSeason
-                                      : seasons.first,
-                                  dropdownColor: surface,
-                                  underline: const SizedBox.shrink(),
-                                  icon: Icon(
-                                    Icons.keyboard_arrow_down_rounded,
-                                    color: accent,
-                                  ),
-                                  style: TextStyle(
-                                    color: accent,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 13,
-                                  ),
-                                  items: [
-                                    for (final s in seasons)
-                                      DropdownMenuItem(
-                                        value: s,
-                                        child: Text('Temporada $s'),
-                                      ),
-                                  ],
-                                  onChanged: (val) {
-                                    if (val != null) {
-                                      setState(() {
-                                        _selectedSeason = val;
-                                        _episodeChunkIndex = 0;
-                                      });
-                                    }
-                                  },
-                                ),
-                              ],
-                            ],
-                          ),
-                        ],
-                      ),
-                      // Píldoras horizontales de Temporada (acceso inmediato en móvil y TV)
-                      if (seasons.length > 1) ...[
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          height: 34,
-                          child: ListView.builder(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: seasons.length,
-                            itemBuilder: (_, idx) {
-                              final s = seasons[idx];
-                              final active = s == _selectedSeason;
-                              return TvFocusable(
-                                onTap: () => setState(() {
-                                  _selectedSeason = s;
-                                  _episodeChunkIndex = 0;
-                                }),
-                                borderRadius: BorderRadius.circular(14),
-                                margin: const EdgeInsets.only(right: 8),
-                                child: AnimatedContainer(
-                                  duration: const Duration(milliseconds: 160),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 13,
-                                  ),
-                                  alignment: Alignment.center,
-                                  decoration: BoxDecoration(
-                                    color: active ? accent : surface,
-                                    borderRadius: BorderRadius.circular(14),
-                                    border: Border.all(
-                                      color: active ? accent : border,
-                                      width: 0.85,
-                                    ),
-                                  ),
-                                  child: Text(
-                                    'T$s',
-                                    style: TextStyle(
-                                      color: active ? onAccent : subColor,
-                                      fontSize: 12,
-                                      fontWeight: active
-                                          ? FontWeight.w800
-                                          : FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                        if (_item.seasonLabelFor(_selectedSeason) != null &&
-                            _item.seasonLabelFor(_selectedSeason) !=
-                                _item.title) ...[
-                          const SizedBox(height: 6),
-                          Text(
-                            _item.seasonLabelFor(_selectedSeason)!,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: subColor,
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w600,
+                              stops: const [0.0, 0.42, 0.74, 1.0],
                             ),
                           ),
-                        ],
-                      ],
-                      if (totalChunks > 1) ...[
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          height: 32,
-                          child: ListView.builder(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: totalChunks,
-                            itemBuilder: (_, idx) {
-                              final start = idx * _pageChunk + 1;
-                              final end = ((idx + 1) * _pageChunk)
-                                  .clamp(1, seasonEpisodes.length);
-                              final active = idx == safeChunk;
-                              return TvFocusable(
-                                onTap: () =>
-                                    setState(() => _episodeChunkIndex = idx),
-                                borderRadius: BorderRadius.circular(14),
-                                margin: const EdgeInsets.only(right: 8),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                  ),
-                                  alignment: Alignment.center,
-                                  decoration: BoxDecoration(
-                                    color: active ? accent : surface,
-                                    borderRadius: BorderRadius.circular(14),
-                                    border: Border.all(
-                                      color: active ? accent : border,
-                                      width: 0.8,
-                                    ),
-                                  ),
-                                  child: Text(
-                                    'Ep. $start–$end',
-                                    style: TextStyle(
-                                      color: active ? onAccent : subColor,
-                                      fontSize: 11.5,
-                                      fontWeight: active
-                                          ? FontWeight.w800
-                                          : FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
                         ),
-                      ],
-                      const SizedBox(height: 10),
-                      if (visibleEpisodes.isEmpty && !_loadingEpisodes)
-                        Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: surface,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: border),
-                          ),
-                          child: Text(
-                            'Pulsa Reproducir arriba para iniciar desde el Episodio 1.',
-                            style: appListCardSubtitleStyle(context),
-                          ),
-                        )
-                      else
-                        Column(
-                          children: [
-                            for (final ep in visibleEpisodes)
-                              _buildEpisodeTile(
-                                context,
-                                ep,
-                                _episodes.indexOf(ep),
-                              ),
-                          ],
-                        ),
-                    ],
-                    if (widget.recommendations.isNotEmpty) ...[
-                      const SizedBox(height: 24),
-                      Text(
-                        'Títulos Similares',
-                        style: appSectionTitleStyle(context),
                       ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        height: 224,
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: widget.recommendations.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(width: 12),
-                          itemBuilder: (_, idx) {
-                            final sim = widget.recommendations[idx];
-                            return PosterCard(
-                              item: sim,
-                              width: 118,
-                              height: 174,
-                              onTap: () {
-                                Navigator.of(context).pop();
-                                widget.onSelectSimilar?.call(sim);
-                              },
+                      Positioned.fill(
+                        child: Builder(
+                          builder: (context) => ColoredBox(
+                            // Fade-out del lienzo al colapsar (v3.3.20): el arte
+                            // se desvanece hacia el color de la hoja mientras el
+                            // rótulo sube anclado, que es lo que piden las
+                            // capturas de referencia.
+                            color: sheetBg.withValues(
+                              alpha: 0.92 *
+                                  Curves.easeIn
+                                      .transform(_collapseFraction(context)),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Align(
+                        alignment: Alignment.topCenter,
+                        child: Builder(
+                          builder: (context) {
+                            // La píldora del sheet se apaga al anclarse: ese
+                            // hueco de arriba pasa a ser del rótulo anclado
+                            // (así en la referencia).
+                            return Opacity(
+                              opacity: (1.0 - _collapseFraction(context) * 3.2)
+                                  .clamp(0.0, 1.0),
+                              child: Container(
+                                margin: const EdgeInsets.only(top: 10),
+                                width: 40,
+                                height: 4,
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.4),
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
                             );
                           },
                         ),
                       ),
+                      // Rótulo dentro del lienzo (v3.3.19): la referencia mete el
+                      // logo de la obra SOBRE el arte, centrado y con un bloom que
+                      // lo sostiene. Los proveedores no publican logo real (verificado
+                      // contra el `__NEXT_DATA__` de PoseidonHD2: cero campos de logo),
+                      // así que lo sostiene la tipografía display de la app, agrandada.
+                      Positioned(
+                        left: 24,
+                        right: 24,
+                        bottom: 78,
+                        child: Center(
+                          child: Text(
+                            item.title,
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: appTabTitleStyle(context).copyWith(
+                              fontSize: TvModeService.of(context) ? 46 : 31,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing:
+                                  TvModeService.of(context) ? -1.0 : -0.65,
+                              color: Colors.white,
+                              shadows: const [
+                                Shadow(
+                                  blurRadius: 28,
+                                  color: Colors.black87,
+                                  offset: Offset(0, 3),
+                                ),
+                                Shadow(blurRadius: 10, color: Colors.black54),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      // Botones primarios sobrios (Blanco puro + vidrio + Descarga offline)
+                      Positioned(
+                        bottom: 12,
+                        left: 16,
+                        right: 16,
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: ListenableBuilder(
+                            listenable: TvRemoteService.instance,
+                            builder: (context, _) {
+                              final tvOnline = !TvModeService.of(context) &&
+                                  TvRemoteService.instance.isTvOnline;
+                              final playOnTv = !TvModeService.of(context) &&
+                                  TvRemoteService.instance.playOnTv;
+
+                              String mainLabel;
+                              if (playOnTv) {
+                                mainLabel = canResume
+                                    ? (item.isSeries
+                                        ? 'Ver T${saved.seasonNumber}·E${saved.episodeNumber} en TV'
+                                        : 'Continuar en TV')
+                                    : 'Reproducir en TV';
+                              } else {
+                                mainLabel = canResume
+                                    ? (item.isSeries
+                                        ? 'Continuar T${saved.seasonNumber}·E${saved.episodeNumber}'
+                                        : 'Continuar')
+                                    : (movieDl?.isCompleted == true
+                                        ? 'Ver sin conexión'
+                                        : 'Reproducir');
+                              }
+
+                              return Row(
+                                children: [
+                                  TvFocusable(
+                                    autofocus: TvModeService.of(context),
+                                    onTap: _playMainAction,
+                                    borderRadius: BorderRadius.circular(24),
+                                    focusColor: const Color(0xFF38BDF8),
+                                    focusScale: 1.05,
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: playOnTv
+                                            ? const Color(0xFF18C75A)
+                                            : AppColors
+                                                .playbackPrimaryBackground,
+                                        borderRadius: BorderRadius.circular(24),
+                                        boxShadow: playOnTv
+                                            ? [
+                                                BoxShadow(
+                                                  color: const Color(0xFF18C75A)
+                                                      .withValues(alpha: 0.35),
+                                                  blurRadius: 10,
+                                                  offset: const Offset(0, 3),
+                                                ),
+                                              ]
+                                            : null,
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 18,
+                                        vertical: 11,
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            playOnTv
+                                                ? Icons.cast_connected_rounded
+                                                : Icons.play_arrow_rounded,
+                                            color: playOnTv
+                                                ? Colors.black
+                                                : AppColors
+                                                    .playbackPrimaryForeground,
+                                            size: 21,
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            mainLabel,
+                                            style: TextStyle(
+                                              color: playOnTv
+                                                  ? Colors.black
+                                                  : AppColors
+                                                      .playbackPrimaryForeground,
+                                              fontWeight: FontWeight.w800,
+                                              fontSize: 13.5,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  if (tvOnline) ...[
+                                    const SizedBox(width: 10),
+                                    // Selector táctil persistente de destino: Móvil vs TV
+                                    Container(
+                                      decoration: BoxDecoration(
+                                        color: AppColors.elevatedSurfaceFor(
+                                            context),
+                                        borderRadius: BorderRadius.circular(24),
+                                        border: Border.all(
+                                          color: playOnTv
+                                              ? const Color(0xFF18C75A)
+                                                  .withValues(alpha: 0.6)
+                                              : AppColors.cardBorderFor(
+                                                  context),
+                                          width: 1.2,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          InkWell(
+                                            borderRadius:
+                                                const BorderRadius.horizontal(
+                                                    left: Radius.circular(24)),
+                                            onTap: () async {
+                                              await TvRemoteService.instance
+                                                  .setPlayOnTv(false);
+                                              unawaited(TvRemoteService.instance
+                                                  .sendPause());
+                                              if (context.mounted) {
+                                                ScaffoldMessenger.of(context)
+                                                    .showSnackBar(
+                                                  const SnackBar(
+                                                    content: Text(
+                                                      '📱 Cambiado a ver en Móvil (Smart TV pausada)',
+                                                    ),
+                                                    duration:
+                                                        Duration(seconds: 2),
+                                                  ),
+                                                );
+                                              }
+                                            },
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 11,
+                                                      vertical: 7),
+                                              decoration: BoxDecoration(
+                                                color: !playOnTv
+                                                    ? AppColors.accentFor(
+                                                            context)
+                                                        .withValues(alpha: 0.2)
+                                                    : Colors.transparent,
+                                                borderRadius: const BorderRadius
+                                                    .horizontal(
+                                                    left: Radius.circular(24)),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    Icons.smartphone_rounded,
+                                                    size: 15,
+                                                    color: !playOnTv
+                                                        ? AppColors.accentFor(
+                                                            context)
+                                                        : AppColors
+                                                            .contentSubtitleFor(
+                                                                context),
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    'Móvil',
+                                                    style: TextStyle(
+                                                      fontSize: 11.5,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      color: !playOnTv
+                                                          ? AppColors.accentFor(
+                                                              context)
+                                                          : AppColors
+                                                              .contentSubtitleFor(
+                                                                  context),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                          InkWell(
+                                            borderRadius:
+                                                const BorderRadius.horizontal(
+                                                    right: Radius.circular(24)),
+                                            onTap: () async {
+                                              await TvRemoteService.instance
+                                                  .setPlayOnTv(true);
+                                              if (context.mounted) {
+                                                ScaffoldMessenger.of(context)
+                                                    .showSnackBar(
+                                                  const SnackBar(
+                                                    content: Text(
+                                                      '📺 Conexión persistente: Ahora se reproducirá en Smart TV',
+                                                    ),
+                                                    duration:
+                                                        Duration(seconds: 2),
+                                                  ),
+                                                );
+                                              }
+                                            },
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 11,
+                                                      vertical: 7),
+                                              decoration: BoxDecoration(
+                                                color: playOnTv
+                                                    ? const Color(0xFF18C75A)
+                                                        .withValues(alpha: 0.25)
+                                                    : Colors.transparent,
+                                                borderRadius: const BorderRadius
+                                                    .horizontal(
+                                                    right: Radius.circular(24)),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    Icons.tv_rounded,
+                                                    size: 15,
+                                                    color: playOnTv
+                                                        ? const Color(
+                                                            0xFF18C75A)
+                                                        : AppColors
+                                                            .contentSubtitleFor(
+                                                                context),
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    'TV',
+                                                    style: TextStyle(
+                                                      fontSize: 11.5,
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                      color: playOnTv
+                                                          ? const Color(
+                                                              0xFF18C75A)
+                                                          : AppColors
+                                                              .contentSubtitleFor(
+                                                                  context),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                  const SizedBox(width: 10),
+                                  OutlinedButton.icon(
+                                    onPressed: () async {
+                                      final added = await _myList.toggle(item);
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              added
+                                                  ? 'Agregado a Mi Lista'
+                                                  : 'Quitado de Mi Lista',
+                                            ),
+                                            duration:
+                                                const Duration(seconds: 1),
+                                          ),
+                                        );
+                                      }
+                                    },
+                                    icon: Icon(
+                                      inMyList
+                                          ? Icons.bookmark_added_rounded
+                                          : Icons.bookmark_add_outlined,
+                                      color: inMyList ? accent : Colors.white,
+                                      size: 18,
+                                    ),
+                                    label: Text(
+                                      inMyList ? 'En Mi Lista' : 'Mi Lista',
+                                      style: TextStyle(
+                                        color: inMyList ? accent : Colors.white,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 12.5,
+                                      ),
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      backgroundColor:
+                                          Colors.black.withValues(alpha: 0.56),
+                                      side: BorderSide(
+                                        color: inMyList
+                                            ? accent.withValues(alpha: 0.7)
+                                            : Colors.white
+                                                .withValues(alpha: 0.25),
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 15,
+                                        vertical: 11,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(24),
+                                      ),
+                                    ),
+                                  ),
+                                  if (!item.isSeries) ...[
+                                    const SizedBox(width: 10),
+                                    _buildMovieDownloadButton(
+                                      context,
+                                      item,
+                                      movieDl,
+                                      accent,
+                                    ),
+                                  ],
+                                ],
+                              );
+                            },
+                          ),
+                        ),
+                      ),
                     ],
-                  ],
+                  ),
                 ),
+              ),
+
+              SliverList(
+                delegate: SliverChildListDelegate([
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        // Fila de estrellas de la referencia (v3.3.19), centrada.
+                        if (hasRealRating) _starsRow(context, item.rating),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          alignment: WrapAlignment.center,
+                          children: [
+                            if (item.year.isNotEmpty)
+                              _metaChip(context, item.year),
+                            if (item.duration.isNotEmpty)
+                              _metaChip(context, item.duration),
+                            if (item.isSeries)
+                              _metaChip(
+                                context,
+                                item.isAnime ? 'Anime' : 'Serie',
+                              ),
+                            if (item.isSeries && _episodes.isNotEmpty)
+                              _metaChip(
+                                  context, '${_episodes.length} episodios'),
+                          ],
+                        ),
+                        if (item.genre.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            item.genre.replaceAll(
+                                RegExp(r'^[🎬📺⚡🔥🎞️✨🧸]+\s*'), ''),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: subColor,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 16),
+                        Text(
+                          'Sinopsis',
+                          textAlign: TextAlign.center,
+                          style: appListCardTitleStyle(context),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          item.overview.isNotEmpty
+                              ? item.overview
+                              : 'Título disponible en alta definición con cambio automático de servidor en InútilTV.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: headingColor.withValues(alpha: 0.8),
+                            fontSize: 13.5,
+                            height: 1.48,
+                          ),
+                        ),
+                        if (item.isSeries) ...[
+                          const SizedBox(height: 22),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Text(
+                                    'Episodios',
+                                    style: appSectionTitleStyle(context),
+                                  ),
+                                  if (_loadingEpisodes) ...[
+                                    const SizedBox(width: 10),
+                                    SizedBox(
+                                      width: 15,
+                                      height: 15,
+                                      child: CircularProgressIndicator(
+                                        color: accent,
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (seasonEpisodes.isNotEmpty)
+                                    TextButton.icon(
+                                      key: const ValueKey(
+                                          'vod-batch-download-btn'),
+                                      onPressed: () => _showBatchDownloadSheet(
+                                        context,
+                                        seasonEpisodes,
+                                      ),
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: accent,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 6,
+                                        ),
+                                        minimumSize: Size.zero,
+                                        tapTargetSize:
+                                            MaterialTapTargetSize.shrinkWrap,
+                                      ),
+                                      icon: InutilIcon(
+                                        InutilGlyph.download,
+                                        size: 16,
+                                        color: accent,
+                                      ),
+                                      label: const Text(
+                                        'Descargar',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ),
+                                  if (seasons.length > 1) ...[
+                                    const SizedBox(width: 4),
+                                    DropdownButton<int>(
+                                      value: seasons.contains(_selectedSeason)
+                                          ? _selectedSeason
+                                          : seasons.first,
+                                      dropdownColor: surface,
+                                      underline: const SizedBox.shrink(),
+                                      icon: Icon(
+                                        Icons.keyboard_arrow_down_rounded,
+                                        color: accent,
+                                      ),
+                                      style: TextStyle(
+                                        color: accent,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 13,
+                                      ),
+                                      items: [
+                                        for (final s in seasons)
+                                          DropdownMenuItem(
+                                            value: s,
+                                            child: Text('Temporada $s'),
+                                          ),
+                                      ],
+                                      onChanged: (val) {
+                                        if (val != null) {
+                                          setState(() {
+                                            _selectedSeason = val;
+                                            _episodeChunkIndex = 0;
+                                          });
+                                        }
+                                      },
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ],
+                          ),
+                          // Píldoras horizontales de Temporada (acceso inmediato en móvil y TV)
+                          if (seasons.length > 1) ...[
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              height: 34,
+                              child: ListView.builder(
+                                scrollDirection: Axis.horizontal,
+                                itemCount: seasons.length,
+                                itemBuilder: (_, idx) {
+                                  final s = seasons[idx];
+                                  final active = s == _selectedSeason;
+                                  return TvFocusable(
+                                    onTap: () => setState(() {
+                                      _selectedSeason = s;
+                                      _episodeChunkIndex = 0;
+                                    }),
+                                    borderRadius: BorderRadius.circular(14),
+                                    margin: const EdgeInsets.only(right: 8),
+                                    child: AnimatedContainer(
+                                      duration:
+                                          const Duration(milliseconds: 160),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 13,
+                                      ),
+                                      alignment: Alignment.center,
+                                      decoration: BoxDecoration(
+                                        color: active ? accent : surface,
+                                        borderRadius: BorderRadius.circular(14),
+                                        border: Border.all(
+                                          color: active ? accent : border,
+                                          width: 0.85,
+                                        ),
+                                      ),
+                                      child: Text(
+                                        'T$s',
+                                        style: TextStyle(
+                                          color: active ? onAccent : subColor,
+                                          fontSize: 12,
+                                          fontWeight: active
+                                              ? FontWeight.w800
+                                              : FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                            if (_item.seasonLabelFor(_selectedSeason) != null &&
+                                _item.seasonLabelFor(_selectedSeason) !=
+                                    _item.title) ...[
+                              const SizedBox(height: 6),
+                              Text(
+                                _item.seasonLabelFor(_selectedSeason)!,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: subColor,
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ],
+                          if (totalChunks > 1) ...[
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              height: 32,
+                              child: ListView.builder(
+                                scrollDirection: Axis.horizontal,
+                                itemCount: totalChunks,
+                                itemBuilder: (_, idx) {
+                                  final start = idx * _pageChunk + 1;
+                                  final end = ((idx + 1) * _pageChunk)
+                                      .clamp(1, seasonEpisodes.length);
+                                  final active = idx == safeChunk;
+                                  return TvFocusable(
+                                    onTap: () => setState(
+                                        () => _episodeChunkIndex = idx),
+                                    borderRadius: BorderRadius.circular(14),
+                                    margin: const EdgeInsets.only(right: 8),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                      ),
+                                      alignment: Alignment.center,
+                                      decoration: BoxDecoration(
+                                        color: active ? accent : surface,
+                                        borderRadius: BorderRadius.circular(14),
+                                        border: Border.all(
+                                          color: active ? accent : border,
+                                          width: 0.8,
+                                        ),
+                                      ),
+                                      child: Text(
+                                        'Ep. $start–$end',
+                                        style: TextStyle(
+                                          color: active ? onAccent : subColor,
+                                          fontSize: 11.5,
+                                          fontWeight: active
+                                              ? FontWeight.w800
+                                              : FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 10),
+                          if (visibleEpisodes.isEmpty && !_loadingEpisodes)
+                            Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: surface,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: border),
+                              ),
+                              child: Text(
+                                'Pulsa Reproducir arriba para iniciar desde el Episodio 1.',
+                                style: appListCardSubtitleStyle(context),
+                              ),
+                            )
+                          else
+                            Column(
+                              children: [
+                                for (final ep in visibleEpisodes)
+                                  _buildEpisodeTile(
+                                    context,
+                                    ep,
+                                    _episodes.indexOf(ep),
+                                  ),
+                              ],
+                            ),
+                        ],
+                        if (widget.recommendations.isNotEmpty) ...[
+                          const SizedBox(height: 24),
+                          Text(
+                            'Títulos Similares',
+                            style: appSectionTitleStyle(context),
+                          ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            height: 224,
+                            child: ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: widget.recommendations.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(width: 12),
+                              itemBuilder: (_, idx) {
+                                final sim = widget.recommendations[idx];
+                                return PosterCard(
+                                  item: sim,
+                                  width: 118,
+                                  height: 174,
+                                  onTap: () {
+                                    Navigator.of(context).pop();
+                                    widget.onSelectSimilar?.call(sim);
+                                  },
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ]),
               ),
             ],
           ),

@@ -248,7 +248,10 @@ class _PosterCardState extends State<PosterCard> {
                 posterUrl: item.poster,
                 backdropUrl: item.backdrop,
                 stills: item.highlightStills,
-                active: true,
+                // v3.3.20 — Cesar frena la rotación: los stills son `w300` y a
+                // este tamaño se ven borrosos. Queda el lienzo base estático
+                // (póster `poster`, nitidez nativa) con su velo de vidrio.
+                active: false,
                 // El velo de vidrio de la tarjeta va encima: que no lo pinte dos.
                 showOverlay: false,
                 radius: appArtworkRadius - 0.5,

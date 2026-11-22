@@ -1,5 +1,15 @@
 # Changelog — InútilTV
 
+## 3.3.20 — 2026-11-22
+- **Canvas con calidad fija (petición directa de Cesar):** la rotación en vivo del `LiveCanvasPreview` se apaga en los tres sitios donde se usaba —carrusel héroe, tarjetas del catálogo y cabecera del detalle (`active: false`)—. Motivo medido: los stills que publica el proveedor llegan a `w300` de TMDB, y en un lienzo grande (46% de pantalla) se ven borrosos; el arte fijo sí va por la ruta de alta calidad (`FastArtwork` tier backdrop, `cacheWidth: 900`). El motor de rotación queda intacto y sigue animando cuando se le alimentan stills de calidad (test de v3.3.18 en verde), y se conserva el efecto que sí se ve bien: el velo de vidrio, la entrada con fade/deriva y el parallax.
+- **Collapsing Toolbar en el modal de detalle** (lo que pedía la referencia de Black Clover: `CollapsingToolbarLayout` / `SliverAppBar` con `pinned`):
+  - El detalle pasa de `ListView` a `CustomScrollView` con un `SliverAppBar(pinned: true)` de `expandedHeight: heroH` y `collapsedHeight: kToolbarHeight`.
+  - **El lienzo hace parallax y se desvanece** al subir (`CollapseMode.parallax` + velo dinámico que sube hasta 0.92 del color de la hoja siguiendo la fracción de colapso que publica `FlexibleSpaceBarSettings`).
+  - **El rótulo se ancla arriba:** el rótulo grande del lienzo hace crossfade hacia abajo y el de la barra superior (18 px móvil / 26 px TV) sube anclado junto a los iconos, con el crossfade inverso. La píldora del sheet se apaga para no chocar con él.
+  - **Iconos fijos:** el remoto Smart TV y la X viven ahora en `actions:` de la barra anclada, que es lo que los deja en su sitio cuando la cabecera se encoge.
+- Suite nueva `test/v3_3_20_collapsing_header_test.dart` (colapso real con drag: rótulo anclado opaco, lienzo desvanecido, píldora apagada) y ajustada `test/v3_3_19_cinematic_header_test.dart` (con la barra anclada hay dos rótulos del título, antes uno).
+
+
 ## 3.3.19 — 2026-11-22
 - **Cabecera del modal de detalle en formato lienzo cinematográfico** (diseño pedido por Cesar con 4 capturas de referencia):
   - **El arte manda:** la cabecera pasa de 248 px fijos a **46% del alto de pantalla** (recortado a 640 px), que es la proporción medida en la referencia (banda de arte ~55% contando el rótulo dentro). Antes el arte era apenas ~10% de la pantalla.

@@ -215,15 +215,18 @@ class _HeroCarouselState extends State<HeroCarousel>
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // Canvas en vivo (v3.3.18): el slide actual del héroe rota solo,
-              // como hace Spotify con los fragmentos destacados.
+              // Canvas en vivo (v3.3.18): rotaba los destacados como Spotify.
+              // v3.3.20 — Cesar lo frena: los stills son `w300` y en un área
+              // grande se ven borrosos, así que la rotación queda apagada
+              // (`active: false` ⇒ lienzo base estático, tier `backdrop`) y el
+              // carrusel vuelve al arte fijo de siempre con su Ken Burns.
               if (item.highlightStills.length >= 2)
                 LiveCanvasPreview(
                   title: item.title,
                   posterUrl: item.poster,
                   backdropUrl: image,
                   stills: item.highlightStills,
-                  active: isActive,
+                  active: false,
                   radius: 20,
                 )
               else if (image.isNotEmpty)

@@ -81,18 +81,19 @@ void main() {
   });
 
   group('v3.3.19 — versión sincronizada (pins exactos de la versión viva)', () {
-    test('pubspec.yaml en 3.3.19+68', () {
-      expect(File('pubspec.yaml').readAsStringSync(),
-          contains('version: 3.3.19+68'));
-    });
-
-    test('lib/constants/app_info.dart en 3.3.19', () {
+    // v3.3.20: los pines exactos de la versión viva viven en
+    // test/v3_3_20_collapsing_header_test.dart; aquí se comprueba la
+    // SINCRONÍA (pubspec ↔ app_info ↔ CHANGELOG), que es lo que no debe romperse
+    // al subir versión.
+    test('pubspec, app_info y CHANGELOG van sincronizados con la versión viva',
+        () {
+      final v = _pubspecSemver();
+      expect(v, isNotEmpty);
       expect(File('lib/constants/app_info.dart').readAsStringSync(),
-          contains("static const String appVersion = '3.3.19'"));
-      expect(AppInfo.appVersion, _pubspecSemver());
-    });
-
-    test('CHANGELOG.md documenta 3.3.19', () {
+          contains("static const String appVersion = '$v'"));
+      expect(AppInfo.appVersion, v);
+      expect(File('CHANGELOG.md').readAsStringSync(), contains('## $v'));
+      // La entrada de esta versión sigue documentada (fija, no dinámica).
       expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.19'));
     });
 
@@ -225,7 +226,11 @@ void main() {
           wrapTheme(Scaffold(body: VodDetailModal(item: item()))));
       await tester.pumpAndSettle();
 
-      expect(find.text('Black Clover'), findsOneWidget);
+      // v3.3.20: ahora hay DOS rótulos con el título, y es a propósito: el
+      // grande sobre el lienzo (el de siempre) y el que se ancla en la barra
+      // superior al colapsar (Collapsing Toolbar). Ninguno vive en el cuerpo
+      // del detalle, así que siguen siendo exactamente dos.
+      expect(find.text('Black Clover'), findsExactly(2));
     });
 
     testWidgets('sin rating real no hay fila de estrellas', (tester) async {
