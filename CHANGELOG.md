@@ -1,5 +1,10 @@
 # Changelog — InútilTV
 
+## 3.3.17 — 2026-11-22
+- **Miniaturas reales de episodios en Series y Anime (verificado en vivo):** SeriesKao y TioAnime no publican imagen por capítulo, así que sus fichas mostraban recuadros negros. Ahora `VodCatalogService._crossFillEpisodeStills` rellena cada episodio con su still TMDB real (`w300`) obtenido del espejo PoseidonHD2/Cuevana3 (`__NEXT_DATA__` → campo `image`), emparejando por título normalizado (mismo conjunto de palabras, ignorando conectores bilingües `and`/`y`) y por `temporada x episodio`. Verificado contra `serieskao.top/serie/rick-and-morty` (94 eps sin imagen) → PoseidonHD2 `TMDbId 60625` → `w300` HTTP 200, ~14.5 KB/imagen.
+- **Nunca un recuadro negro:** si un capítulo sigue sin still (obra sin imágenes en TMDB), la fila del episodio muestra el arte del show (backdrop → póster) bajo el velo, en lugar de un rectángulo vacío.
+- **Duración honesta por capítulo:** se eliminó el `45 min` inventado de SeriesKao/PoseidonHD2; ahora se usa la duración real cuando el proveedor la publica y, si no, la insignia de calidad (`HD`).
+
 ## 3.3.16 — 2026-11-22
 - **Carátulas HD restauradas en la búsqueda de anime:** `upgradePosterUrl` colapsaba `/thumbnail/` a `//slug.jpg` (404 medido) y las tarjetas salían con placeholder; ahora sube a la ruta HD real `.../animes/image/<slug>.jpg` (200 OK, ~40 KB medidos).
 - **Agrupación real de temporadas en Series y Anime:**

@@ -347,7 +347,10 @@ class SeriesKaoService {
         title: epTitle.isNotEmpty ? epTitle : 'Episodio $eNum',
         episodeNumber: eNum,
         seasonNumber: sNum,
-        duration: '45 min',
+        // SeriesKao no publica duración por capítulo: se deja vacía para que la
+        // UI muestre la insignia de calidad (y el completado cruzado la rellene
+        // si el proveedor alterno sí la trae).
+        duration: '',
         slug: '$slug/$sNum/$eNum',
         provider: 'serieskao',
       ));

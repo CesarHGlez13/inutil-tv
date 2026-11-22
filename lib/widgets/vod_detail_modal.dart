@@ -1231,6 +1231,18 @@ class _VodDetailModalState extends State<VodDetailModal> {
                       cacheWidth: 240,
                       fit: BoxFit.cover,
                       errorWidget: const SizedBox.shrink(),
+                    )
+                  // Sin still del capítulo: nunca un recuadro negro, se muestra
+                  // el arte del show (backdrop -> poster) bajo el velo.
+                  else if (_item.backdrop.isNotEmpty || _item.poster.isNotEmpty)
+                    FastArtwork(
+                      url: _item.backdrop.isNotEmpty
+                          ? _item.backdrop
+                          : _item.poster,
+                      tier: ArtworkTier.thumbnail,
+                      cacheWidth: 240,
+                      fit: BoxFit.cover,
+                      errorWidget: const SizedBox.shrink(),
                     ),
                   Container(color: Colors.black.withValues(alpha: 0.34)),
                   Center(

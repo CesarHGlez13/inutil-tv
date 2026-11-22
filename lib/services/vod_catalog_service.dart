@@ -64,6 +64,11 @@ class VodCatalogService {
   final Map<String, List<VodItem>> _seriesPageCache = {};
   final Map<String, List<VodItem>> _animePageCache = {};
 
+  /// Still TMDB real por título y capítulo (`"<T>x<E>" -> url w300`), tomado del
+  /// proveedor alterno que sí publica imagen por episodio. Evita recuadros
+  /// negros en fichas de Series/Anime cuyos episodios llegan sin miniatura.
+  final Map<String, Map<String, String>> _stillsByTitle = {};
+
   Future<void>? _respaldosFuture;
   List<VodItem> _copiaMovies = [];
   List<VodItem> _copiaSeries = [];
@@ -433,7 +438,10 @@ class VodCatalogService {
     try {
       if (item.provider == 'serieskao') {
         final enriched = await _serieskao.fetchDetail(item);
-        if (enriched != null) return item.mergedWith(enriched);
+        if (enriched != null) {
+          await _crossFillEpisodeStills(enriched, enriched.episodes);
+          return item.mergedWith(enriched);
+        }
       } else if (item.provider == 'poseidon') {
         final enriched = await _poseidon.fetchDetail(item);
         if (enriched != null) return item.mergedWith(enriched);
@@ -596,6 +604,54 @@ class VodCatalogService {
   ///   o solo 1 temporada, consulta al proveedor complementario y UNE los
   ///   capítulos/temporadas faltantes (sin duplicar temporada#episodio).
   Future<List<VodEpisode>> fetchEpisodes(VodItem item) async {
+    final eps = await _fetchEpisodesRaw(item);
+    if (eps.isNotEmpty) await _crossFillEpisodeStills(item, eps);
+    return eps;
+  }
+
+  /// Rellena EN SITIO las miniaturas (y la duración) de los episodios que su
+  /// proveedor no publica, usando los stills TMDB reales del espejo PoseidonHD2.
+  /// Solo se tocan `thumbnail`/`duration`: `provider` y `slug` se conservan
+  /// porque la resolución de fuentes por episodio depende de ellos.
+  Future<void> _crossFillEpisodeStills(
+    VodItem item,
+    List<VodEpisode> eps,
+  ) async {
+    final missing = eps.where((e) => e.thumbnail.isEmpty).toList();
+    if (missing.isEmpty) return;
+    // PoseidonHD2 es la fuente de stills; si a él le faltan, nadie los tiene.
+    if (item.provider == 'poseidon') return;
+
+    final key = StreamValidator.normalizeTitle(item.title);
+    final map = _stillsByTitle[key] ??
+        await _poseidon.fetchStillsMapForTitle(
+          item.title,
+          isSeries: item.isSeries,
+        );
+    _stillsByTitle[key] = map;
+    if (map.isEmpty) return;
+
+    for (var i = 0; i < eps.length; i++) {
+      final e = eps[i];
+      if (e.thumbnail.isNotEmpty) continue;
+      final thumb = map['${e.seasonNumber}x${e.episodeNumber}'];
+      if (thumb == null || thumb.isEmpty) continue;
+      eps[i] = VodEpisode(
+        id: e.id,
+        title: e.title,
+        episodeNumber: e.episodeNumber,
+        seasonNumber: e.seasonNumber,
+        overview: e.overview,
+        duration: e.duration,
+        thumbnail: thumb,
+        sources: e.sources,
+        slug: e.slug,
+        provider: e.provider,
+      );
+    }
+  }
+
+  Future<List<VodEpisode>> _fetchEpisodesRaw(VodItem item) async {
     if (item.episodes.isNotEmpty) return item.episodes;
 
     // 1. Anime en SeriesKao (Latino + multi-temporada nativa) -> respaldo JKAnime/TioAnime

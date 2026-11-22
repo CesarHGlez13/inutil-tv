@@ -174,6 +174,78 @@ class CuevanaPoseidonService {
     return episodes;
   }
 
+  /// Mapa `"<temporada>x<episodio>" -> still TMDB` (`w300`) para un título.
+  ///
+  /// Los espejos PoseidonHD2/Cuevana3 publican la imagen real de cada capítulo
+  /// (campo `image` en `__NEXT_DATA__`), así que este mapa se usa para dar
+  /// miniatura a episodios de proveedores que no publican imagen por capítulo
+  /// (SeriesKao, PelisFlix). Devuelve vacío si el título no aparece en el espejo.
+  Future<Map<String, String>> fetchStillsMapForTitle(
+    String title, {
+    bool isSeries = true,
+  }) async {
+    final clean = title.trim();
+    if (clean.isEmpty) return const {};
+
+    final hits = await search(clean);
+    if (hits.isEmpty) return const {};
+
+    final match = pickStillsMatch(hits, clean, isSeries: isSeries);
+    if (match == null) return const {};
+
+    final detail = await fetchDetail(match);
+    final eps = detail?.episodes ?? const <VodEpisode>[];
+    return {
+      for (final e in eps)
+        if (e.thumbnail.isNotEmpty)
+          '${e.seasonNumber}x${e.episodeNumber}': e.thumbnail,
+    };
+  }
+
+  /// Palabras que cambian entre idiomas/títulos y no ayudan a identificar la obra.
+  static const Set<String> _stopTokens = {
+    'and', 'y', 'the', 'el', 'la', 'los', 'las', 'un', 'una', 'de', 'del',
+    'le', 'a', 'of', 'en',
+  };
+
+  /// Elige el candidato del espejo que corresponde a la MISMA obra. Exige que el
+  /// conjunto de palabras coincida (ignorando conectores bilingües) para no
+  /// rellenar miniaturas con el arte de otra obra parecida (p. ej. «Rick y
+  /// Morty: El Anime» no debe ganar sobre «Rick and Morty»).
+  @visibleForTesting
+  VodItem? pickStillsMatch(List<VodItem> hits, String title,
+      {required bool isSeries}) {
+    Set<String> tokensFor(String s) => StreamValidator.normalizeTitle(s)
+        .split(RegExp(r'\s+'))
+        .where((t) => t.isNotEmpty && !_stopTokens.contains(t))
+        .toSet();
+
+    final target = tokensFor(title);
+    if (target.isEmpty) return null;
+
+    VodItem? best;
+    var bestScore = 0.0;
+    for (final h in hits) {
+      final t = tokensFor(h.title);
+      if (t.isEmpty) continue;
+      final inter = t.intersection(target).length;
+      double score;
+      if (t.length == target.length && inter == t.length) {
+        score = 1.0; // mismo conjunto de palabras
+      } else if (inter == target.length || inter == t.length) {
+        score = 0.85; // uno contiene al otro
+      } else {
+        score = inter / t.length;
+      }
+      if (h.isSeries == isSeries) score += 0.1;
+      if (score > bestScore) {
+        bestScore = score;
+        best = h;
+      }
+    }
+    return bestScore >= 0.9 ? best : null;
+  }
+
   /// Resuelve TODAS las fuentes de reproducción válidas para una película o episodio,
   /// validando bytes reales de video (Vidara HLS + Doodstream MP4) antes de devolverlas.
   Future<List<StreamSource>> resolveAllStreamSources(
@@ -864,13 +936,16 @@ class CuevanaPoseidonService {
         final title = (e['title'] ?? 'Episodio $eNum').toString().trim();
         final thumb = _optimizeTmdbImage((e['image'] ?? '').toString(), 'w300');
         final epUrlSlug = (e['url'] is Map ? e['url']['slug'] : '')?.toString() ?? '';
+        // Duración real si el espejo la publica; '' => la UI muestra la
+        // insignia de calidad en lugar de inventar un número.
+        final runtimeMin = _runtimeMinutes(e['runtime'] ?? e['duration']);
 
         episodes.add(VodEpisode(
           id: 'cp_ep_${itemSlug}_${sNum}x$eNum',
           title: title.isNotEmpty ? title : 'Episodio $eNum',
           episodeNumber: eNum,
           seasonNumber: sNum,
-          duration: '45 min',
+          duration: runtimeMin != null ? '$runtimeMin min' : '',
           thumbnail: thumb,
           slug: epUrlSlug.isNotEmpty ? epUrlSlug : '$itemSlug/seasons/$sNum/episodes/$eNum',
           provider: 'poseidon',
@@ -906,6 +981,23 @@ class CuevanaPoseidonService {
     final base = _detailPathFor(item);
     if (base == null) return null;
     return '$base/temporada/${ep.seasonNumber}/episodio/${ep.episodeNumber}';
+  }
+
+  /// Minutos reales de un episodio a partir de `runtime`/`duration` del JSON
+  /// del espejo (número o ISO-8601 tipo `PT0H22M00S`). `null` si no viene.
+  static int? _runtimeMinutes(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is num) return raw.toInt() > 0 ? raw.toInt() : null;
+    final s = raw.toString().trim();
+    if (s.isEmpty) return null;
+    final iso = RegExp(r'P(?:\d+D)?T?(?:(\d+)H)?(?:(\d+)M)?').firstMatch(s);
+    if (iso != null && (iso.group(1) != null || iso.group(2) != null)) {
+      final mins = int.tryParse(iso.group(1) ?? '0')! * 60 +
+          int.tryParse(iso.group(2) ?? '0')!;
+      return mins > 0 ? mins : null;
+    }
+    final plain = int.tryParse(s.replaceAll(RegExp(r'[^0-9]'), ''));
+    return (plain != null && plain > 0 && plain < 600) ? plain : null;
   }
 
   static String _optimizeTmdbImage(String raw, String size) {
