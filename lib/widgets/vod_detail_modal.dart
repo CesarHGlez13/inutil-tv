@@ -15,6 +15,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_ui.dart';
 import '../theme/inutil_icons.dart';
 import 'fast_artwork.dart';
+import 'live_canvas_preview.dart';
 import 'poster_card.dart';
 import 'tv_focusable.dart';
 import 'tv_remote_sheet.dart';
@@ -116,6 +117,13 @@ class _VodDetailModalState extends State<VodDetailModal> {
   int _selectedSeason = 1;
   int _episodeChunkIndex = 0;
   List<VodEpisode> _episodes = [];
+
+  /// Stills para el canvas en vivo de la cabecera (v3.3.18): los que trajo el
+  /// catálogo y, si viene vacío, los de los episodios cargados — que son los
+  /// stills TMDB reales que el relleno cruzado de v3.3.17 deja en `thumbnail`.
+  List<String> _headerStills(VodItem item) => item.highlightStills.isNotEmpty
+      ? item.highlightStills
+      : VodItem.selectHighlightStills(_episodes);
   bool _loadingEpisodes = false;
   int _requestToken = 0;
 
@@ -451,15 +459,26 @@ class _VodDetailModalState extends State<VodDetailModal> {
                   SizedBox(
                     height: 248,
                     width: double.infinity,
-                    child: image.isNotEmpty
-                        ? FastArtwork(
-                            url: image,
-                            tier: ArtworkTier.backdrop,
-                            cacheWidth: 900,
-                            fit: BoxFit.cover,
-                            errorWidget: ColoredBox(color: surface),
+                    child: _headerStills(item).length >= 2
+                        // Canvas en vivo (v3.3.18): la cabecera del detalle rota
+                        // los stills reales de la obra, igual que el héroe.
+                        ? LiveCanvasPreview(
+                            title: item.title,
+                            posterUrl: item.poster,
+                            backdropUrl: image,
+                            stills: _headerStills(item),
+                            active: true,
+                            radius: 0,
                           )
-                        : ColoredBox(color: surface),
+                        : image.isNotEmpty
+                            ? FastArtwork(
+                                url: image,
+                                tier: ArtworkTier.backdrop,
+                                cacheWidth: 900,
+                                fit: BoxFit.cover,
+                                errorWidget: ColoredBox(color: surface),
+                              )
+                            : ColoredBox(color: surface),
                   ),
                   Positioned.fill(
                     child: DecoratedBox(

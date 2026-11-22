@@ -1,5 +1,11 @@
 # Changelog — InútilTV
 
+## 3.3.18 — 2026-11-22
+
+- **Canvas en vivo estilo Spotify (`LiveCanvasPreview`).** Al enfocar una tarjeta con el mando —o manteniendo pulsado en el teléfono— la carátula deja de estar quieta y rota por los stills reales de la obra con crossfade lento y deriva Ken Burns, rematada por el velo de vidrio. El carrusel héroe y la cabecera del modal de detalle lo hacen en autoplay.
+- **Datos:** campo nuevo `highlightStills` en `VodItem`, rellenado con los stills TMDB por episodio que el relleno cruzado de v3.3.17 ya resuelve. El selector `selectHighlightStills` es puro y determinista (dedupe de URLs, orden por temporada/episodio y reparto 1º / ~⅓ / ~⅔ / último, máx 4), así la rotación es estable entre sesiones; viaja en `toJson`/`fromJson` y se preserva en los merges.
+- **Costo acotado:** un solo `AnimationController` por instancia, creado perezosamente y sólo mientras hay algo que animar (en grillas eso es ~1 tarjeta, porque el foco del mando es exclusivo); las imágenes pasan por `FastArtwork` (RAM LRU → disco LRU), así que los stills ya vistos no se descargan dos veces; sin stills cae en el arte generado, nunca un recuadro negro.
+
 ## 3.3.17 — 2026-11-22
 - **Miniaturas reales de episodios en Series y Anime (verificado en vivo):** SeriesKao y TioAnime no publican imagen por capítulo, así que sus fichas mostraban recuadros negros. Ahora `VodCatalogService._crossFillEpisodeStills` rellena cada episodio con su still TMDB real (`w300`) obtenido del espejo PoseidonHD2/Cuevana3 (`__NEXT_DATA__` → campo `image`), emparejando por título normalizado (mismo conjunto de palabras, ignorando conectores bilingües `and`/`y`) y por `temporada x episodio`. Verificado contra `serieskao.top/serie/rick-and-morty` (94 eps sin imagen) → PoseidonHD2 `TMDbId 60625` → `w300` HTTP 200, ~14.5 KB/imagen.
 - **Nunca un recuadro negro:** si un capítulo sigue sin still (obra sin imágenes en TMDB), la fila del episodio muestra el arte del show (backdrop → póster) bajo el velo, en lugar de un rectángulo vacío.

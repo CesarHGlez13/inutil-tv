@@ -9,6 +9,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_ui.dart';
 import 'dynamic_poster_canvas.dart';
 import 'fast_artwork.dart';
+import 'live_canvas_preview.dart';
 import 'tv_focusable.dart';
 
 /// Carrusel Hero editorial de InútilTV v3.2.1 — optimizado para 120 FPS:
@@ -214,7 +215,18 @@ class _HeroCarouselState extends State<HeroCarousel>
           child: Stack(
             fit: StackFit.expand,
             children: [
-              if (image.isNotEmpty)
+              // Canvas en vivo (v3.3.18): el slide actual del héroe rota solo,
+              // como hace Spotify con los fragmentos destacados.
+              if (item.highlightStills.length >= 2)
+                LiveCanvasPreview(
+                  title: item.title,
+                  posterUrl: item.poster,
+                  backdropUrl: image,
+                  stills: item.highlightStills,
+                  active: isActive,
+                  radius: 20,
+                )
+              else if (image.isNotEmpty)
                 AnimatedBuilder(
                   animation: _kenBurns,
                   builder: (context, child) {

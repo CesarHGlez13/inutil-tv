@@ -241,6 +241,13 @@ class VodItem {
   /// temporada como una entrada independiente con su propio slug).
   final List<VodSeasonRef> seasonRefs;
 
+  /// Stills reales de «momentos destacados» (TMDB `w300`) que alimentan el
+  /// canvas en vivo estilo Spotify de [LiveCanvasPreview] (v3.3.18). Los elige
+  /// de forma determinista `VodCatalogService.pickHighlightStills` a partir de
+  /// los stills ya resueltos por el relleno cruzado de v3.3.17; vacío => el
+  /// canvas cae en el arte generado (`DynamicPosterCanvas`).
+  final List<String> highlightStills;
+
   const VodItem({
     required this.id,
     required this.title,
@@ -262,6 +269,7 @@ class VodItem {
     this.episodeCount = 0,
     this.genrePath = '',
     this.seasonRefs = const [],
+    this.highlightStills = const [],
   });
 
   List<int> get seasons {
@@ -335,6 +343,9 @@ class VodItem {
       episodeCount: merged.length > episodeCount ? merged.length : episodeCount,
       genrePath: genrePath,
       seasonRefs: seasonRefs,
+      highlightStills: highlightStills.isNotEmpty
+          ? highlightStills
+          : selectHighlightStills(merged),
     );
   }
 
@@ -445,6 +456,7 @@ class VodItem {
       genrePath:
           withEps.genrePath.isNotEmpty ? withEps.genrePath : sibling.genrePath,
       seasonRefs: mergedRefs,
+      highlightStills: withEps.highlightStills,
     );
   }
 
@@ -466,13 +478,22 @@ class VodItem {
         slug: other.slug.isNotEmpty ? other.slug : slug,
         provider: other.provider.isNotEmpty ? other.provider : provider,
         quality: other.quality.isNotEmpty ? other.quality : quality,
-        seasonCount: other.seasonCount > seasonCount ? other.seasonCount : seasonCount,
-        episodeCount: other.episodeCount > episodeCount ? other.episodeCount : episodeCount,
+        seasonCount:
+            other.seasonCount > seasonCount ? other.seasonCount : seasonCount,
+        episodeCount: other.episodeCount > episodeCount
+            ? other.episodeCount
+            : episodeCount,
         genrePath: other.genrePath.isNotEmpty ? other.genrePath : genrePath,
         seasonRefs: other.seasonRefs.length >= seasonRefs.length &&
                 other.seasonRefs.isNotEmpty
             ? other.seasonRefs
             : seasonRefs,
+        highlightStills: other.highlightStills.isNotEmpty
+            ? other.highlightStills
+            : (highlightStills.isNotEmpty
+                ? highlightStills
+                : selectHighlightStills(
+                    other.episodes.isNotEmpty ? other.episodes : episodes)),
       );
 
   Map<String, dynamic> toJson() => {
@@ -497,6 +518,7 @@ class VodItem {
         'episodes': episodes.map((e) => e.toJson()).toList(),
         if (seasonRefs.isNotEmpty)
           'seasonRefs': seasonRefs.map((r) => r.toJson()).toList(),
+        if (highlightStills.isNotEmpty) 'highlightStills': highlightStills,
       };
 
   factory VodItem.fromJson(Map<String, dynamic> j) => VodItem(
@@ -529,7 +551,47 @@ class VodItem {
                 ?.map((r) => VodSeasonRef.fromJson(r as Map<String, dynamic>))
                 .toList() ??
             const [],
+        highlightStills: (j['highlightStills'] as List?)
+                ?.map((e) => '$e')
+                .where((e) => e.isNotEmpty)
+                .toList() ??
+            const [],
       );
+
+  /// Stills deterministas de «momentos destacados» para el canvas en vivo
+  /// (v3.3.18). Puro y sin red: ordena los capítulos por temporada/episodio,
+  /// quita URLs repetidas y, si hay más de [max], reparte los picks a lo largo
+  /// de la obra (primero, ~⅓, ~⅔, último) en vez de tomar sólo el arranque,
+  /// igual que el canvas de Spotify no muestra siempre los mismos clips.
+  static List<String> selectHighlightStills(
+    List<VodEpisode> episodes, {
+    int max = 4,
+  }) {
+    if (episodes.isEmpty || max < 1) return const [];
+    final ordered = [...episodes]..sort((a, b) {
+        final s = a.seasonNumber.compareTo(b.seasonNumber);
+        return s != 0 ? s : a.episodeNumber.compareTo(b.episodeNumber);
+      });
+
+    final urls = <String>[];
+    final seen = <String>{};
+    for (final e in ordered) {
+      final u = e.thumbnail.trim();
+      if (u.isEmpty) continue;
+      if (seen.add(u)) urls.add(u);
+    }
+    if (urls.isEmpty) return const [];
+    if (urls.length <= max) return urls;
+    if (max == 1) return [urls.first];
+
+    final n = urls.length;
+    final picks = <String>[];
+    for (var k = 0; k < max; k++) {
+      final url = urls[(k * (n - 1) / (max - 1)).round()];
+      if (!picks.contains(url)) picks.add(url);
+    }
+    return picks;
+  }
 }
 
 /// Página de catálogo con metadatos de paginación real del proveedor.

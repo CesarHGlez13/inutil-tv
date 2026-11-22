@@ -6,6 +6,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_ui.dart';
 import 'dynamic_poster_canvas.dart';
 import 'fast_artwork.dart';
+import 'live_canvas_preview.dart';
 import 'tv_focusable.dart';
 
 /// Tarjeta editorial de póster vertical (relación estricta 2:3) de InútilTV v3.2.1.
@@ -54,6 +55,10 @@ class PosterCard extends StatefulWidget {
 class _PosterCardState extends State<PosterCard> {
   static final _emojiPrefixRe = RegExp(r'^[🎬📺⚡🔥🎞️✨🧸]+\s*');
   bool _pressed = false;
+
+  /// Activado manteniendo pulsado en el teléfono (en TV manda el foco del
+  /// mando, que ya llega por [_pressed]).
+  bool _liveHold = false;
 
   bool get _hasGenuineRating {
     final r = widget.item.rating.trim();
@@ -181,9 +186,16 @@ class _PosterCardState extends State<PosterCard> {
         borderRadius: BorderRadius.circular(appArtworkRadius),
         focusScale: 1.045,
         pressScale: 0.96,
+        onLongPress: () {
+          if (!_liveHold) setState(() => _liveHold = true);
+        },
         onFocusChange: (hasFocus) {
           if (_pressed != hasFocus) {
             setState(() => _pressed = hasFocus);
+          }
+          if (!hasFocus && _liveHold) {
+            // Al salir de foco se apaga la rotación: sólo anima lo enfocado.
+            setState(() => _liveHold = false);
           }
         },
         child: widget.width != null
@@ -199,6 +211,10 @@ class _PosterCardState extends State<PosterCard> {
     final canvasAccent = DynamicPosterCanvas.accentForTitle(item.title);
     final totalSeasons = item.seasons.length;
     final placeholderCanvas = _buildPlaceholder(context);
+
+    // Canvas en vivo (v3.3.18): en TV al enfocar la tarjeta, en el teléfono
+    // manteniendo pulsado. Sin stills reales => se queda la carátula de siempre.
+    final live = (_pressed || _liveHold) && item.highlightStills.length >= 2;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
@@ -226,14 +242,26 @@ class _PosterCardState extends State<PosterCard> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            FastArtwork(
-              url: item.poster,
-              tier: ArtworkTier.poster,
-              cacheWidth: 320,
-              fit: BoxFit.cover,
-              placeholder: placeholderCanvas,
-              errorWidget: placeholderCanvas,
-            ),
+            if (live)
+              LiveCanvasPreview(
+                title: item.title,
+                posterUrl: item.poster,
+                backdropUrl: item.backdrop,
+                stills: item.highlightStills,
+                active: true,
+                // El velo de vidrio de la tarjeta va encima: que no lo pinte dos.
+                showOverlay: false,
+                radius: appArtworkRadius - 0.5,
+              )
+            else
+              FastArtwork(
+                url: item.poster,
+                tier: ArtworkTier.poster,
+                cacheWidth: 320,
+                fit: BoxFit.cover,
+                placeholder: placeholderCanvas,
+                errorWidget: placeholderCanvas,
+              ),
 
             // Sutil degradado superior/inferior para legibilidad sin opacar la carátula
             const Positioned.fill(
