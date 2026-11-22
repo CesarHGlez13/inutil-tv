@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../services/artwork_cache_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_ui.dart';
+import 'dynamic_poster_canvas.dart';
 import 'fast_artwork.dart';
 import 'tv_focusable.dart';
 
@@ -69,11 +70,8 @@ class _PosterCardState extends State<PosterCard> {
       return widget.subtitleOverride!;
     }
     final item = widget.item;
-    final cleanGenre = item.genre
-        .replaceAll(_emojiPrefixRe, '')
-        .split('·')
-        .first
-        .trim();
+    final cleanGenre =
+        item.genre.replaceAll(_emojiPrefixRe, '').split('·').first.trim();
     if (item.year.isNotEmpty && cleanGenre.isNotEmpty) {
       return '${item.year} · $cleanGenre';
     }
@@ -119,9 +117,7 @@ class _PosterCardState extends State<PosterCard> {
         ),
         const SizedBox(height: 2),
         Text(
-          sub.isNotEmpty
-              ? sub
-              : (widget.item.isSeries ? 'Serie' : 'Película'),
+          sub.isNotEmpty ? sub : (widget.item.isSeries ? 'Serie' : 'Película'),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
@@ -200,17 +196,30 @@ class _PosterCardState extends State<PosterCard> {
   Widget _buildPosterArtwork(BuildContext context, Color accent) {
     final item = widget.item;
     final cardSurface = AppColors.elevatedSurfaceFor(context);
+    final canvasAccent = DynamicPosterCanvas.accentForTitle(item.title);
+    final totalSeasons = item.seasons.length;
+    final placeholderCanvas = _buildPlaceholder(context);
 
-    return DecoratedBox(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(appArtworkRadius),
         color: cardSurface,
         border: Border.all(
           color: _pressed
-              ? accent.withValues(alpha: 0.65)
+              ? canvasAccent.withValues(alpha: 0.85)
               : AppColors.cardBorderFor(context),
-          width: _pressed ? 1.1 : 0.75,
+          width: _pressed ? 1.3 : 0.75,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: canvasAccent.withValues(alpha: _pressed ? 0.36 : 0.12),
+            blurRadius: _pressed ? 16 : 8,
+            spreadRadius: _pressed ? 0.5 : -2,
+            offset: Offset(0, _pressed ? 6 : 4),
+          ),
+        ],
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(appArtworkRadius - 0.5),
@@ -222,7 +231,8 @@ class _PosterCardState extends State<PosterCard> {
               tier: ArtworkTier.poster,
               cacheWidth: 320,
               fit: BoxFit.cover,
-              errorWidget: _buildPlaceholder(context),
+              placeholder: placeholderCanvas,
+              errorWidget: placeholderCanvas,
             ),
 
             // Sutil degradado superior/inferior para legibilidad sin opacar la carátula
@@ -241,6 +251,14 @@ class _PosterCardState extends State<PosterCard> {
                     stops: [0.0, 0.22, 0.72, 1.0],
                   ),
                 ),
+              ),
+            ),
+
+            // Acabado de canvas dinámico (bisel luminoso + halo ambiental + destello en foco)
+            Positioned.fill(
+              child: PosterCanvasGlassOverlay(
+                accent: canvasAccent,
+                highlighted: _pressed,
               ),
             ),
 
@@ -315,6 +333,36 @@ class _PosterCardState extends State<PosterCard> {
                 ),
               ),
 
+            // Etiqueta de temporadas agrupadas en esquina inferior derecha
+            if (totalSeasons > 1)
+              Positioned(
+                bottom: 7,
+                right: 7,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2.5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xC2000000),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: canvasAccent.withValues(alpha: 0.55),
+                      width: 0.7,
+                    ),
+                  ),
+                  child: Text(
+                    '$totalSeasons Temp.',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 8,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                ),
+              ),
+
             // Indicador de reproducción al presionar
             if (_pressed)
               Container(
@@ -360,35 +408,10 @@ class _PosterCardState extends State<PosterCard> {
   }
 
   Widget _buildPlaceholder(BuildContext context) {
-    final surface = AppColors.elevatedSurfaceFor(context);
-    final subColor = AppColors.contentSubtitleFor(context);
-    return Container(
-      color: surface,
-      padding: const EdgeInsets.all(10),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.movie_outlined,
-              color: subColor.withValues(alpha: 0.45),
-              size: 28,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              widget.item.title,
-              textAlign: TextAlign.center,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: subColor.withValues(alpha: 0.8),
-                fontSize: 10.5,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
+    // T3 (v3.3.16): canvas dinámico determinista en vez del placeholder plano.
+    return DynamicPosterCanvas(
+      title: widget.item.title,
+      subtitle: _cleanSubtitle(),
     );
   }
 }

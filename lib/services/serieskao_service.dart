@@ -49,6 +49,58 @@ class SeriesKaoService {
     return _fetchCatalog(url);
   }
 
+  /// Categorías por género del propio sitio (`/generos/<slug>`). Slugs y
+  /// conteos verificados en vivo (200 OK, 24 tarjetas/pág en todas las
+  /// categorías que usa la app: accion, comedia, crimen, animacion, drama,
+  /// fantasia, aventura, dorama, ciencia-ficcion, familia, documental, belica).
+  Future<List<VodItem>> fetchGenreSeries(String slug, {int page = 1}) async {
+    final clean = slug.trim();
+    if (clean.isEmpty) return [];
+    final url = page > 1
+        ? '$baseUrl/generos/$clean?page=$page'
+        : '$baseUrl/generos/$clean';
+    return _fetchCatalog(url, includeAnime: clean == 'animacion');
+  }
+
+  /// Animes populares en Español Latino / Sub con TODAS las temporadas
+  /// unificadas en una sola ficha (`/animes/populares`, verificado 200 OK, 24/pág).
+  Future<List<VodItem>> fetchPopularAnimes({int page = 1}) async {
+    final url = page > 1
+        ? '$baseUrl/animes/populares?page=$page'
+        : '$baseUrl/animes/populares';
+    return _fetchCatalog(url, includeAnime: true, onlyAnime: true);
+  }
+
+  /// Animes recientes actualizados en Español Latino (`/animes`).
+  Future<List<VodItem>> fetchLatestAnimes({int page = 1}) async {
+    final url = page > 1 ? '$baseUrl/animes?page=$page' : '$baseUrl/animes';
+    return _fetchCatalog(url, includeAnime: true, onlyAnime: true);
+  }
+
+  /// Búsqueda exacta de animes en SeriesKao (`/search?s=...`, filtra `/anime/`).
+  Future<List<VodItem>> searchAnimes(String query) async {
+    final clean = query.trim();
+    if (clean.isEmpty) return [];
+
+    final q = Uri.encodeQueryComponent(clean);
+    var hits = await _fetchCatalog(
+      '$baseUrl/search?s=$q',
+      includeAnime: true,
+      onlyAnime: true,
+    );
+    if (hits.isEmpty) {
+      final ascii = StreamValidator.stripAccents(clean);
+      if (ascii != clean) {
+        hits = await _fetchCatalog(
+          '$baseUrl/search?s=${Uri.encodeQueryComponent(ascii)}',
+          includeAnime: true,
+          onlyAnime: true,
+        );
+      }
+    }
+    return hits;
+  }
+
   /// Búsqueda exacta de series (`/search?s=...`).
   Future<List<VodItem>> searchSeries(String query) async {
     final clean = query.trim();
@@ -67,13 +119,21 @@ class SeriesKaoService {
     return hits;
   }
 
-  Future<List<VodItem>> _fetchCatalog(String url) async {
+  Future<List<VodItem>> _fetchCatalog(
+    String url, {
+    bool includeAnime = false,
+    bool onlyAnime = false,
+  }) async {
     try {
       final res = await http
           .get(Uri.parse(url), headers: _headers)
           .timeout(const Duration(seconds: 9));
       if (res.statusCode != 200) return [];
-      return parseCatalogCards(res.body);
+      return parseCatalogCards(
+        res.body,
+        includeAnime: includeAnime,
+        onlyAnime: onlyAnime,
+      );
     } catch (e) {
       debugPrint('[SeriesKao] Catalog err ($url): $e');
       return [];
@@ -81,7 +141,11 @@ class SeriesKaoService {
   }
 
   @visibleForTesting
-  static List<VodItem> parseCatalogCards(String html) {
+  static List<VodItem> parseCatalogCards(
+    String html, {
+    bool includeAnime = false,
+    bool onlyAnime = false,
+  }) {
     final out = <VodItem>[];
     final seen = <String>{};
 
@@ -93,12 +157,17 @@ class SeriesKaoService {
     for (final m in cardMatches) {
       final block = m.group(1)!;
       final hrefMatch = RegExp(
-        r'''href=["\'](?:/serie/|https?://[^"\']+/serie/)([^"\'#/?]+)["\']''',
+        r'''href=["\'](?:/|https?://[^"\']+/)?(serie|anime)/([^"\'#/?]+)["\']''',
       ).firstMatch(block);
       if (hrefMatch == null) continue;
 
-      final slug = hrefMatch.group(1)!.trim();
-      if (slug.isEmpty || !seen.add(slug)) continue;
+      final kind = hrefMatch.group(1)!.trim();
+      final isAnimeCard = kind == 'anime';
+      if (onlyAnime && !isAnimeCard) continue;
+      if (!includeAnime && isAnimeCard) continue;
+
+      final slug = hrefMatch.group(2)!.trim();
+      if (slug.isEmpty || !seen.add('$kind/$slug')) continue;
 
       final imgMatch =
           RegExp(r'''<img[^>]+src=["\']([^"\']+)["\']''').firstMatch(block);
@@ -109,6 +178,11 @@ class SeriesKaoService {
       ).firstMatch(block);
       final yearMatch = RegExp(
         r'''class="card__year"[^>]*>(\d{4})<''',
+      ).firstMatch(block) ??
+          RegExp(r'''card__badge--year"[^>]*>(\d{4})<''').firstMatch(block);
+      final ratingMatch = RegExp(
+        r'''class="card__rating"[^>]*>.*?(\d(?:\.\d)?)<''',
+        dotAll: true,
       ).firstMatch(block);
 
       final rawTitle =
@@ -126,13 +200,15 @@ class SeriesKaoService {
           : poster;
 
       out.add(VodItem(
-        id: 'sk_s_$slug',
+        id: isAnimeCard ? 'sk_a_$slug' : 'sk_s_$slug',
         title: title,
         poster: poster,
         backdrop: backdrop,
         year: yearMatch?.group(1) ?? '',
-        genre: 'Serie · Latino / Sub',
+        genre: isAnimeCard ? 'Anime · Latino / Sub' : 'Serie · Latino / Sub',
+        rating: ratingMatch?.group(1) ?? '',
         isSeries: true,
+        isAnime: isAnimeCard,
         slug: slug,
         provider: 'serieskao',
         quality: 'HD',
@@ -143,19 +219,29 @@ class SeriesKaoService {
   }
 
   /// Obtiene detalle enriquecido (sinopsis real en español + póster HD + lista
-  /// completa de temporadas y episodios con títulos reales).
+  /// completa de temporadas y episodios con títulos reales). Soporta tanto
+  /// `/serie/<slug>` como `/anime/<slug>`.
   Future<VodItem?> fetchDetail(VodItem item) async {
     final slug = _cleanSlug(item);
     if (slug.isEmpty) return null;
 
-    if (_detailCache.containsKey(slug)) {
-      return _detailCache[slug];
+    final kind = item.isAnime ? 'anime' : 'serie';
+    final cacheKey = '$kind/$slug';
+    if (_detailCache.containsKey(cacheKey)) {
+      return _detailCache[cacheKey];
     }
 
     try {
-      final res = await http
-          .get(Uri.parse('$baseUrl/serie/$slug'), headers: _headers)
+      var res = await http
+          .get(Uri.parse('$baseUrl/$kind/$slug'), headers: _headers)
           .timeout(const Duration(seconds: 9));
+      var effectiveKind = kind;
+      if (res.statusCode != 200) {
+        effectiveKind = kind == 'anime' ? 'serie' : 'anime';
+        res = await http
+            .get(Uri.parse('$baseUrl/$effectiveKind/$slug'), headers: _headers)
+            .timeout(const Duration(seconds: 9));
+      }
       if (res.statusCode != 200) return null;
       final html = res.body;
 
@@ -182,8 +268,10 @@ class SeriesKaoService {
 
       final episodes = parseEpisodesFromHtml(html, slug: slug);
       if (episodes.isNotEmpty) {
+        _episodeCache[cacheKey] = episodes;
         _episodeCache[slug] = episodes;
       }
+      final seasonsCount = episodes.map((e) => e.seasonNumber).toSet().length;
 
       final enriched = VodItem(
         id: item.id,
@@ -192,16 +280,22 @@ class SeriesKaoService {
         backdrop: backdrop,
         overview: overview.isNotEmpty ? overview : item.overview,
         year: item.year.isNotEmpty ? item.year : (yearMatch?.group(1) ?? ''),
-        genre: item.genre.isNotEmpty ? item.genre : 'Serie · Latino / Sub',
+        genre: item.genre.isNotEmpty
+            ? item.genre
+            : (effectiveKind == 'anime'
+                ? 'Anime · Latino / Sub'
+                : 'Serie · Latino / Sub'),
         rating: item.rating,
         isSeries: true,
+        isAnime: item.isAnime || effectiveKind == 'anime',
         slug: slug,
         provider: 'serieskao',
         quality: 'HD',
         episodes: episodes,
+        seasonCount: seasonsCount > 0 ? seasonsCount : item.seasonCount,
         episodeCount: episodes.length,
       );
-      _detailCache[slug] = enriched;
+      _detailCache[cacheKey] = enriched;
       return enriched;
     } catch (e) {
       debugPrint('[SeriesKao] Detail err ($slug): $e');
@@ -209,10 +303,13 @@ class SeriesKaoService {
     }
   }
 
-  /// Carga todas las temporadas y episodios de una serie de SeriesKao.
+  /// Carga todas las temporadas y episodios de una serie o anime de SeriesKao.
   Future<List<VodEpisode>> fetchSeriesEpisodes(VodItem item) async {
     final slug = _cleanSlug(item);
     if (slug.isEmpty) return [];
+    final kind = item.isAnime ? 'anime' : 'serie';
+    final cacheKey = '$kind/$slug';
+    if (_episodeCache.containsKey(cacheKey)) return _episodeCache[cacheKey]!;
     if (_episodeCache.containsKey(slug)) return _episodeCache[slug]!;
 
     final detail = await fetchDetail(item);
@@ -284,18 +381,20 @@ class SeriesKaoService {
     }
 
     try {
+      final kind = item.isAnime ? 'anime' : 'serie';
       onStatus?.call(
         'Buscando servidores (T${episode.seasonNumber}·E${episode.episodeNumber})...',
       );
       final apiUrl =
-          '$baseUrl/api/episodio/serie/${Uri.encodeComponent(slug)}/${episode.seasonNumber}/${episode.episodeNumber}';
+          '$baseUrl/api/episodio/$kind/${Uri.encodeComponent(slug)}/${episode.seasonNumber}/${episode.episodeNumber}';
+      final referer = '$baseUrl/$kind/$slug';
       final apiRes = await http
           .get(
             Uri.parse(apiUrl),
             headers: {
               ..._headers,
               'Accept': 'application/json',
-              'Referer': '$baseUrl/serie/$slug',
+              'Referer': referer,
             },
           )
           .timeout(const Duration(seconds: 9));
@@ -317,7 +416,7 @@ class SeriesKaoService {
             Uri.parse(vidUrl),
             headers: {
               ..._headers,
-              'Referer': '$baseUrl/serie/$slug',
+              'Referer': referer,
             },
           )
           .timeout(const Duration(seconds: 9));
@@ -538,9 +637,12 @@ class SeriesKaoService {
 
   static String _cleanSlug(VodItem item) {
     if (item.slug.isNotEmpty) {
-      return item.slug.replaceFirst(RegExp(r'^/?serie/'), '').trim();
+      return item.slug.replaceFirst(RegExp(r'^/?(?:serie|anime)/'), '').trim();
     }
-    return item.id.replaceFirst('sk_s_', '').trim();
+    return item.id
+        .replaceFirst('sk_s_', '')
+        .replaceFirst('sk_a_', '')
+        .trim();
   }
 
   static String _decodeHtmlEntities(String input) {

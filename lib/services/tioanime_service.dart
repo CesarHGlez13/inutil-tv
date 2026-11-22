@@ -20,6 +20,136 @@ class TioAnimeService {
     'Accept-Language': 'es-MX,es;q=0.9',
   };
 
+  final Map<String, List<VodEpisode>> _episodeCache = {};
+
+  /// Directorio de anime de TioAnime (`/directorio?p=$page`, verificado 200 OK).
+  Future<List<VodItem>> fetchDirectory({int page = 1, String? genre}) async {
+    try {
+      final url = (genre != null && genre.isNotEmpty)
+          ? '$baseUrl/directorio?genero[]=$genre&p=$page'
+          : '$baseUrl/directorio?p=$page';
+      final res = await http
+          .get(Uri.parse(url), headers: _headers)
+          .timeout(const Duration(seconds: 9));
+      if (res.statusCode != 200) return [];
+      return parseDirectoryCards(res.body);
+    } catch (e) {
+      debugPrint('[TioAnimeService] Directory err: $e');
+      return [];
+    }
+  }
+
+  /// Búsqueda directa de anime en TioAnime (`/directorio?q=...`).
+  Future<List<VodItem>> search(String query) async {
+    final clean = query.trim();
+    if (clean.isEmpty) return [];
+    try {
+      final q = Uri.encodeQueryComponent(clean);
+      final res = await http
+          .get(Uri.parse('$baseUrl/directorio?q=$q'), headers: _headers)
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return [];
+      return parseDirectoryCards(res.body);
+    } catch (e) {
+      debugPrint('[TioAnimeService] Search err: $e');
+      return [];
+    }
+  }
+
+  /// Lista completa de episodios reales desde `/anime/<slug>` (`var episodes = [...]`).
+  Future<List<VodEpisode>> fetchEpisodes(
+    String slugOrId, {
+    int seasonNumber = 1,
+  }) async {
+    final slug = slugOrId.replaceFirst('tio_', '').trim();
+    if (slug.isEmpty) return [];
+    final cacheKey = '$slug#$seasonNumber';
+    if (_episodeCache.containsKey(cacheKey)) return _episodeCache[cacheKey]!;
+
+    try {
+      final res = await http
+          .get(Uri.parse('$baseUrl/anime/$slug'), headers: _headers)
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return [];
+
+      final m = RegExp(r'var\s+episodes\s*=\s*\[([^\]]*)\]').firstMatch(res.body);
+      if (m == null) return [];
+      final nums = m
+          .group(1)!
+          .split(',')
+          .map((s) => int.tryParse(s.trim()))
+          .whereType<int>()
+          .toSet()
+          .toList()
+        ..sort();
+      if (nums.isEmpty) return [];
+
+      final eps = [
+        for (final n in nums)
+          VodEpisode(
+            id: '$baseUrl/ver/$slug-$n',
+            title: 'Episodio $n',
+            episodeNumber: n,
+            seasonNumber: seasonNumber,
+            duration: '24 min',
+            overview: 'Episodio $n · Sub Español (TioAnime).',
+            slug: '$slug/$n',
+            provider: 'tioanime',
+          ),
+      ];
+      _episodeCache[cacheKey] = eps;
+      return eps;
+    } catch (e) {
+      debugPrint('[TioAnimeService] fetchEpisodes($slug) err: $e');
+      return [];
+    }
+  }
+
+  @visibleForTesting
+  static List<VodItem> parseDirectoryCards(String html) {
+    final out = <VodItem>[];
+    final seen = <String>{};
+    final matches = RegExp(
+      r'<article\s+class="anime"[^>]*>(.*?)</article>',
+      dotAll: true,
+    ).allMatches(html);
+
+    for (final m in matches) {
+      final block = m.group(1)!;
+      final href = RegExp(r'href="/anime/([^"]+)"').firstMatch(block)?.group(1);
+      if (href == null || href.isEmpty || !seen.add(href)) continue;
+
+      final img = RegExp(r'<img[^>]+src="([^"]+)"').firstMatch(block)?.group(1) ?? '';
+      final rawTitle = RegExp(r'<h3[^>]*class="title"[^>]*>([^<]+)</h3>')
+              .firstMatch(block)
+              ?.group(1) ??
+          href;
+      final title = rawTitle
+          .replaceAll('&amp;', '&')
+          .replaceAll('&#039;', "'")
+          .replaceAll('&quot;', '"')
+          .trim();
+      final poster = img.startsWith('http')
+          ? img
+          : (img.isNotEmpty ? '$baseUrl$img' : '');
+
+      out.add(VodItem(
+        id: 'tio_$href',
+        title: title.isNotEmpty ? title : href,
+        poster: poster,
+        backdrop: poster,
+        genre: 'Anime · Sub Español',
+        rating: '',
+        isSeries: true,
+        isAnime: true,
+        slug: href,
+        provider: 'tioanime',
+        quality: 'HD',
+      ));
+    }
+    return out;
+  }
+
   /// Resuelve fuentes MP4 verificadas para un episodio de anime por título o slug.
   Future<List<StreamSource>> resolveEpisodeFallback(
     String titleOrSlug,

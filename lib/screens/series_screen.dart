@@ -41,8 +41,23 @@ class _SeriesScreenState extends State<SeriesScreen> {
 
   static const _categories = [
     (id: 'populares', label: 'Populares HD'),
+    (id: 'tendencias', label: 'Tendencias'),
     (id: 'recientes', label: 'Recientes'),
     (id: 'estrenos', label: 'Estrenos'),
+    // Géneros de SeriesKao añadidos en v3.3.16 (slugs del propio sitio,
+    // verificados en vivo: 200 OK con 24 tarjetas por página).
+    (id: 'gen:accion', label: 'Acción'),
+    (id: 'gen:comedia', label: 'Comedia'),
+    (id: 'gen:crimen', label: 'Crimen'),
+    (id: 'gen:animacion', label: 'Animación'),
+    (id: 'gen:drama', label: 'Drama'),
+    (id: 'gen:fantasia', label: 'Fantasía'),
+    (id: 'gen:aventura', label: 'Aventura'),
+    (id: 'gen:ciencia-ficcion', label: 'Sci-Fi'),
+    (id: 'gen:dorama', label: 'Doramas'),
+    (id: 'gen:familia', label: 'Familia'),
+    (id: 'gen:documental', label: 'Documentales'),
+    (id: 'gen:belica', label: 'Bélica'),
   ];
 
   @override

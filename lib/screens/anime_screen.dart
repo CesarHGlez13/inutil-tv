@@ -295,7 +295,9 @@ class _AnimeScreenState extends State<AnimeScreen> {
               Text(
                 _isSearching
                     ? 'Resultados para "${_searchCtl.text.trim()}"'
-                    : '$_selectedGenreLabel · Sub Español',
+                    : _selectedGenrePath.startsWith('sk:')
+                        ? '$_selectedGenreLabel · Latino / Sub'
+                        : '$_selectedGenreLabel · Sub Español',
                 style: appListCardTitleStyle(context),
               ),
               Text(

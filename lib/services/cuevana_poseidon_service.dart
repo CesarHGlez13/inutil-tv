@@ -81,8 +81,17 @@ class CuevanaPoseidonService {
   }
 
   /// Obtiene series destacadas con paginación real.
-  Future<List<VodItem>> fetchSeries({int page = 1}) async {
-    final path = page > 1 ? '/series/page/$page' : '/series';
+  Future<List<VodItem>> fetchSeries({int page = 1, String? section}) async {
+    final String path;
+    if (section == 'tendencias') {
+      path = page > 1
+          ? '/series/tendencias/semana/page/$page'
+          : '/series/tendencias/semana';
+    } else if (section == 'estrenos') {
+      path = page > 1 ? '/series/estrenos/page/$page' : '/series/estrenos';
+    } else {
+      path = page > 1 ? '/series/page/$page' : '/series';
+    }
     final pageProps = await _fetchPageProps(path);
     if (pageProps == null) return [];
 

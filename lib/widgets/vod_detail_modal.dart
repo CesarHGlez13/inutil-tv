@@ -189,7 +189,13 @@ class _VodDetailModalState extends State<VodDetailModal> {
   }
 
   List<int> get _seasons {
-    if (_episodes.isEmpty) return const [1];
+    if (_episodes.isEmpty) {
+      // Agrupación por show: el modelo ya conoce las temporadas declaradas
+      // (seasonCount/entradas hermanas unidas) aunque los episodios se
+      // carguen de forma diferida. Sin esto el selector no aparece.
+      final s = _item.seasons;
+      return s.isEmpty ? const [1] : s;
+    }
     final s = _episodes.map((e) => e.seasonNumber).toSet().toList()..sort();
     return s.isEmpty ? const [1] : s;
   }
@@ -942,7 +948,9 @@ class _VodDetailModalState extends State<VodDetailModal> {
                               if (seasons.length > 1) ...[
                                 const SizedBox(width: 4),
                                 DropdownButton<int>(
-                                  value: _selectedSeason,
+                                  value: seasons.contains(_selectedSeason)
+                                      ? _selectedSeason
+                                      : seasons.first,
                                   dropdownColor: surface,
                                   underline: const SizedBox.shrink(),
                                   icon: Icon(
@@ -975,6 +983,69 @@ class _VodDetailModalState extends State<VodDetailModal> {
                           ),
                         ],
                       ),
+                      // Píldoras horizontales de Temporada (acceso inmediato en móvil y TV)
+                      if (seasons.length > 1) ...[
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: 34,
+                          child: ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: seasons.length,
+                            itemBuilder: (_, idx) {
+                              final s = seasons[idx];
+                              final active = s == _selectedSeason;
+                              return TvFocusable(
+                                onTap: () => setState(() {
+                                  _selectedSeason = s;
+                                  _episodeChunkIndex = 0;
+                                }),
+                                borderRadius: BorderRadius.circular(14),
+                                margin: const EdgeInsets.only(right: 8),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 160),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 13,
+                                  ),
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    color: active ? accent : surface,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: active ? accent : border,
+                                      width: 0.85,
+                                    ),
+                                  ),
+                                  child: Text(
+                                    'T$s',
+                                    style: TextStyle(
+                                      color: active ? onAccent : subColor,
+                                      fontSize: 12,
+                                      fontWeight: active
+                                          ? FontWeight.w800
+                                          : FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        if (_item.seasonLabelFor(_selectedSeason) != null &&
+                            _item.seasonLabelFor(_selectedSeason) !=
+                                _item.title) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            _item.seasonLabelFor(_selectedSeason)!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: subColor,
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ],
                       if (totalChunks > 1) ...[
                         const SizedBox(height: 8),
                         SizedBox(

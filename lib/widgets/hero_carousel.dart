@@ -7,6 +7,7 @@ import '../services/play_target.dart';
 import '../services/tv_remote_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_ui.dart';
+import 'dynamic_poster_canvas.dart';
 import 'fast_artwork.dart';
 import 'tv_focusable.dart';
 
@@ -230,13 +231,15 @@ class _HeroCarouselState extends State<HeroCarousel>
                     tier: ArtworkTier.backdrop,
                     cacheWidth: 860,
                     fit: BoxFit.cover,
+                    placeholder: _buildDegradado(title: item.title),
                     errorWidget: _buildFallback(
                       portada: item.poster == image ? '' : item.poster,
+                      title: item.title,
                     ),
                   ),
                 )
               else
-                _buildFallback(portada: item.poster),
+                _buildFallback(portada: item.poster, title: item.title),
 
               // Gradiente editorial suave hacia negro carbón
               DecoratedBox(
@@ -495,21 +498,25 @@ class _HeroCarouselState extends State<HeroCarousel>
 
   /// Fondo del héroe cuando la imagen no llegó: primero prueba la portada
   /// (vive en otro servidor y suele estar ya guardada en el teléfono) y si
-  /// tampoco hay portada muestra un degradado en vez de un recuadro gris.
-  Widget _buildFallback({String portada = ''}) {
+  /// tampoco hay portada muestra un canvas dinámico en vez de un recuadro gris.
+  Widget _buildFallback({String portada = '', String title = ''}) {
     if (portada.isNotEmpty) {
       return FastArtwork(
         url: portada,
         tier: ArtworkTier.poster,
         cacheWidth: 520,
         fit: BoxFit.cover,
-        errorWidget: _buildDegradado(),
+        errorWidget: _buildDegradado(title: title),
       );
     }
-    return _buildDegradado();
+    return _buildDegradado(title: title);
   }
 
-  Widget _buildDegradado() {
+  Widget _buildDegradado({String title = ''}) {
+    if (title.isNotEmpty) {
+      // T3 (v3.3.16): canvas determinista; el título ya va en el overlay.
+      return DynamicPosterCanvas(title: title, showText: false);
+    }
     final accent = AppColors.accentFor(context);
     return DecoratedBox(
       decoration: BoxDecoration(

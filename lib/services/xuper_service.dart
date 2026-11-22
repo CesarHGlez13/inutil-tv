@@ -12,6 +12,7 @@ import 'live_tv_sync_service.dart';
 import 'my_list_service.dart';
 import 'pelisflix_service.dart';
 import 'serieskao_service.dart';
+import 'vod_catalog_service.dart' show VodCatalogService;
 import 'watch_history.dart';
 
 List<Channel> _parseChannelsInIsolate(String jsonStr) {
@@ -155,13 +156,9 @@ class XuperService extends ChangeNotifier {
       ..._classicMovies,
     ];
 
-    final seenIds = <String>{};
-    final uniquePool = <VodItem>[];
-    for (final item in allItems) {
-      if (item.id.isNotEmpty && seenIds.add(item.id)) {
-        uniquePool.add(item);
-      }
-    }
+    final uniquePool = VodCatalogService.groupByShowStateless(
+      allItems.where((item) => item.id.isNotEmpty).toList(),
+    );
 
     final history = WatchHistory().items;
     final myList = MyListService.instance.items;

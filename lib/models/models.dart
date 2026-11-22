@@ -173,6 +173,38 @@ class VodEpisode {
       );
 }
 
+/// Referencia a una temporada agrupada bajo un mismo título (p. ej. JKAnime
+/// separa cada temporada en su propio slug: `kaijuu-8-gou` y
+/// `kaijuu-8-gou-2nd-season`). Permite unificar todas las temporadas en una
+/// sola tarjeta y resolver episodios por temporada al abrir la ficha.
+class VodSeasonRef {
+  final int seasonNumber;
+  final String title;
+  final String slug;
+  final String provider;
+
+  const VodSeasonRef({
+    required this.seasonNumber,
+    required this.title,
+    required this.slug,
+    this.provider = '',
+  });
+
+  Map<String, dynamic> toJson() => {
+        'seasonNumber': seasonNumber,
+        'title': title,
+        'slug': slug,
+        'provider': provider,
+      };
+
+  factory VodSeasonRef.fromJson(Map<String, dynamic> j) => VodSeasonRef(
+        seasonNumber: (j['seasonNumber'] as num?)?.toInt() ?? 1,
+        title: j['title'] as String? ?? '',
+        slug: j['slug'] as String? ?? '',
+        provider: j['provider'] as String? ?? '',
+      );
+}
+
 /// Contenido VOD (Película, Serie o Anime estilo Xuper / Netflix).
 class VodItem {
   final String id;
@@ -205,6 +237,10 @@ class VodItem {
   /// Ruta/parámetro de género del proveedor para búsquedas y filtros server-side.
   final String genrePath;
 
+  /// Referencias de temporadas agrupadas (cuando un proveedor lista cada
+  /// temporada como una entrada independiente con su propio slug).
+  final List<VodSeasonRef> seasonRefs;
+
   const VodItem({
     required this.id,
     required this.title,
@@ -225,22 +261,192 @@ class VodItem {
     this.seasonCount = 0,
     this.episodeCount = 0,
     this.genrePath = '',
+    this.seasonRefs = const [],
   });
 
   List<int> get seasons {
-    if (episodes.isEmpty) {
+    final s = <int>{
+      for (final e in episodes) e.seasonNumber,
+      for (final r in seasonRefs) r.seasonNumber,
+    }..remove(0);
+    if (s.isEmpty) {
       return [for (var i = 1; i <= (seasonCount < 1 ? 1 : seasonCount); i++) i];
     }
-    final s = episodes.map((e) => e.seasonNumber).toSet().toList();
-    s.sort();
-    if (s.length == 1 && seasonCount > 1) {
+    final list = s.toList()..sort();
+    if (list.length == 1 && seasonCount > 1) {
       return [for (var i = 1; i <= seasonCount; i++) i];
     }
-    return s;
+    return list;
+  }
+
+  /// Etiqueta corta de una temporada agrupada si el proveedor la nombró distinto.
+  String? seasonLabelFor(int season) {
+    for (final r in seasonRefs) {
+      if (r.seasonNumber == season && r.title.isNotEmpty) return r.title;
+    }
+    return null;
   }
 
   List<VodEpisode> episodesForSeason(int season) =>
       episodes.where((e) => e.seasonNumber == season).toList();
+
+  /// Agrupa entradas hermanas del MISMO show (una por temporada en el
+  /// proveedor) bajo [this]: conserva la identidad de la base y UNE los
+  /// episodios de las hermanas (dedupe por temporada#episodio). Base
+  /// inmutable; devuelve una copia. (No confundir con [mergedWith], que
+  /// reemplaza listas en lugar de unirlas.)
+  VodItem groupedWithSeasonSiblings(List<VodEpisode> siblingEpisodes) {
+    if (siblingEpisodes.isEmpty) return this;
+    final seenKeys = <String>{
+      for (final e in episodes) '${e.seasonNumber}#${e.episodeNumber}',
+    };
+    final merged = <VodEpisode>[...episodes];
+    for (final e in siblingEpisodes) {
+      final k = '${e.seasonNumber}#${e.episodeNumber}';
+      if (seenKeys.add(k)) merged.add(e);
+    }
+    merged.sort((a, b) {
+      final s = a.seasonNumber.compareTo(b.seasonNumber);
+      return s != 0 ? s : a.episodeNumber.compareTo(b.episodeNumber);
+    });
+    final seasonsSet = <int>{
+      for (final e in merged) e.seasonNumber,
+      for (final r in seasonRefs) r.seasonNumber,
+      if (seasonCount > 0) ...List.generate(seasonCount, (i) => i + 1),
+    }..remove(0);
+    return VodItem(
+      id: id,
+      title: title,
+      poster: poster,
+      backdrop: backdrop,
+      overview: overview,
+      year: year,
+      genre: genre,
+      rating: rating,
+      duration: duration,
+      isSeries: isSeries,
+      isAnime: isAnime,
+      sources: sources,
+      episodes: merged,
+      slug: slug,
+      provider: provider,
+      quality: quality,
+      seasonCount: seasonsSet.length > 1 ? seasonsSet.length : seasonCount,
+      episodeCount: merged.length > episodeCount ? merged.length : episodeCount,
+      genrePath: genrePath,
+      seasonRefs: seasonRefs,
+    );
+  }
+
+  /// Agrupa una entrada hermana completa ([sibling], p. ej. "Kaijuu 8-gou 2nd Season")
+  /// bajo [this] preservando tanto los episodios ya cargados como las referencias
+  /// de slug por temporada ([seasonRefs]) para carga diferida en el modal.
+  VodItem groupedWithSiblingItem(
+    VodItem sibling, {
+    required int baseSeasonNumber,
+    required int siblingSeasonNumber,
+  }) {
+    final refsBySlug = <String, VodSeasonRef>{};
+    if (seasonRefs.isNotEmpty) {
+      for (final r in seasonRefs) {
+        if (r.slug.isNotEmpty) refsBySlug[r.slug] = r;
+      }
+    } else if (slug.isNotEmpty) {
+      refsBySlug[slug] = VodSeasonRef(
+        seasonNumber: baseSeasonNumber < 1 ? 1 : baseSeasonNumber,
+        title: title,
+        slug: slug,
+        provider: provider,
+      );
+    }
+
+    final sameProvider = provider.isEmpty ||
+        sibling.provider.isEmpty ||
+        sibling.provider == provider;
+
+    if (sameProvider) {
+      if (sibling.seasonRefs.isNotEmpty) {
+        for (final r in sibling.seasonRefs) {
+          if (r.slug.isNotEmpty &&
+              (r.provider.isEmpty || r.provider == provider) &&
+              !refsBySlug.containsKey(r.slug)) {
+            refsBySlug[r.slug] = r;
+          }
+        }
+      } else if (sibling.slug.isNotEmpty &&
+          !refsBySlug.containsKey(sibling.slug)) {
+        var assignedSeason = siblingSeasonNumber < 1 ? 1 : siblingSeasonNumber;
+        final usedSeasons =
+            refsBySlug.values.map((r) => r.seasonNumber).toSet();
+        while (usedSeasons.contains(assignedSeason)) {
+          assignedSeason++;
+        }
+        refsBySlug[sibling.slug] = VodSeasonRef(
+          seasonNumber: assignedSeason,
+          title: sibling.title,
+          slug: sibling.slug,
+          provider: sibling.provider,
+        );
+      }
+    }
+
+    final mergedRefs = refsBySlug.values.toList()
+      ..sort((a, b) => a.seasonNumber.compareTo(b.seasonNumber));
+
+    // Re-etiquetar episodios de la hermana con su número de temporada si venían en T1
+    final siblingEps = sibling.episodes.map((e) {
+      if (e.seasonNumber == 1 && siblingSeasonNumber > 1) {
+        return VodEpisode(
+          id: e.id,
+          title: e.title,
+          episodeNumber: e.episodeNumber,
+          seasonNumber: siblingSeasonNumber,
+          overview: e.overview,
+          duration: e.duration,
+          thumbnail: e.thumbnail,
+          sources: e.sources,
+          slug: e.slug,
+          provider: e.provider,
+        );
+      }
+      return e;
+    }).toList();
+
+    final withEps = groupedWithSeasonSiblings(siblingEps);
+    final totalSeasons = {
+      ...withEps.seasons,
+      for (final r in mergedRefs) r.seasonNumber,
+    }..remove(0);
+
+    return VodItem(
+      id: withEps.id,
+      title: withEps.title,
+      poster: withEps.poster.isNotEmpty ? withEps.poster : sibling.poster,
+      backdrop:
+          withEps.backdrop.isNotEmpty ? withEps.backdrop : sibling.backdrop,
+      overview:
+          withEps.overview.isNotEmpty ? withEps.overview : sibling.overview,
+      year: withEps.year.isNotEmpty ? withEps.year : sibling.year,
+      genre: withEps.genre.isNotEmpty ? withEps.genre : sibling.genre,
+      rating: withEps.rating.isNotEmpty ? withEps.rating : sibling.rating,
+      duration:
+          withEps.duration.isNotEmpty ? withEps.duration : sibling.duration,
+      isSeries: withEps.isSeries || sibling.isSeries,
+      isAnime: withEps.isAnime || sibling.isAnime,
+      sources: withEps.sources.isNotEmpty ? withEps.sources : sibling.sources,
+      episodes: withEps.episodes,
+      slug: withEps.slug,
+      provider: withEps.provider,
+      quality: withEps.quality.isNotEmpty ? withEps.quality : sibling.quality,
+      seasonCount: totalSeasons.length > withEps.seasonCount
+          ? totalSeasons.length
+          : withEps.seasonCount,
+      episodeCount: withEps.episodeCount,
+      genrePath:
+          withEps.genrePath.isNotEmpty ? withEps.genrePath : sibling.genrePath,
+      seasonRefs: mergedRefs,
+    );
+  }
 
   /// Copia con los campos no vacíos de [other] (para fusionar detalle diferido).
   VodItem mergedWith(VodItem other) => VodItem(
@@ -260,9 +466,13 @@ class VodItem {
         slug: other.slug.isNotEmpty ? other.slug : slug,
         provider: other.provider.isNotEmpty ? other.provider : provider,
         quality: other.quality.isNotEmpty ? other.quality : quality,
-        seasonCount: other.seasonCount > 0 ? other.seasonCount : seasonCount,
-        episodeCount: other.episodeCount > 0 ? other.episodeCount : episodeCount,
+        seasonCount: other.seasonCount > seasonCount ? other.seasonCount : seasonCount,
+        episodeCount: other.episodeCount > episodeCount ? other.episodeCount : episodeCount,
         genrePath: other.genrePath.isNotEmpty ? other.genrePath : genrePath,
+        seasonRefs: other.seasonRefs.length >= seasonRefs.length &&
+                other.seasonRefs.isNotEmpty
+            ? other.seasonRefs
+            : seasonRefs,
       );
 
   Map<String, dynamic> toJson() => {
@@ -285,6 +495,8 @@ class VodItem {
         'genrePath': genrePath,
         'sources': sources.map((s) => s.toJson()).toList(),
         'episodes': episodes.map((e) => e.toJson()).toList(),
+        if (seasonRefs.isNotEmpty)
+          'seasonRefs': seasonRefs.map((r) => r.toJson()).toList(),
       };
 
   factory VodItem.fromJson(Map<String, dynamic> j) => VodItem(
@@ -311,6 +523,10 @@ class VodItem {
             const [],
         episodes: (j['episodes'] as List?)
                 ?.map((e) => VodEpisode.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            const [],
+        seasonRefs: (j['seasonRefs'] as List?)
+                ?.map((r) => VodSeasonRef.fromJson(r as Map<String, dynamic>))
                 .toList() ??
             const [],
       );

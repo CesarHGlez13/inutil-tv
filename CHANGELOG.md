@@ -1,5 +1,18 @@
 # Changelog — InútilTV
 
+## 3.3.16 — 2026-11-22
+- **Carátulas HD restauradas en la búsqueda de anime:** `upgradePosterUrl` colapsaba `/thumbnail/` a `//slug.jpg` (404 medido) y las tarjetas salían con placeholder; ahora sube a la ruta HD real `.../animes/image/<slug>.jpg` (200 OK, ~40 KB medidos).
+- **Agrupación real de temporadas en Series y Anime:**
+  - Las temporadas de un mismo título (`2nd Season`, `3rd Season`, `Season 2`, `Temporada 2`, `T2`, `S2`, `Part 2`, `The Final Season`, `II/III/IV`, etc.) colapsan en **una sola tarjeta** en grillas, búsquedas y rieles de Inicio, mostrando insignia `X Temp.` y eligiendo siempre T1 como base.
+  - Descubrimiento automático de cadena completa de temporadas en JKAnime (`Temporadas y relacionados`: `Precuela` ↔ `Secuela`), cargando todas las temporadas dentro del mismo modal con píldoras horizontales `T1`, `T2`, `T3`... (óptimo para móvil y mando de Smart TV) y resolviendo el slug exacto de cada temporada al reproducir.
+- **Portadas con Canvas Dinámico cinematográfico:**
+  - Nuevo `DynamicPosterCanvas` determinista (paleta curada, halos radiales de estudio, curva luminosa, monograma tipográfico y brillo diagonal) usado tanto durante la carga como de respaldo — cero recuadros grises.
+  - Todas las tarjetas de catálogo ahora incorporan `PosterCanvasGlassOverlay` (bisel luminoso superior, resplandor cromático por título y destello especular en foco/toque, manteniendo 60–120 FPS).
+- **Ampliación definitiva de catálogos y capítulos completos (verificado en vivo):**
+  - **Anime:** integrados **SeriesKao Animes** (`Latino HD` y `Recientes Latino`, con audio latino y todas las temporadas unificadas en una sola ficha: Attack on Titan 4 temp./98 eps, My Hero Academia 8 temp./178 eps, DBZ 9 temp./297 eps, One Piece 894 eps) + **TioAnime** (`tioanime.com/directorio` + búsqueda + episodios completos) + géneros canónicos de JKAnime verificados contra el control real (`sci-fi`, `super-poderes`, `misterio`, `psicologico`, `thriller`, `magia`, `harem`, `policial`, `militar`, `demonios`, `isekai`, `shoujo`, `musica`) + chip **Películas** (`tipo=peliculas`).
+  - **Series:** añadidas categorías verificadas en vivo (`Tendencias` de PoseidonHD2 + `Acción`, `Comedia`, `Crimen`, `Animación`, `Drama`, `Fantasía`, `Aventura`, `Sci-Fi`, `Doramas`, `Familia`, `Documentales`, `Bélica` de SeriesKao) + **completado cruzado automático de capítulos** entre SeriesKao y PoseidonHD2 cuando un proveedor tiene temporadas/capítulos incompletos.
+- Suite nueva `test/v3_3_16_grouping_and_posters_test.dart` verificando todos los frentes.
+
 ## 3.3.15 — 2026-11-22
 - **Recomendaciones Dinámicas y Personalizadas al Estilo Spotify:**
   - Incorporado motor de recomendación en `XuperService` con secciones contextuales: `Especialmente para ti` (basado en géneros favoritos y títulos guardados en Mi Lista sin duplicar vistos) y `Porque viste [Título]` (conectando el último título visto con películas, series y anime similares).

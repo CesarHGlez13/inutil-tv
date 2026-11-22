@@ -284,10 +284,31 @@ class VodCatalogService {
 
     var falloDeRed = false;
     List<VodItem> primary = [];
-    if (category == 'estrenos') {
+    if (category.startsWith('gen:')) {
+      // Categorías de género de SeriesKao (slugs medidos en vivo: 200 OK,
+      // 24 tarjetas/pág en todas las que expone la app).
       try {
-        primary = await _poseidon.fetchSeries(page: page);
+        primary = await _serieskao
+            .fetchGenreSeries(category.substring(4), page: page);
       } catch (_) {}
+    } else if (category == 'tendencias') {
+      try {
+        primary = await _poseidon.fetchSeries(page: page, section: 'tendencias');
+      } catch (_) {}
+      if (primary.isEmpty) {
+        try {
+          primary = await _serieskao.fetchPopularSeries(page: page);
+        } catch (_) {}
+      }
+    } else if (category == 'estrenos') {
+      try {
+        primary = await _poseidon.fetchSeries(page: page, section: 'estrenos');
+      } catch (_) {}
+      if (primary.isEmpty) {
+        try {
+          primary = await _poseidon.fetchSeries(page: page);
+        } catch (_) {}
+      }
       if (primary.isEmpty) {
         try {
           primary = await _serieskao.fetchLatestSeries(page: page);
@@ -327,7 +348,8 @@ class VodCatalogService {
     final masterSlice = primary.isEmpty && page == 1
         ? (_copiaSeries.isNotEmpty ? _copiaSeries : _masterSeries)
         : <VodItem>[];
-    final deduped = _dedupeByTitle([...primary, ...masterSlice]);
+    final deduped = _dedupeGroupedByShow([...primary, ...masterSlice],
+        reset: page == 1, stream: 'series');
     final healthy = _health.filterAndRankSeries(deduped);
     ultimoErrorDeRed = primary.isEmpty;
     if (healthy.isEmpty) return healthy; // vacío: se reintenta al tocar
@@ -351,9 +373,29 @@ class VodCatalogService {
     var falloDeRed = false;
     List<VodItem> list = [];
     try {
-      list = await _jkanime.fetchDirectory(page: page, genre: genre);
+      if (genre == 'sk:populares') {
+        list = await _serieskao.fetchPopularAnimes(page: page);
+      } else if (genre == 'sk:recientes') {
+        list = await _serieskao.fetchLatestAnimes(page: page);
+      } else if (genre == 'tio:populares') {
+        list = await _tioanime.fetchDirectory(page: page);
+      } else {
+        list = await _jkanime.fetchDirectory(page: page, genre: genre);
+      }
     } catch (_) {
       falloDeRed = true;
+    }
+
+    // Failover automático entre proveedores sólidos de anime cuando el primario falla
+    if (list.isEmpty && (genre == null || genre.isEmpty)) {
+      try {
+        list = await _serieskao.fetchPopularAnimes(page: page);
+      } catch (_) {}
+      if (list.isEmpty) {
+        try {
+          list = await _tioanime.fetchDirectory(page: page);
+        } catch (_) {}
+      }
     }
     final vinoDeRed = list.isNotEmpty;
 
@@ -379,13 +421,14 @@ class VodCatalogService {
     }
 
     ultimoErrorDeRed = !vinoDeRed;
+    list = _dedupeGroupedByShow(list, reset: page == 1, stream: 'anime');
     if (list.isEmpty) return list; // vacío: se reintenta al tocar
     if (page == 1 && !falloDeRed) _guardarCopia('anime', list);
     _animePageCache[key] = list;
     return list;
   }
 
-  /// Enriquecimiento de ficha de detalle (sinopsis real en español + episodios).
+  /// Enriquecimiento de ficha de detalle (sinopsis real en español + temporadas + episodios).
   Future<VodItem> enrichDetail(VodItem item) async {
     try {
       if (item.provider == 'serieskao') {
@@ -394,19 +437,35 @@ class VodCatalogService {
       } else if (item.provider == 'poseidon') {
         final enriched = await _poseidon.fetchDetail(item);
         if (enriched != null) return item.mergedWith(enriched);
-      } else if (item.isAnime || item.provider == 'jkanime') {
-        if (item.overview.isEmpty ||
+      } else if (item.provider == 'jkanime' ||
+          (item.isAnime && item.provider != 'tioanime')) {
+        final slug =
+            item.slug.isNotEmpty ? item.slug : item.id.replaceAll('jk_', '');
+        final needsMeta = item.overview.isEmpty ||
             item.overview.startsWith('Estado:') ||
-            item.poster.contains('/thumbnail/')) {
-          final meta = await _jkanime.fetchAnimeMetaDetails(item.slug);
-          return item.mergedWith(VodItem(
-            id: item.id,
-            title: item.title,
-            poster: meta.poster,
-            backdrop: meta.poster,
-            overview: meta.overview,
-          ));
-        }
+            item.poster.contains('/thumbnail/');
+        final results = await Future.wait([
+          if (needsMeta)
+            _jkanime.fetchAnimeMetaDetails(slug)
+          else
+            Future.value((overview: item.overview, poster: item.poster)),
+          _jkanime.discoverSeasonChain(
+            slug,
+            fallbackTitle: item.title,
+            seedRefs: item.seasonRefs,
+          ),
+        ]);
+        final meta = results[0] as ({String overview, String poster});
+        final chain = results[1] as List<VodSeasonRef>;
+        return item.mergedWith(VodItem(
+          id: item.id,
+          title: item.title,
+          poster: meta.poster,
+          backdrop: meta.poster,
+          overview: meta.overview,
+          seasonCount: chain.length > 1 ? chain.length : item.seasonCount,
+          seasonRefs: chain,
+        ));
       }
     } catch (_) {}
     return item;
@@ -429,20 +488,24 @@ class VodCatalogService {
 
     final remoteResults = await Future.wait([
       _serieskao.searchSeries(q),
+      _serieskao.searchAnimes(q),
       _poseidon.search(q),
       _jkanime.search(q),
+      _tioanime.search(q),
       _pelisflix.search(q),
     ]);
 
     final all = <VodItem>[
       ...remoteResults[0], // SeriesKao (Series exactas primero!)
-      ...remoteResults[1], // Poseidon/Cuevana (Películas + Series TMDB HD)
-      ...remoteResults[2], // JKAnime (HD)
-      ...remoteResults[3], // PelisFlix respaldo
+      ...remoteResults[1], // SeriesKao Animes (Latino + todas las temporadas!)
+      ...remoteResults[2], // Poseidon/Cuevana (Películas + Series TMDB HD)
+      ...remoteResults[3], // JKAnime (HD)
+      ...remoteResults[4], // TioAnime (respaldo sólido)
+      ...remoteResults[5], // PelisFlix respaldo
       ...localMatches,
     ];
 
-    final unique = _dedupeByTitle(all);
+    final unique = groupByShowStateless(all);
 
     int score(VodItem v) {
       final t = StreamValidator.normalizeTitle(v.title);
@@ -507,32 +570,106 @@ class VodCatalogService {
       ...results[2].where((it) => it.isSeries && !it.isAnime),
       ...localMatches,
     ];
-    return _health.filterAndRankSeries(_dedupeByTitle(series));
+    return _health.filterAndRankSeries(groupByShowStateless(series));
   }
 
   Future<List<VodItem>> searchAnime(String query) async {
     final q = query.trim();
     if (q.isEmpty) return [];
-    return _jkanime.search(q);
+    final results = await Future.wait([
+      _jkanime.search(q),
+      _serieskao.searchAnimes(q),
+      _tioanime.search(q),
+    ]);
+    final combined = <VodItem>[
+      ...results[0],
+      ...results[1],
+      ...results[2],
+    ];
+    return groupByShowStateless(combined);
   }
 
   /// Carga episodios completos de cualquier serie o anime.
+  /// - Anime JKAnime: descubre toda la cadena de temporadas (Precuela/Secuela)
+  ///   y carga sus capítulos en paralelo etiquetando cada temporada (T1, T2...).
+  /// - Series (SeriesKao / PoseidonHD2): si el primario devuelve pocos capítulos
+  ///   o solo 1 temporada, consulta al proveedor complementario y UNE los
+  ///   capítulos/temporadas faltantes (sin duplicar temporada#episodio).
   Future<List<VodEpisode>> fetchEpisodes(VodItem item) async {
     if (item.episodes.isNotEmpty) return item.episodes;
 
-    if (item.provider == 'jkanime' || item.isAnime) {
-      final slug = item.slug.isNotEmpty ? item.slug : item.id.replaceAll('jk_', '');
-      return _jkanime.fetchEpisodes(slug);
-    }
-
-    if (item.provider == 'serieskao') {
+    // 1. Anime en SeriesKao (Latino + multi-temporada nativa) -> respaldo JKAnime/TioAnime
+    if (item.provider == 'serieskao' && item.isAnime) {
       final eps = await _serieskao.fetchSeriesEpisodes(item);
       if (eps.isNotEmpty) return eps;
+      final jkHits = await _jkanime.search(item.title);
+      final jkMatch = _pickBestMatch(jkHits, item.title, isSeries: true);
+      if (jkMatch != null) {
+        final chain = await _jkanime.discoverSeasonChain(
+          jkMatch.slug,
+          fallbackTitle: jkMatch.title,
+        );
+        final jkEps = chain.length > 1
+            ? await _jkanime.fetchAllSeasonsEpisodes(chain)
+            : await _jkanime.fetchEpisodes(jkMatch.slug);
+        if (jkEps.isNotEmpty) return jkEps;
+      }
+      return [];
     }
 
+    // 2. Anime en TioAnime -> respaldo JKAnime
+    if (item.provider == 'tioanime') {
+      final eps = await _tioanime.fetchEpisodes(item.slug);
+      if (eps.isNotEmpty) return eps;
+      final jkHits = await _jkanime.search(item.title);
+      final jkMatch = _pickBestMatch(jkHits, item.title, isSeries: true);
+      if (jkMatch != null) {
+        return _jkanime.fetchEpisodes(jkMatch.slug);
+      }
+      return [];
+    }
+
+    // 3. Anime en JKAnime: agrupar TODAS las temporadas de la cadena en la misma ficha
+    if (item.provider == 'jkanime' || item.isAnime) {
+      final slug =
+          item.slug.isNotEmpty ? item.slug : item.id.replaceAll('jk_', '');
+      final chain = await _jkanime.discoverSeasonChain(
+        slug,
+        fallbackTitle: item.title,
+        seedRefs: item.seasonRefs,
+      );
+      List<VodEpisode> eps = chain.length > 1
+          ? await _jkanime.fetchAllSeasonsEpisodes(chain)
+          : await _jkanime.fetchEpisodes(slug);
+
+      // Si JKAnime falló o trajo incompleto, intentar SeriesKao Animes / TioAnime
+      if (eps.isEmpty) {
+        final skHits = await _serieskao.searchAnimes(item.title);
+        final skMatch = _pickBestMatch(skHits, item.title, isSeries: true);
+        if (skMatch != null) {
+          eps = await _serieskao.fetchSeriesEpisodes(skMatch);
+        }
+      }
+      if (eps.isEmpty) {
+        final tioHits = await _tioanime.search(item.title);
+        final tioMatch = _pickBestMatch(tioHits, item.title, isSeries: true);
+        if (tioMatch != null) {
+          eps = await _tioanime.fetchEpisodes(tioMatch.slug);
+        }
+      }
+      return eps;
+    }
+
+    // 4. Series: SeriesKao con completado cruzado desde PoseidonHD2 para evitar capítulos faltantes
+    if (item.provider == 'serieskao') {
+      final eps = await _serieskao.fetchSeriesEpisodes(item);
+      return _supplementSeriesEpisodes(item, eps, complement: 'poseidon');
+    }
+
+    // 5. Series: PoseidonHD2 con completado cruzado desde SeriesKao
     if (item.provider == 'poseidon') {
       final eps = await _poseidon.fetchSeriesEpisodes(item);
-      if (eps.isNotEmpty) return eps;
+      return _supplementSeriesEpisodes(item, eps, complement: 'serieskao');
     }
 
     if (item.provider == 'pelisflix' || item.isSeries) {
@@ -541,9 +678,71 @@ class VodCatalogService {
           : item.id.replaceAll('pf_serie_', '').replaceAll('pf_pelicula_', '');
       final eps = await _pelisflix.fetchSeriesEpisodes(slug);
       if (eps.isNotEmpty) return eps;
+      // Si PelisFlix está caído, buscar la serie en SeriesKao / PoseidonHD2
+      return _supplementSeriesEpisodes(item, const [], complement: 'serieskao');
     }
 
     return [];
+  }
+
+  /// Completa temporadas/capítulos faltantes consultando el proveedor alterno
+  /// cuando el primario quedó vacío o incompleto (<=1 temporada o <20 capítulos).
+  Future<List<VodEpisode>> _supplementSeriesEpisodes(
+    VodItem item,
+    List<VodEpisode> primaryEps, {
+    required String complement,
+  }) async {
+    final primarySeasons = primaryEps.map((e) => e.seasonNumber).toSet();
+    final needsCheck = primaryEps.isEmpty ||
+        primarySeasons.length <= 1 ||
+        primaryEps.length < 20;
+    if (!needsCheck) return primaryEps;
+
+    try {
+      List<VodEpisode> extra = const [];
+      if (complement == 'poseidon') {
+        final hits = await _poseidon
+            .search(item.title)
+            .timeout(const Duration(seconds: 7), onTimeout: () => []);
+        final match = _pickBestMatch(hits, item.title, isSeries: true);
+        if (match != null) {
+          extra = await _poseidon
+              .fetchSeriesEpisodes(match)
+              .timeout(const Duration(seconds: 7), onTimeout: () => []);
+        }
+      } else {
+        final hits = await _serieskao
+            .searchSeries(item.title)
+            .timeout(const Duration(seconds: 7), onTimeout: () => []);
+        final match = _pickBestMatch(hits, item.title, isSeries: true);
+        if (match != null) {
+          extra = await _serieskao
+              .fetchSeriesEpisodes(match)
+              .timeout(const Duration(seconds: 7), onTimeout: () => []);
+        }
+      }
+
+      if (extra.isEmpty) return primaryEps;
+      if (primaryEps.isEmpty) return extra;
+
+      // Unir conservando los del proveedor primario y llenando huecos con el alterno
+      final merged = <VodEpisode>[...primaryEps];
+      final seen = <String>{
+        for (final e in primaryEps) '${e.seasonNumber}#${e.episodeNumber}',
+      };
+      for (final e in extra) {
+        if (seen.add('${e.seasonNumber}#${e.episodeNumber}')) {
+          merged.add(e);
+        }
+      }
+      merged.sort((a, b) {
+        final s = a.seasonNumber.compareTo(b.seasonNumber);
+        return s != 0 ? s : a.episodeNumber.compareTo(b.episodeNumber);
+      });
+      return merged;
+    } catch (_) {
+      return primaryEps;
+    }
   }
 
   /// Resuelve TODAS las fuentes de reproducción VALIDADAS con failover automático
@@ -576,24 +775,90 @@ class VodCatalogService {
       }
     }
 
-    // 2. Anime: JKAnime (HLS validado) -> respaldo TioAnime (YourUpload MP4)
-    if (item.isAnime || item.provider == 'jkanime') {
+    // 2. Anime: respeta el proveedor real del episodio (SeriesKao Latino / JKAnime / TioAnime)
+    if (item.isAnime ||
+        item.provider == 'jkanime' ||
+        item.provider == 'tioanime' ||
+        episode?.provider == 'jkanime' ||
+        episode?.provider == 'tioanime') {
       final epNum = episode?.episodeNumber ?? 1;
-      final animeSlug =
-          item.slug.isNotEmpty ? item.slug : item.id.replaceAll('jk_', '');
-      final sources = await _jkanime.getEpisodeSources(
-        animeSlug,
-        epNum,
-        onStatus: onStatus,
-      );
-      if (sources.isNotEmpty) return sources;
 
+      // 2a. Anime de SeriesKao (Audio Latino + Embed69 HD) -> failover a JKAnime / TioAnime
+      if ((item.provider == 'serieskao' || episode?.provider == 'serieskao') &&
+          episode != null) {
+        final skSources = await _serieskao.resolveEpisodeSources(
+          item,
+          episode,
+          onStatus: onStatus,
+        );
+        if (skSources.isNotEmpty) return skSources;
+      }
+
+      // 2b. Episodio específico de TioAnime -> probar TioAnime primero
+      if (episode?.provider == 'tioanime' || item.provider == 'tioanime') {
+        final tioSlug = (episode != null && episode.slug.contains('/'))
+            ? episode.slug.split('/').first
+            : (item.slug.isNotEmpty ? item.slug : item.title);
+        final tioSources = await _tioanime.resolveEpisodeFallback(
+          tioSlug,
+          epNum,
+          onStatus: onStatus,
+        );
+        if (tioSources.isNotEmpty) return tioSources;
+      }
+
+      // 2c. JKAnime: usar el slug de la TEMPORADA del episodio (`episode.slug`)
+      // cuando exista (`kaijuu-8-gou-2nd-season/3`), no solo el slug base T1.
+      final epSlugPrefix = (episode != null &&
+              episode.provider == 'jkanime' &&
+              episode.slug.contains('/'))
+          ? episode.slug.split('/').first
+          : '';
+      final animeSlug = epSlugPrefix.isNotEmpty
+          ? epSlugPrefix
+          : (item.slug.isNotEmpty ? item.slug : item.id.replaceAll('jk_', ''));
+      if (animeSlug.isNotEmpty) {
+        final sources = await _jkanime.getEpisodeSources(
+          animeSlug,
+          epNum,
+          onStatus: onStatus,
+        );
+        if (sources.isNotEmpty) return sources;
+      }
+
+      // 2d. Respaldo cruzado a TioAnime
       final tioBackup = await _tioanime.resolveEpisodeFallback(
-        item.title,
+        epSlugPrefix.isNotEmpty ? epSlugPrefix : item.title,
         epNum,
         onStatus: onStatus,
       );
       if (tioBackup.isNotEmpty) return tioBackup;
+    }
+
+    // 2.5. Si el episodio fue completado desde un proveedor alterno, respetarlo primero
+    if (episode != null &&
+        episode.provider == 'poseidon' &&
+        item.provider != 'poseidon') {
+      final cpHits = await _poseidon.search(item.title);
+      final match = _pickBestMatch(cpHits, item.title, isSeries: true);
+      if (match != null) {
+        final cpSources = await _poseidon.resolveAllStreamSources(
+          match,
+          episode: episode,
+          onStatus: onStatus,
+        );
+        if (cpSources.isNotEmpty) return cpSources;
+      }
+    } else if (episode != null &&
+        episode.provider == 'serieskao' &&
+        item.provider != 'serieskao') {
+      final skSources = await _serieskao.resolveByTitleAndEpisode(
+        item.title,
+        episode.seasonNumber,
+        episode.episodeNumber,
+        onStatus: onStatus,
+      );
+      if (skSources.isNotEmpty) return skSources;
     }
 
     // 3. SeriesKao (Primario de Series) -> failover automático por episodio a PoseidonHD2!
@@ -746,6 +1011,174 @@ class VodCatalogService {
           '${it.isAnime ? "a" : (it.isSeries ? "s" : "m")}_${norm.isNotEmpty ? norm : it.id}';
       if (seen.add(key)) {
         out.add(it);
+      }
+    }
+    return out;
+  }
+
+  /// Extrae el número de temporada implícito en un título de serie o anime
+  /// ("2nd Season" -> 2, "Temporada 3" -> 3, "T4" -> 4, "Final Season" -> 99,
+  ///  "Overlord III" -> 3, base sin sufijo -> 1).
+  static int extractSeasonNumber(String title) {
+    final norm = StreamValidator.normalizeTitle(title);
+    if (norm.isEmpty) return 1;
+
+    if (RegExp(r'\b(?:the\s+)?final\s+season\b').hasMatch(norm)) return 99;
+
+    final ord = RegExp(r'\b(\d+)(?:st|nd|rd|th)\s+season\b').firstMatch(norm);
+    if (ord != null) return int.tryParse(ord.group(1)!) ?? 1;
+
+    final explicit =
+        RegExp(r'\b(?:t|temporada|temp|season|s)\s*(\d+)\b').firstMatch(norm);
+    if (explicit != null) return int.tryParse(explicit.group(1)!) ?? 1;
+
+    final part = RegExp(r'\b(?:part|parte|cour)\s*(\d+)$').firstMatch(norm);
+    if (part != null) return int.tryParse(part.group(1)!) ?? 1;
+
+    final roman = RegExp(r'\s+(ii|iii|iv|v|vi)$').firstMatch(norm);
+    if (roman != null && norm.length > roman.group(1)!.length + 3) {
+      return switch (roman.group(1)) {
+        'ii' => 2,
+        'iii' => 3,
+        'iv' => 4,
+        'v' => 5,
+        'vi' => 6,
+        _ => 1,
+      };
+    }
+
+    final trailingDigit = RegExp(r'^(.+\s+\S+)\s+([2-9])$').firstMatch(norm);
+    if (trailingDigit != null) {
+      return int.tryParse(trailingDigit.group(2)!) ?? 1;
+    }
+    return 1;
+  }
+
+  /// Clave canónica para AGRUPAR temporadas: normaliza el título y le quita
+  /// sufijos/prefijos de temporada ("T2", "Temporada 3", "Season 2", "S2",
+  /// "2nd Season", "3rd Season", "Part 2", "The Final Season", "II/III/IV",
+  /// o dígito final "2..9" en títulos multi-palabra) para que todas las
+  /// temporadas del mismo show aparezcan en UNA sola tarjeta.
+  /// Las películas conservan su título completo para no colapsar secuelas.
+  static String canonicalShowKey(VodItem it) {
+    final rawNorm = StreamValidator.normalizeTitle(it.title);
+    final kind = it.isAnime ? 'a' : (it.isSeries ? 's' : 'm');
+    if (!it.isSeries && !it.isAnime) {
+      return '${kind}_${rawNorm.isNotEmpty ? rawNorm : it.id}';
+    }
+
+    var norm = rawNorm;
+    // Repetir hasta 2 pasadas para limpiar compuestos como "Season 3 Part 2"
+    for (var i = 0; i < 2; i++) {
+      final before = norm;
+      norm = norm
+          .replaceFirst(
+            RegExp(r'^(?:t|temporada|temp|season|serie|series?)\s+\d+\s+'),
+            ' ',
+          )
+          .replaceFirst(
+            RegExp(r'\s+(?:the\s+)?final\s+season(?:\s+(?:part|parte|cour)\s*\d+)?$'),
+            ' ',
+          )
+          .replaceFirst(
+            RegExp(r'\s+\d+(?:st|nd|rd|th)\s+season(?:\s+(?:part|parte|cour)\s*\d+)?$'),
+            ' ',
+          )
+          .replaceFirst(
+            RegExp(r'\s+(?:t|temporada|temp|season|s)\s*\d+(?:\s+(?:part|parte|cour)\s*\d+)?$'),
+            ' ',
+          )
+          .replaceFirst(
+            RegExp(r'\s+(?:part|parte|cour)\s*\d+$'),
+            ' ',
+          )
+          .replaceFirst(RegExp(r'\s+tv$'), ' ')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      if (norm == before) break;
+    }
+
+    // Numerales romanos de temporada al final (II, III, IV, V, VI) si hay base >= 3 chars
+    final romanMatch = RegExp(r'^(.{3,}?)\s+(?:ii|iii|iv|v|vi)$').firstMatch(norm);
+    if (romanMatch != null) {
+      norm = romanMatch.group(1)!.trim();
+    }
+
+    // Dígito final de temporada (2..9) solo en títulos de >=2 palabras (ej. "5 toubun no hanayome 2")
+    final digitMatch = RegExp(r'^(\S+\s+.+?)\s+[2-9]$').firstMatch(norm);
+    if (digitMatch != null) {
+      norm = digitMatch.group(1)!.trim();
+    }
+
+    if (norm.isEmpty) norm = rawNorm;
+    return '${kind}_${norm.isNotEmpty ? norm : it.id}';
+  }
+
+  /// Agrupa una lista de resultados (búsquedas o rieles) sin estado global,
+  /// eligiendo como base la temporada menor (T1) y conservando todas las
+  /// temporadas hermanas dentro de `seasonRefs` + unión de episodios.
+  static List<VodItem> groupByShowStateless(List<VodItem> items) {
+    final out = <VodItem>[];
+    final byKey = <String, int>{};
+    for (final it in items) {
+      if (it.poster.contains('404x.jpg')) continue;
+      final key = canonicalShowKey(it);
+      final idx = byKey[key];
+      if (idx == null) {
+        byKey[key] = out.length;
+        out.add(it);
+      } else {
+        out[idx] = _mergeShowPair(out[idx], it);
+      }
+    }
+    return out;
+  }
+
+  /// Fusiona dos entradas del mismo show eligiendo siempre como tarjeta base la
+  /// de temporada más baja (p. ej. T1 sobre T2) y conservando todas las
+  /// referencias de temporadas hermanas (`seasonRefs`) + episodios.
+  static VodItem _mergeShowPair(VodItem a, VodItem b) {
+    final sa = extractSeasonNumber(a.title);
+    final sb = extractSeasonNumber(b.title);
+    final bIsBetterBase = sb < sa ||
+        (sb == sa && a.poster.isEmpty && b.poster.isNotEmpty);
+    final base = bIsBetterBase ? b : a;
+    final sibling = bIsBetterBase ? a : b;
+    final baseSeason = bIsBetterBase ? sb : sa;
+    final siblingSeason = bIsBetterBase ? sa : sb;
+    return base.groupedWithSiblingItem(
+      sibling,
+      baseSeasonNumber: baseSeason,
+      siblingSeasonNumber: siblingSeason,
+    );
+  }
+
+  /// Estado global de agrupación entre páginas (se reinicia en page 1).
+  /// Se nombrespacea por stream ('series'/'anime') para que el scroll
+  /// infinito de una pestaña no se coma entradas de la otra.
+  final Set<String> _vistosAgrupados = <String>{};
+
+  /// Dedupe AGRUPANDO por show canónico: la primera entrada (o la de menor
+  /// temporada en la página) es la base y conserva tanto episodios como
+  /// referencias de slug de todas las temporadas hermanas (`seasonRefs`).
+  /// [reset] limpia el estado de ese stream (llamar true solo en page 1).
+  List<VodItem> _dedupeGroupedByShow(List<VodItem> items,
+      {bool reset = false, String stream = 'default'}) {
+    if (reset) _vistosAgrupados.removeWhere((k) => k.startsWith('$stream|'));
+    final out = <VodItem>[];
+    final byKey = <String, int>{}; // key -> índice en out
+    for (final it in items) {
+      if (it.poster.contains('404x.jpg')) continue;
+      final key = canonicalShowKey(it);
+      final namespaced = '$stream|$key';
+      final idx = byKey[key];
+      if (idx == null) {
+        if (_vistosAgrupados.contains(namespaced)) continue; // ya mostrado
+        _vistosAgrupados.add(namespaced);
+        byKey[key] = out.length;
+        out.add(it);
+      } else {
+        out[idx] = _mergeShowPair(out[idx], it);
       }
     }
     return out;
