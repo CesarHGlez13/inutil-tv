@@ -4,6 +4,7 @@ import android.app.UiModeManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -90,12 +91,36 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "isAndroidTv" -> result.success(detectAndroidTv())
+                "getSystemProxy" -> result.success(readSystemHttpProxy())
                 else -> result.notImplemented()
             }
         }
     }
 
     private fun primaryInstallAbi(): String = Build.SUPPORTED_ABIS.firstOrNull() ?: ""
+
+    private fun readSystemHttpProxy(): String {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val cm = getSystemService(CONNECTIVITY_SERVICE) as? ConnectivityManager
+                val proxyInfo = cm?.defaultProxy
+                val host = proxyInfo?.host?.trim().orEmpty()
+                val port = proxyInfo?.port ?: -1
+                if (host.isNotEmpty() && port in 1..65535) {
+                    return "$host:$port"
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return try {
+            val host = System.getProperty("http.proxyHost")?.trim().orEmpty()
+            val portStr = System.getProperty("http.proxyPort")?.trim().orEmpty()
+            val port = portStr.toIntOrNull() ?: 3128
+            if (host.isNotEmpty() && port in 1..65535) "$host:$port" else ""
+        } catch (_: Exception) {
+            ""
+        }
+    }
 
     private fun detectAndroidTv(): Boolean {
         val uiMode = getSystemService(UI_MODE_SERVICE) as? UiModeManager

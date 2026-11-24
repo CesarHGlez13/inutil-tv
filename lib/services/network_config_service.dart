@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'firebase_config.dart';
@@ -104,10 +105,13 @@ class NetworkConfigService extends ChangeNotifier {
       (Platform.environment.containsKey('FLUTTER_TEST') || kIsWeb) &&
           !Platform.environment.containsKey('INUTILTV_REAL_NET');
 
+  static const MethodChannel _deviceChannel = MethodChannel('inutil_tv/device');
+
   bool _loaded = false;
   bool _secureDns = true;
   bool _tlsFallback = true;
   String _proxy = '';
+  String _systemProxy = '';
 
   final Map<String, _DnsEntry> _dnsCache = {};
   final Map<String, Future<String?>> _dnsPending = {};
@@ -128,16 +132,26 @@ class NetworkConfigService extends ChangeNotifier {
   /// Reintento para redes que inspeccionan TLS (activado por defecto).
   bool get tlsFallbackEnabled => _tlsFallback;
 
-  /// `host:puerto` del proxy manual (vacío = salida directa).
+  /// `host:puerto` del proxy manual (vacío = usar proxy del sistema o salida directa).
   String get proxyHostPort => _proxy;
 
-  bool get proxyEnabled => _proxy.isNotEmpty;
+  /// `host:puerto` del proxy configurado en los ajustes Wi-Fi del sistema Android.
+  String get systemProxyHostPort => _systemProxy;
 
-  /// true cuando hay alguna restricción activada (proxy o DNS seguro).
-  bool get restrictionsActive => _proxy.isNotEmpty || _secureDns;
+  /// Proxy efectivo activo: manual si el usuario escribió uno, o el del sistema.
+  String get effectiveProxyHostPort =>
+      _proxy.isNotEmpty ? _proxy : _systemProxy;
+
+  bool get systemProxyDetected => _proxy.isEmpty && _systemProxy.isNotEmpty;
+
+  bool get proxyEnabled => effectiveProxyHostPort.isNotEmpty;
+
+  /// true cuando hay alguna restricción activada (proxy manual/sistema o DNS seguro).
+  bool get restrictionsActive => effectiveProxyHostPort.isNotEmpty || _secureDns;
 
   /// Valor para la propiedad `proxy-url` de libmpv (null = sin proxy).
-  String? get mpvProxyUrl => _proxy.isEmpty ? null : 'http://$_proxy';
+  String? get mpvProxyUrl =>
+      effectiveProxyHostPort.isEmpty ? null : 'http://$effectiveProxyHostPort';
 
   NetworkIssue get lastIssue => _lastIssue;
 
@@ -193,11 +207,33 @@ class NetworkConfigService extends ChangeNotifier {
     _dohClient = null;
     _lastIssue = NetworkIssue.none;
     _dohEndpoints = _kDohEndpoints;
+    _systemProxy = '';
   }
 
   /// `true` dentro de `flutter test`, donde no se toca la red real.
   @visibleForTesting
   static bool get hermeticTestEnvironment => _hermetic;
+
+  @visibleForTesting
+  void setSystemProxyForTest(String raw) {
+    _systemProxy = _normalizeProxy(raw) ?? '';
+  }
+
+  /// Actualiza la detección del proxy HTTP configurado en el Wi-Fi del sistema
+  /// (estándar en redes empresariales Android que requieren proxy autorizado).
+  Future<void> refreshSystemProxy() async {
+    if (_hermetic || kIsWeb || !Platform.isAndroid) return;
+    try {
+      final raw = await _deviceChannel
+          .invokeMethod<String>('getSystemProxy')
+          .timeout(const Duration(seconds: 2));
+      final normalized = _normalizeProxy(raw ?? '') ?? '';
+      if (normalized != _systemProxy) {
+        _systemProxy = normalized;
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
 
   Future<void> load({bool force = false}) async {
     if (_loaded && !force) return;
@@ -207,6 +243,7 @@ class NetworkConfigService extends ChangeNotifier {
       _tlsFallback = sp.getBool(_kTlsFallback) ?? true;
       _proxy = _normalizeProxy(sp.getString(_kProxy) ?? '') ?? '';
     } catch (_) {}
+    await refreshSystemProxy();
     _loaded = true;
     installGlobalOverride();
     notifyListeners();
@@ -307,17 +344,10 @@ class NetworkConfigService extends ChangeNotifier {
     final timeout = connectTimeout ?? const Duration(seconds: 10);
     client.connectionTimeout = timeout;
 
-    // Se lee al momento de cada conexión, así un cambio desde Ajustes aplica
-    // incluso a los clientes que ya estaban creados y en uso.
-    client.findProxy = (uri) {
-      final proxy = _proxy;
-      if (proxy.isNotEmpty) return 'PROXY $proxy';
-      try {
-        return HttpClient.findProxyFromEnvironment(uri);
-      } catch (_) {
-        return 'DIRECT';
-      }
-    };
+    // Se lee al momento de cada conexión, así un cambio desde Ajustes o el
+    // proxy Wi-Fi del sistema aplica incluso a clientes ya creados.
+    // Loopback (proxy HLS local 127.0.0.1) siempre va DIRECT para no romper reproducción.
+    client.findProxy = (uri) => resolveProxyDirectiveForUri(uri);
 
     client.connectionFactory = (uri, proxyHost, proxyPort) => _connect(
           uri,
@@ -342,11 +372,30 @@ class NetworkConfigService extends ChangeNotifier {
 
   // ------------------------------------------------------------- resolución
 
+  /// Directiva de proxy (`DIRECT` o `PROXY host:port`) para un [Uri].
+  /// Loopback (`localhost`, `127.0.0.1`, `::1`) siempre permanece `DIRECT`.
+  @visibleForTesting
+  String resolveProxyDirectiveForUri(Uri uri) {
+    final host = uri.host.toLowerCase();
+    if (host == 'localhost' || host == '127.0.0.1' || host == '::1') {
+      return 'DIRECT';
+    }
+    final effective = effectiveProxyHostPort;
+    if (effective.isNotEmpty) return 'PROXY $effective';
+    try {
+      return HttpClient.findProxyFromEnvironment(uri);
+    } catch (_) {
+      return 'DIRECT';
+    }
+  }
+
   /// Resuelve [host] con DNS-over-HTTPS. `null` si DoH no responde o está
   /// desactivado: el llamador usa entonces el DNS del sistema.
   Future<String?> resolve(String host) async {
     _dbg('resolve($host) inicio');
-    if (_hermetic || !_secureDns || _proxy.isNotEmpty) return null;
+    if (_hermetic || !_secureDns || effectiveProxyHostPort.isNotEmpty) {
+      return null;
+    }
     final lower = host.toLowerCase();
     if (RegExp(r'^\d{1,3}(\.\d{1,3}){3}$').hasMatch(lower)) return lower;
 
@@ -686,20 +735,23 @@ class NetworkConfigService extends ChangeNotifier {
   /// Comprueba los cuatro frentes que necesita la app y devuelve latencias.
   Future<NetworkReport> runDiagnostics() async {
     _dbg('diagnostico: inicio');
+    await refreshSystemProxy();
     final checks = <NetworkCheck>[];
     checks.add(await _probe('Cuenta', Uri.parse(
       '${FirebaseConfig.firestoreBaseUrl}/app_config/tv_release',
     )));
-    checks.add(await _probe('Catálogo', Uri.parse(
+    checks.add(await _probeAlguna('Catálogo', const [
+      'https://meta.inutix.com/healthz',
       'https://www.themoviedb.org/',
-    )));
+    ]));
     checks.add(await _probeAlguna('Video', const [
       'https://jkanime.net/',
       'https://www.poseidonhd2.co/',
     ]));
-    checks.add(await _probe('Actualizaciones', Uri.parse(
+    checks.add(await _probeAlguna('Actualizaciones', const [
+      'https://ota.inutix.com/release.json',
       'https://github.com/CesarHGlez13/inutil-tv/releases/latest/download/release.json',
-    )));
+    ]));
     return NetworkReport(checks, proxyEnabled, secureDnsEnabled);
   }
 

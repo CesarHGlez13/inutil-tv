@@ -1,47 +1,32 @@
 # Changelog — Inutix TV
 
+## 3.3.36 — 2026-11-24
+- **Mejor compatibilidad con redes Wi-Fi con proxy:** Inutix TV ahora detecta y respeta automáticamente el proxy HTTP configurado en los ajustes Wi-Fi de tu dispositivo Android, mejorando la conexión y reproducción de video en redes con proxy sin afectar la reproducción local.
+- **Diagnóstico de red más preciso:** La prueba de conexión en *Ajustes > Red y conexión* ahora verifica los servidores actuales de catálogo y actualizaciones.
+- **Notas de versión pensadas para ti:** Resúmenes de novedades más claros y directos enfocados en tu experiencia de uso.
+
 ## 3.3.35 — 2026-11-24
-- **Identidad Unificada Monolith `iX TV` + Limpieza Total de Marca:**
-  - **Logo Oficial Monolith `iX TV`:** Adaptado 1:1 del nuevo logo oficial Monolith `iX MUSIC` (mismo fondo grafito diagonal, mismo monograma geométrico `iX` en blanco puro y punto con halo ambiental en cian eléctrico `#00D4FF` con tipografía geométrica `T V`) aplicado en `assets/logo.png`, íconos de launcher (`mipmap-mdpi` a `mipmap-xxxhdpi`), banners Android TV (`tv_banner.png`) y cabecera de Inicio móvil y TV.
-  - **Reemplazo Completo de Referencias Antiguas en Toda la App:** Eliminadas al 100% las menciones visibles restantes de `Inútil`, `InútilTV`, `Inútil Music` y `Familia Inútil` en toda la interfaz (barra superior de Inicio, Acerca de, Ajustes, Acceso, Onboarding, Wrapped, Panel Admin, OTA y avisos), unificando todo bajo **Inutix TV**, **Inutix Music** y **Familia Inutix**.
-  - **Títulos de Release y Telegram Unificados:** Actualizados los títulos de GitHub Releases y entregas de APKs en Telegram a **Inutix TV**.
+- **Nuevo logo oficial `iX TV`:** Identidad visual renovada y unificada con Inutix Music en el ícono de la app, pantalla de acceso, barra de inicio y banner de Android TV.
+- **Marca unificada en toda la app:** Todos los menús, pantallas y avisos ahora muestran de forma consistente **Inutix TV**, **Inutix Music** y **Familia Inutix**.
 
 ## 3.3.34 — 2026-11-24
-- **Nueva Identidad Oficial — Inutix TV y Cero Secretos de Terceros en la App:**
-  - **Rebrand Completo a Inutix TV:** Nuevo nombre oficial `Inutix TV` en launcher Android, Android TV, barra lateral TV, pantalla de acceso, Acerca de, OTA y textos de interfaz, conservando compatibilidad total de actualización sobre instalaciones previas (`dev.cesar.tubotv`, sesión, Mi Lista, historial y descargas intactos).
-  - **Nuevo Logo e Iconografía Profesional IX:** Nuevo emblema minimalista `IX` con marco de TV en vidrio cian-cobalto y triángulo de reproducción ámbar en `assets/logo.png`, todos los íconos de launcher (`mipmap-mdpi` a `mipmap-xxxhdpi`) y nuevos banners panorámicos para Android TV (`drawable/tv_banner.png` y `drawable-xhdpi/tv_banner.png`).
-  - **Cero Llaves de API de Terceros en el Código ni en el APK (`TitleLogoService`):** Eliminadas definitivamente `tmdbApiKey`, `tmdbReadAccessToken` y `fanartApiKey` del código fuente Dart y de los binarios; el 100% de la resolución de logos opera vía `https://meta.inutix.com/logo` con secretos cifrados exclusivamente en Cloudflare Workers.
-  - **Hardening de `/healthz` y Scripts Públicos:** `meta.inutix.com`, `ota.inutix.com` y `backup.inutix.com` devuelven únicamente `{"ok": true}` sin autenticación (telemetría completa restringida a `X-Admin-Secret`), y se eliminaron rutas locales y direcciones LAN hardcodeadas en `tool/firebase_admin.py`.
+- **Bienvenida a Inutix TV:** Cambio de nombre oficial a **Inutix TV** manteniendo tu sesión, historial, Mi Lista y descargas intactas al actualizar.
+- **Mayor privacidad y seguridad:** Refuerzo interno para proteger las comunicaciones de la app al consultar carátulas, logotipos y actualizaciones.
 
 ## 3.3.33 — 2026-11-24
-- **Blindaje Total sobre Cloudflare Edge (`inutix.com`) y Configuración Remota Dinámica de Proveedores:**
-  - **Gateway Edge Propio de Metadatos y Logos (`meta.inutix.com`):** Worker en Cloudflare Edge que resuelve y cachea logos tipográficos PNG (7 días globales) y proxy TMDB/Fanart sin exponer credenciales ni depender de cuotas o bloqueos regionales. `TitleLogoService` consulta `meta.inutix.com/logo` primero con respaldo automático a TMDB Bearer Auth + Fanart.tv.
-  - **Espejo Edge de Actualizaciones OTA (`ota.inutix.com`):** `InutilUpdateService` respalda la verificación de `release.json` y la descarga reanudable de APKs con `https://ota.inutix.com/release.json` y `https://ota.inutix.com/download/<tag>/<asset.apk>` cuando una red bloquea o estrangula `github.com`.
-  - **Rotación Dinámica de Espejos VOD Sin Recompilar (`RemoteProvidersConfig` → `app_config/providers` en `api.inutix.com`):** Los espejos de Poseidon/Cuevana, VidHide, StreamWish, SeriesKao, JKAnime y TioAnime (además de `metaBaseUrl` y `otaBaseUrl`) ahora se actualizan en caliente desde `api.inutix.com` (0 cuota Firestore, failover `LAN → api → backup`, caché local de 6 h), permitiendo cambiar dominios caídos en segundos sin lanzar nueva APK.
+- **Carga más rápida de logotipos y actualizaciones más confiables:** Mejor velocidad al mostrar los logos oficiales de tus películas y series, y respaldo automático para descargar nuevas versiones sin interrupciones.
+- **Mayor disponibilidad del catálogo:** Los servidores de video ahora se mantienen actualizados de forma más ágil sin necesidad de esperar una nueva versión de la app.
 
 ## 3.3.32 — 2026-11-24
-- **Motor de Reproducción Ultrarrápido y Tolerante a Redes Lentas (Películas, Series y Anime):**
-  - **DNS Rápido Sin Penalización DoH en Redes Normales/Lentas (`NetworkConfigService`):** Se reutiliza una conexión TLS keep-alive para DoH y se intenta primero el DNS local del sistema (5–15 ms) con conmutación automática a DoH cuando la red filtra o envenena nombres, eliminando 3–8 s de sobrecarga por subdominio efímero de CDN.
-  - **Carrera de Primer Ganador y Espejos Directos (`CuevanaPoseidonService` y `SeriesKaoService`):** Reordenados espejos directos de VidHide y StreamWish (sin redirecciones 302 ni espejos rotos), implementada carrera `raceFirstNonNull` + ventana de gracia `collectBatchWithFastWin` (700 ms tras el primer servidor verificado), soporte para respaldos `hls3`/`master.txt` y eliminación de la doble validación redundante. Resolución 2.5×–5× más rápida en películas y series.
-  - **Validación Keep-Alive y Respaldo en Redes Lentas (`StreamValidator`):** Un único `HttpClient` keep-alive reutilizado en toda la cadena HLS (`master.m3u8` → `index.m3u8` → primer segmento `.ts`), sin enviar `Range` en playlists `.m3u8`, timeout ampliado a 10 s y distinción entre rechazo real (`invalid`: 403/404/DMCA) y lentitud de red (`timeout`), conservando candidatos válidos en redes lentas en lugar de mostrar error.
-  - **Proxy HLS Adaptativo y `libmpv` para Redes Lentas (`HlsStreamProxy` y `PlayerScreen`):** Medición en vivo de ancho de banda (`EWMA`) con lookahead adaptativo (+1 segmento en redes lentas < 200 KB/s para no saturar el enlace, +4 en Wi-Fi rápido), 3 reintentos con backoff exponencial en playlists y segmentos (timeout 22 s), prefetch inmediato del segmento 0, y `libmpv` con `network-timeout=30`, `reconnect_on_network_error=1` y guardián anti-pantalla-negra de 22 s en VOD.
+- **Reproducción más rápida en películas, series y anime:** Se redujeron de forma notable los tiempos de arranque antes de empezar a ver cualquier título.
+- **Optimizada para internet lento:** Ajuste automático de carga de video y reintentos inteligentes para evitar cortes, pantallas negras y errores de reproducción en conexiones inestables o de baja velocidad.
 
 ## 3.3.31 — 2026-11-24
-- **Migración Completa a Infraestructura Propia `inutix.com` (0 cuota Firestore + Failover Automático):**
-  - **Eliminación Total de URLs Directas a `firestore.googleapis.com`:** `InutilPromoPopupService` (`app_config/tv_promo_popup`, `app_config/promo_popup`) y `NetworkConfigService` (`runDiagnostics` → `app_config/tv_release`) ahora utilizan `FirebaseConfig.firestoreBaseUrl` para enrutar siempre por `inutix.com`.
-  - **Failover Automático de 3 Capas en Runtime (`LAN → api.inutix.com → backup.inutix.com`):** En `InutilFirestoreService`, `InutilUpdateService` y `InutilPromoPopupService`, si el relay LAN (`192.168.100.27`) falla por conexión conmuta a `api.inutix.com`; si `api.inutix.com` falla por conexión o responde HTTP `502/503/521/522/524/530`, llama a `FirebaseConfig.markCloudRelayUnreachable()` y reintenta automáticamente contra `backup.inutix.com`.
-  - **Sincronización OTA con `api.inutix.com` y `backup.inutix.com`:** `tool/publish_release.sh` actualiza `app_config/tv_release` en el nodo autoritativo `api.inutix.com` (con `X-Admin-Secret`) e invalida la caché en `backup.inutix.com`, manteniendo compatibilidad con Firestore para clientes antiguos.
-  - **Panel Admin (`tool/firebase_admin.py`) sobre `api.inutix.com`:** Lectura y escritura administrativa dirigida por defecto a `https://api.inutix.com` con `X-Admin-Secret` (0 consumo de cuota Firestore).
+- **Conexión más estable con respaldo automático:** Si el servidor principal presenta intermitencias, la app cambia automáticamente a un servidor de respaldo para que sigas viendo tu contenido sin interrupciones.
 
 ## 3.3.30 — 2026-11-24
-- **Seguridad y Aislamiento Estricto por Cuenta en Control Remoto LAN (InútilTV Connect):**
-  - **Autenticación Obligatoria por Cuenta en Puente LAN (HTTP 38443 y UDP 38444):** Se derivó un token criptográfico determinista por cuenta (`SHA-256` sobre el UID de Firebase Auth, header `X-Inutil-Account` y paquete UDP `INUTIL_TV_DISCOVER|<token>`). Las Smart TVs ahora rechazan con `403 Forbidden` cualquier petición de `/api/tv/ping`, `/api/tv/state` o `/api/tv/command` que provenga de un dispositivo con una cuenta distinta en la misma red Wi-Fi.
-  - **Eliminación de IP Hardcodeada y Caché Aislada por Cuenta:** Se eliminó la IP fija de laboratorio (`192.168.100.17`), se aisló el caché de IP LAN en `SharedPreferences` por `uid` (`inutil_tv_lan_host_<uid>`), se purga automáticamente cualquier clave heredada y se limpia la sesión LAN al cerrar sesión o cambiar de cuenta.
-- **Logo PNG sobre la Portada con Desplazamiento Solidario 1:1 (Móvil):**
-  - **Posición sobre la Imagen de Portada:** En `VodDetailModal` móvil, el logo oficial PNG ahora se posiciona directamente sobre la imagen de la portada (no sobre el bloque negro inferior), con una viñeta inferior compacta (`125 px`) que preserva la claridad del arte.
-  - **Desplazamiento Solidario 1:1 con la Barra Negra (`CollapseMode.pin`):** El logo sube en perfecta sincronía 1:1 anclado al borde superior de la barra negra de contenido al scrollear (sin quedar cubierto como cortina), mientras la portada conserva parallax cinematográfico suave (`0.55x`).
-- **TMDB Read Access Token (Bearer Auth):**
-  - Integrado el token oficial de lectura Bearer de TMDB en `TitleLogoService` para consultas autenticadas y más estables de logotipos PNG transparentes.
+- **Control remoto Wi-Fi exclusivo para tu cuenta:** Mayor privacidad al controlar tu Smart TV desde el celular; solo los dispositivos con tu misma cuenta pueden conectarse entre sí.
+- **Logo sobre la portada en móvil:** El logotipo oficial de cada película o serie ahora luce sobre la imagen de portada y se desplaza de forma fluida al deslizar la pantalla.
 
 ## 3.3.29 — 2026-11-23
 - **Fidelidad Total Crunchyroll Mobile & Smart TV (Anclaje de Logo y Layout Compacto):**
