@@ -1,5 +1,10 @@
 # Changelog — InútilTV
 
+## 3.3.21 — 2026-11-23
+- **Canvas dinámico eliminado del modal de detalle:** se quita `LiveCanvasPreview` por completo de la cabecera; ahora siempre se usa `FastArtwork` (tier backdrop, `cacheWidth: 900`) para garantizar portada de alta calidad fija con el efecto de fade-in/deriva.
+- **Crossfade completo del Collapsing Toolbar:** el título grande sobre el arte ahora se desvanece al hacer scroll (`Opacity` ligada a `_collapseFraction`), creando un crossfade limpio con el título pinned de la barra anclada.
+- **Botones de acción con fade-out:** los botones Reproducir / Mi Lista / Descarga en la parte inferior del héroe se desvanecen al colapsar la cabecera con `IgnorePointer` para no interceptar taps cuando están ocultos.
+
 ## 3.3.20 — 2026-11-22
 - **Canvas con calidad fija (petición directa de Cesar):** la rotación en vivo del `LiveCanvasPreview` se apaga en los tres sitios donde se usaba —carrusel héroe, tarjetas del catálogo y cabecera del detalle (`active: false`)—. Motivo medido: los stills que publica el proveedor llegan a `w300` de TMDB, y en un lienzo grande (46% de pantalla) se ven borrosos; el arte fijo sí va por la ruta de alta calidad (`FastArtwork` tier backdrop, `cacheWidth: 900`). El motor de rotación queda intacto y sigue animando cuando se le alimentan stills de calidad (test de v3.3.18 en verde), y se conserva el efecto que sí se ve bien: el velo de vidrio, la entrada con fade/deriva y el parallax.
 - **Collapsing Toolbar en el modal de detalle** (lo que pedía la referencia de Black Clover: `CollapsingToolbarLayout` / `SliverAppBar` con `pinned`):

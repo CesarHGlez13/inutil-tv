@@ -15,7 +15,6 @@ import '../theme/app_colors.dart';
 import '../theme/app_ui.dart';
 import '../theme/inutil_icons.dart';
 import 'fast_artwork.dart';
-import 'live_canvas_preview.dart';
 import 'poster_card.dart';
 import 'tv_focusable.dart';
 import 'tv_remote_sheet.dart';
@@ -178,12 +177,6 @@ class _VodDetailModalState extends State<VodDetailModal>
   int _episodeChunkIndex = 0;
   List<VodEpisode> _episodes = [];
 
-  /// Stills para el canvas en vivo de la cabecera (v3.3.18): los que trajo el
-  /// catálogo y, si viene vacío, los de los episodios cargados — que son los
-  /// stills TMDB reales que el relleno cruzado de v3.3.17 deja en `thumbnail`.
-  List<String> _headerStills(VodItem item) => item.highlightStills.isNotEmpty
-      ? item.highlightStills
-      : VodItem.selectHighlightStills(_episodes);
   bool _loadingEpisodes = false;
   int _requestToken = 0;
 
@@ -608,30 +601,15 @@ class _VodDetailModalState extends State<VodDetailModal>
                         width: double.infinity,
                         child: _revealed(
                           context,
-                          _headerStills(item).length >= 2
-                              // Canvas en vivo (v3.3.18) con la ROTACIÓN apagada
-                              // en la app (v3.3.20): los stills del proveedor son
-                              // w300 de TMDB y en un lienzo de este tamaño se ven
-                              // borrosos, así que `active: false` deja el lienzo
-                              // base estático (tier backdrop, alta calidad) y el
-                              // motor de rotación sigue intacto para datos buenos.
-                              ? LiveCanvasPreview(
-                                  title: item.title,
-                                  posterUrl: item.poster,
-                                  backdropUrl: image,
-                                  stills: _headerStills(item),
-                                  active: false,
-                                  radius: 0,
+                          image.isNotEmpty
+                              ? FastArtwork(
+                                  url: image,
+                                  tier: ArtworkTier.backdrop,
+                                  cacheWidth: 900,
+                                  fit: BoxFit.cover,
+                                  errorWidget: ColoredBox(color: surface),
                                 )
-                              : image.isNotEmpty
-                                  ? FastArtwork(
-                                      url: image,
-                                      tier: ArtworkTier.backdrop,
-                                      cacheWidth: 900,
-                                      fit: BoxFit.cover,
-                                      errorWidget: ColoredBox(color: surface),
-                                    )
-                                  : ColoredBox(color: surface),
+                              : ColoredBox(color: surface),
                         ),
                       ),
                       Positioned.fill(
@@ -689,45 +667,65 @@ class _VodDetailModalState extends State<VodDetailModal>
                           },
                         ),
                       ),
-                      // Rótulo dentro del lienzo (v3.3.19): la referencia mete el
-                      // logo de la obra SOBRE el arte, centrado y con un bloom que
-                      // lo sostiene. Los proveedores no publican logo real (verificado
-                      // contra el `__NEXT_DATA__` de PoseidonHD2: cero campos de logo),
-                      // así que lo sostiene la tipografía display de la app, agrandada.
+                      // Rótulo dentro del lienzo (v3.3.19): tipografía display
+                      // sobre el arte. Se desvanece al colapsar (crossfade con
+                      // el título anclado en la barra pinned).
                       Positioned(
                         left: 24,
                         right: 24,
                         bottom: 78,
-                        child: Center(
-                          child: Text(
-                            item.title,
-                            textAlign: TextAlign.center,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: appTabTitleStyle(context).copyWith(
-                              fontSize: TvModeService.of(context) ? 46 : 31,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing:
-                                  TvModeService.of(context) ? -1.0 : -0.65,
-                              color: Colors.white,
-                              shadows: const [
-                                Shadow(
-                                  blurRadius: 28,
-                                  color: Colors.black87,
-                                  offset: Offset(0, 3),
+                        child: Builder(
+                          builder: (context) {
+                            final k = _collapseFraction(context);
+                            return Opacity(
+                              opacity: (1.0 - k * 2.5).clamp(0.0, 1.0),
+                              child: Center(
+                                child: Text(
+                                  item.title,
+                                  textAlign: TextAlign.center,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: appTabTitleStyle(context).copyWith(
+                                    fontSize:
+                                        TvModeService.of(context) ? 46 : 31,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing:
+                                        TvModeService.of(context)
+                                            ? -1.0
+                                            : -0.65,
+                                    color: Colors.white,
+                                    shadows: const [
+                                      Shadow(
+                                        blurRadius: 28,
+                                        color: Colors.black87,
+                                        offset: Offset(0, 3),
+                                      ),
+                                      Shadow(
+                                        blurRadius: 10,
+                                        color: Colors.black54,
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                Shadow(blurRadius: 10, color: Colors.black54),
-                              ],
-                            ),
-                          ),
+                              ),
+                            );
+                          },
                         ),
                       ),
                       // Botones primarios sobrios (Blanco puro + vidrio + Descarga offline)
+                      // Se desvanecen al colapsar la cabecera.
                       Positioned(
                         bottom: 12,
                         left: 16,
                         right: 16,
-                        child: SingleChildScrollView(
+                        child: Builder(
+                          builder: (context) {
+                            final k = _collapseFraction(context);
+                            return Opacity(
+                              opacity: (1.0 - k * 2.5).clamp(0.0, 1.0),
+                              child: IgnorePointer(
+                                ignoring: k > 0.4,
+                                child: SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
                           child: ListenableBuilder(
                             listenable: TvRemoteService.instance,
@@ -1037,6 +1035,10 @@ class _VodDetailModalState extends State<VodDetailModal>
                               );
                             },
                           ),
+                        ),
+                              ),
+                            );
+                          },
                         ),
                       ),
                     ],
