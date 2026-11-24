@@ -30,21 +30,41 @@ class HlsStreamProxy {
 
   static const int _maxTotalCacheBytes = 36 * 1024 * 1024; // 36 MB máx. global
   static const int _maxSessions = 6;
-  static const Duration _upstreamTimeout = Duration(seconds: 12);
+  static const Duration _connectTimeout = Duration(seconds: 12);
+  static const Duration _upstreamTimeout = Duration(seconds: 22);
 
   HttpServer? _server;
   HttpClient? _sharedHttpClient;
   int _port = 0;
   int _nextSessionSeq = 0;
+  double _ewmaBytesPerSec = 0;
   final Map<String, _ProxySession> _sessions = {};
   final Map<String, _VaultPlaybackSession> _vaultSessions = {};
   Future<void>? _starting;
+
+  /// Estima cuántos segmentos adelantar según el ancho de banda real medido.
+  /// En redes lentas (< 200 KB/s ≈ 1.6 Mbps) limita el lookahead a +1 segmento
+  /// para que el segmento actual reciba todo el ancho de banda sin saturarse.
+  @visibleForTesting
+  static int adaptiveLookaheadForThroughput(double bytesPerSec) {
+    if (bytesPerSec <= 0) return 3; // aún sin medir: balanceado
+    if (bytesPerSec < 200 * 1024) return 1; // red lenta (3G / 4G débil)
+    if (bytesPerSec < 600 * 1024) return 2; // red media
+    return 4; // Wi-Fi / fibra rápida
+  }
+
+  void _recordThroughput(int bytes, int elapsedMs) {
+    if (bytes < 4096 || elapsedMs <= 0) return;
+    final sample = (bytes * 1000.0) / elapsedMs;
+    _ewmaBytesPerSec =
+        _ewmaBytesPerSec <= 0 ? sample : (_ewmaBytesPerSec * 0.65 + sample * 0.35);
+  }
 
   HttpClient get _httpClient {
     final existing = _sharedHttpClient;
     if (existing != null) return existing;
     final c = HttpClient()
-      ..connectionTimeout = _upstreamTimeout
+      ..connectionTimeout = _connectTimeout
       ..idleTimeout = const Duration(seconds: 30)
       ..maxConnectionsPerHost = 8
       ..badCertificateCallback = (_, __, ___) => true;
@@ -52,7 +72,7 @@ class HlsStreamProxy {
     NetworkConfigService.instance.apply(
       c,
       tolerateBadCertificates: true,
-      connectTimeout: _upstreamTimeout,
+      connectTimeout: _connectTimeout,
     );
     _sharedHttpClient = c;
     return c;
@@ -534,6 +554,8 @@ class HlsStreamProxy {
       session.rewrittenMaster = body;
       if (fetched.segmentIndices.isNotEmpty) {
         session.activeMediaSegmentIndices = fetched.segmentIndices;
+        // Comenzar a descargar el primer segmento inmediatamente mientras libmpv parsea
+        _triggerLookahead(session, fetched.segmentIndices.first - 1, maxAhead: 1);
       }
     }
 
@@ -571,6 +593,8 @@ class HlsStreamProxy {
       session.rewrittenSubPlaylists[idx] = body;
       if (fetched.segmentIndices.isNotEmpty) {
         session.activeMediaSegmentIndices = fetched.segmentIndices;
+        // Comenzar a descargar el primer segmento inmediatamente mientras libmpv parsea
+        _triggerLookahead(session, fetched.segmentIndices.first - 1, maxAhead: 1);
       }
     }
 
@@ -621,9 +645,9 @@ class HlsStreamProxy {
     await req.response.close();
   }
 
-  void _triggerLookahead(_ProxySession session, int currentIdx) {
-    // Lookahead agresivo +4 segmentos con pool keep-alive para cero cortes de red
-    for (var offset = 1; offset <= 4; offset++) {
+  void _triggerLookahead(_ProxySession session, int currentIdx, {int? maxAhead}) {
+    final ahead = maxAhead ?? adaptiveLookaheadForThroughput(_ewmaBytesPerSec);
+    for (var offset = 1; offset <= ahead; offset++) {
       final nextIdx = currentIdx + offset;
       if (!session.segments.containsKey(nextIdx)) continue;
       if (session.cachedSegments.containsKey(nextIdx)) continue;
@@ -992,101 +1016,128 @@ class HlsStreamProxy {
     _ProxySession session,
     String upstreamUrl,
   ) async {
-    try {
-      final uri = Uri.parse(upstreamUrl);
-      final req = await _httpClient.getUrl(uri).timeout(_upstreamTimeout);
-      _applyUpstreamHeaders(req, session.headers);
-      final res = await req.close().timeout(_upstreamTimeout);
-      if (res.statusCode < 200 || res.statusCode >= 300) {
-        await res.drain<void>().catchError((_) {});
-        return null;
-      }
-
-      var resolvedBase = uri;
-      for (final r in res.redirects) {
-        resolvedBase = resolvedBase.resolveUri(r.location);
-      }
-
-      final rawBytes = await _readAllBytes(res);
-      final text = utf8.decode(rawBytes, allowMalformed: true);
-      if (!text.contains('#EXTM3U')) return null;
-
-      final lines = text.split(RegExp(r'\r?\n'));
-      final out = StringBuffer();
-      final variantIndices = <int>[];
-      final segmentIndices = <int>[];
-      var lastLineWasStreamInf = false;
-      var lastBandwidth = 0;
-      var bestBandwidth = -1;
-      int? preferredVariantIdx;
-
-      for (final rawLine in lines) {
-        final line = rawLine.trim();
-        if (line.isEmpty) continue;
-
-        if (line.startsWith('#')) {
-          if (line.startsWith('#EXT-X-STREAM-INF')) {
-            lastLineWasStreamInf = true;
-            final bwMatch = RegExp(r'BANDWIDTH=(\d+)').firstMatch(line);
-            lastBandwidth = int.tryParse(bwMatch?.group(1) ?? '') ?? 0;
-            out.writeln(line);
-          } else if (line.startsWith('#EXT-X-KEY') ||
-              line.startsWith('#EXT-X-MAP') ||
-              line.startsWith('#EXT-X-MEDIA')) {
-            // Reescribir URI="..." hacia /key/ o /pl/ local
-            final rewrittenTag = line.replaceAllMapped(
-              RegExp(r'URI="([^"]+)"'),
-              (m) {
-                final abs = resolvedBase.resolve(m.group(1)!).toString();
-                if (line.startsWith('#EXT-X-MEDIA') &&
-                    abs.toLowerCase().contains('.m3u8')) {
-                  final plIdx = session.registerSubPlaylist(abs);
-                  return 'URI="http://127.0.0.1:$_port/s/${session.id}/pl/$plIdx.m3u8"';
-                }
-                final keyIdx = session.registerKey(abs);
-                return 'URI="http://127.0.0.1:$_port/s/${session.id}/key/$keyIdx.bin"';
-              },
+    final uri = Uri.parse(upstreamUrl);
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        final req = await _httpClient.getUrl(uri).timeout(_connectTimeout);
+        _applyUpstreamHeaders(req, session.headers);
+        final res = await req.close().timeout(_upstreamTimeout);
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          await res.drain<void>().catchError((_) {});
+          if (attempt < 2) {
+            await Future<void>.delayed(
+              Duration(milliseconds: attempt == 0 ? 250 : 750),
             );
-            out.writeln(rewrittenTag);
-          } else {
-            out.writeln(line);
           }
           continue;
         }
 
-        final absUrl = resolvedBase.resolve(line).toString();
-        final looksLikePlaylist = lastLineWasStreamInf ||
-            absUrl.toLowerCase().contains('.m3u8') ||
-            absUrl.toLowerCase().contains('chunklist') ||
-            absUrl.toLowerCase().contains('index-');
-
-        if (looksLikePlaylist) {
-          final plIdx = session.registerSubPlaylist(absUrl);
-          variantIndices.add(plIdx);
-          if (lastBandwidth >= bestBandwidth) {
-            bestBandwidth = lastBandwidth;
-            preferredVariantIdx = plIdx;
-          }
-          out.writeln('http://127.0.0.1:$_port/s/${session.id}/pl/$plIdx.m3u8');
-        } else {
-          final segIdx = session.registerSegment(absUrl);
-          segmentIndices.add(segIdx);
-          out.writeln('http://127.0.0.1:$_port/s/${session.id}/seg/$segIdx.ts');
+        var resolvedBase = uri;
+        for (final r in res.redirects) {
+          resolvedBase = resolvedBase.resolveUri(r.location);
         }
-        lastLineWasStreamInf = false;
-        lastBandwidth = 0;
-      }
 
-      return _RewrittenPlaylist(
-        rewrittenBody: out.toString(),
-        variantIndices: variantIndices,
-        preferredVariantIndex: preferredVariantIdx,
-        segmentIndices: segmentIndices,
-      );
-    } catch (e) {
-      debugPrint('[HlsStreamProxy] Playlist fetch err: $e');
-      return null;
+        final rawBytes = await _readAllBytes(res).timeout(_upstreamTimeout);
+        final text = utf8.decode(rawBytes, allowMalformed: true);
+        if (!text.contains('#EXTM3U')) {
+          if (attempt < 2) {
+            await Future<void>.delayed(
+              Duration(milliseconds: attempt == 0 ? 250 : 750),
+            );
+          }
+          continue;
+        }
+
+        final lines = text.split(RegExp(r'\r?\n'));
+        final out = StringBuffer();
+        final variantIndices = <int>[];
+        final segmentIndices = <int>[];
+        var lastLineWasStreamInf = false;
+        var lastBandwidth = 0;
+        var bestBandwidth = -1;
+        int? preferredVariantIdx;
+        final preferLowBitrate =
+            _ewmaBytesPerSec > 0 && _ewmaBytesPerSec < 350 * 1024;
+        var bestSlowBandwidth = 1 << 30;
+
+        for (final rawLine in lines) {
+          final line = rawLine.trim();
+          if (line.isEmpty) continue;
+
+          if (line.startsWith('#')) {
+            if (line.startsWith('#EXT-X-STREAM-INF')) {
+              lastLineWasStreamInf = true;
+              final bwMatch = RegExp(r'BANDWIDTH=(\d+)').firstMatch(line);
+              lastBandwidth = int.tryParse(bwMatch?.group(1) ?? '') ?? 0;
+              out.writeln(line);
+            } else if (line.startsWith('#EXT-X-KEY') ||
+                line.startsWith('#EXT-X-MAP') ||
+                line.startsWith('#EXT-X-MEDIA')) {
+              // Reescribir URI="..." hacia /key/ o /pl/ local
+              final rewrittenTag = line.replaceAllMapped(
+                RegExp(r'URI="([^"]+)"'),
+                (m) {
+                  final abs = resolvedBase.resolve(m.group(1)!).toString();
+                  if (line.startsWith('#EXT-X-MEDIA') &&
+                      abs.toLowerCase().contains('.m3u8')) {
+                    final plIdx = session.registerSubPlaylist(abs);
+                    return 'URI="http://127.0.0.1:$_port/s/${session.id}/pl/$plIdx.m3u8"';
+                  }
+                  final keyIdx = session.registerKey(abs);
+                  return 'URI="http://127.0.0.1:$_port/s/${session.id}/key/$keyIdx.bin"';
+                },
+              );
+              out.writeln(rewrittenTag);
+            } else {
+              out.writeln(line);
+            }
+            continue;
+          }
+
+          final absUrl = resolvedBase.resolve(line).toString();
+          final looksLikePlaylist = lastLineWasStreamInf ||
+              absUrl.toLowerCase().contains('.m3u8') ||
+              absUrl.toLowerCase().contains('chunklist') ||
+              absUrl.toLowerCase().contains('index-');
+
+          if (looksLikePlaylist) {
+            final plIdx = session.registerSubPlaylist(absUrl);
+            variantIndices.add(plIdx);
+            if (preferLowBitrate && lastBandwidth > 0) {
+              if (lastBandwidth < bestSlowBandwidth) {
+                bestSlowBandwidth = lastBandwidth;
+                preferredVariantIdx = plIdx;
+              }
+            } else if (lastBandwidth >= bestBandwidth) {
+              bestBandwidth = lastBandwidth;
+              preferredVariantIdx = plIdx;
+            }
+            out.writeln('http://127.0.0.1:$_port/s/${session.id}/pl/$plIdx.m3u8');
+          } else {
+            final segIdx = session.registerSegment(absUrl);
+            segmentIndices.add(segIdx);
+            out.writeln('http://127.0.0.1:$_port/s/${session.id}/seg/$segIdx.ts');
+          }
+          lastLineWasStreamInf = false;
+          lastBandwidth = 0;
+        }
+
+        return _RewrittenPlaylist(
+          rewrittenBody: out.toString(),
+          variantIndices: variantIndices,
+          preferredVariantIndex: preferredVariantIdx,
+          segmentIndices: segmentIndices,
+        );
+      } catch (e) {
+        debugPrint('[HlsStreamProxy] Playlist fetch err (intento ${attempt + 1}): $e');
+        if (attempt < 2) {
+          await Future<void>.delayed(
+            Duration(milliseconds: attempt == 0 ? 250 : 750),
+          );
+        }
+      }
     }
+    return null;
   }
 
   Future<Uint8List?> _fetchSegmentBytes(
@@ -1105,20 +1156,28 @@ class HlsStreamProxy {
 
     final future = () async {
       try {
-        for (var attempt = 0; attempt < 2; attempt++) {
+        for (var attempt = 0; attempt < 3; attempt++) {
           try {
+            final sw = Stopwatch()..start();
             final req = await _httpClient
                 .getUrl(Uri.parse(upstream))
-                .timeout(_upstreamTimeout);
+                .timeout(_connectTimeout);
             _applyUpstreamHeaders(req, session.headers);
             final res = await req.close().timeout(_upstreamTimeout);
             if (res.statusCode < 200 || res.statusCode >= 300) {
               await res.drain<void>().catchError((_) {});
+              if (attempt < 2) {
+                await Future<void>.delayed(
+                  Duration(milliseconds: attempt == 0 ? 250 : 750),
+                );
+              }
               continue;
             }
 
-            final raw = await _readAllBytes(res);
+            final raw = await _readAllBytes(res).timeout(_upstreamTimeout);
+            sw.stop();
             if (raw.isEmpty) continue;
+            _recordThroughput(raw.length, sw.elapsedMilliseconds);
 
             final clean = stripDisguisedHeader(raw);
             if (storeInCache) {
@@ -1126,8 +1185,10 @@ class HlsStreamProxy {
             }
             return clean;
           } catch (_) {
-            if (attempt == 0) {
-              await Future<void>.delayed(const Duration(milliseconds: 120));
+            if (attempt < 2) {
+              await Future<void>.delayed(
+                Duration(milliseconds: attempt == 0 ? 250 : 750),
+              );
             }
           }
         }

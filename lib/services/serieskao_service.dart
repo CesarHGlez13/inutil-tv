@@ -436,51 +436,82 @@ class SeriesKaoService {
       });
 
       final cp = CuevanaPoseidonService();
-      final resolved = <StreamSource>[];
+      final verified = <StreamSource>[];
+      final timeoutFallbacks = <StreamSource>[];
       final seenUrls = <String>{};
 
-      // Carrera en lotes paralelos de 3 hosts para resolución rápida (~2s)
+      // Carrera en lotes paralelos de 3 hosts: retorna en cuanto haya >=1 servidor
+      // verificado por bytes (sin esperar otro lote extra de 8s) y conserva respaldo
+      // en caso de timeout por red lenta.
       const batchSize = 3;
-      for (var i = 0; i < embeds.length && resolved.length < 2; i += batchSize) {
+      for (var i = 0; i < embeds.length && verified.isEmpty; i += batchSize) {
         final batch = embeds.skip(i).take(batchSize).toList();
         onStatus?.call(
           'Verificando servidor (${batch.first.langLabel})...',
         );
 
-        final batchResults = await Future.wait(batch.map((e) async {
-          StreamSource? src;
-          if (e.server == 'vidhide') {
-            src = await cp.extractVidHide(
-              e.url,
-              label: 'HD · ${e.langLabel}',
-            );
-          } else if (e.server == 'streamwish') {
-            src = await cp.extractStreamWish(
-              e.url,
-              label: 'HD · ${e.langLabel}',
-            );
-          } else if (e.server == 'vidara') {
-            src = await cp.extractVidara(
-              e.url,
-              label: 'HD · ${e.langLabel}',
-            );
-          }
-          if (src == null) return null;
-          final ok = await StreamValidator.validateUrl(
-            src.url,
-            headers: src.headers,
-          );
-          return ok ? src : null;
-        }));
+        final batchResults = await CuevanaPoseidonService.collectBatchWithFastWin(
+          batch.map((e) async {
+            List<StreamSource> extracted = const [];
+            if (e.server == 'vidhide') {
+              extracted = await cp.extractVidHideCandidates(
+                e.url,
+                label: 'HD · ${e.langLabel}',
+              );
+            } else if (e.server == 'streamwish') {
+              extracted = await cp.extractStreamWishCandidates(
+                e.url,
+                label: 'HD · ${e.langLabel}',
+              );
+            } else if (e.server == 'vidara') {
+              final s = await cp.extractVidara(
+                e.url,
+                label: 'HD · ${e.langLabel}',
+              );
+              if (s != null) extracted = [s];
+            }
+            if (extracted.isEmpty) {
+              return (null as StreamSource?, StreamValidationStatus.invalid);
+            }
 
-        for (final s in batchResults) {
-          if (s != null && seenUrls.add(s.url)) {
-            resolved.add(s);
+            StreamSource? timedOutCandidate;
+            for (final src in extracted) {
+              final status = await StreamValidator.validateUrlDetailed(
+                src.url,
+                headers: src.headers,
+                timeout: const Duration(seconds: 9),
+              );
+              if (status == StreamValidationStatus.valid) {
+                return (src, status);
+              }
+              if (status == StreamValidationStatus.timeout &&
+                  timedOutCandidate == null) {
+                timedOutCandidate = src;
+              }
+            }
+            if (timedOutCandidate != null) {
+              return (timedOutCandidate, StreamValidationStatus.timeout);
+            }
+            return (null as StreamSource?, StreamValidationStatus.invalid);
+          }).toList(growable: false),
+        );
+
+        for (final (s, status) in batchResults) {
+          if (s == null || !seenUrls.add(s.url)) continue;
+          if (status == StreamValidationStatus.valid) {
+            verified.add(s);
+          } else if (status == StreamValidationStatus.timeout) {
+            timeoutFallbacks.add(s);
           }
         }
       }
 
-      if (resolved.isNotEmpty) {
+      final resolved = <StreamSource>[
+        ...verified,
+        if (verified.length < 2) ...timeoutFallbacks,
+      ];
+
+      if (verified.isNotEmpty) {
         _streamCache[cacheKey] = _CachedSkStreams(
           resolved,
           DateTime.now().add(const Duration(hours: 2)),

@@ -113,6 +113,8 @@ class NetworkConfigService extends ChangeNotifier {
   final Map<String, Future<String?>> _dnsPending = {};
   final Set<String> _tlsInspectedHosts = {};
   DateTime? _dohDownUntil;
+  DateTime? _preferDohFirstUntil;
+  HttpClient? _dohClient;
   NetworkIssue _lastIssue = NetworkIssue.none;
   bool _overrideInstalled = false;
 
@@ -186,6 +188,9 @@ class NetworkConfigService extends ChangeNotifier {
     _dnsPending.clear();
     _tlsInspectedHosts.clear();
     _dohDownUntil = null;
+    _preferDohFirstUntil = null;
+    _dohClient?.close(force: true);
+    _dohClient = null;
     _lastIssue = NetworkIssue.none;
     _dohEndpoints = _kDohEndpoints;
   }
@@ -379,19 +384,37 @@ class NetworkConfigService extends ChangeNotifier {
     );
   }
 
+  HttpClient _getDohClient() {
+    final existing = _dohClient;
+    if (existing != null) return existing;
+    final client = HttpClient()
+      ..connectionTimeout = _dohQueryTimeout
+      ..idleTimeout = const Duration(seconds: 45)
+      ..maxConnectionsPerHost = 4;
+    client.connectionFactory = (uri, proxyHost, proxyPort) => _plainConnect(
+          uri,
+          proxyHost,
+          proxyPort,
+          timeout: _dohQueryTimeout,
+        );
+    _dohClient = client;
+    return client;
+  }
+
   Future<String?> _queryDoh(String host) async {
     final downUntil = _dohDownUntil;
     if (downUntil != null && downUntil.isAfter(DateTime.now())) return null;
 
     var anyReachable = false;
-    for (final base in _dohEndpoints) {
-      for (final type in const ['A', 'AAAA']) {
+    // Priorizar IPv4 ('A') primero en todos los resolvers (99% de CDNs de video);
+    // sólo consultar 'AAAA' si ningún servidor devolvió registro A.
+    for (final type in const ['A', 'AAAA']) {
+      for (final base in _dohEndpoints) {
         _dbg('queryDoh($host) antes de _queryOnce $type en $base');
         final result = await _queryOnce(base, host, type);
         _dbg('queryDoh($host) volvio $type -> ${result.ip} reachable=${result.reachable}');
         if (result.ip != null) return result.ip;
-        if (!result.reachable) break; // este entorno no responde: probar otro
-        anyReachable = true;
+        if (result.reachable) anyReachable = true;
       }
     }
     // Sólo se descarta DoH si NINGÚN servidor respondió: un dominio muerto
@@ -402,8 +425,9 @@ class NetworkConfigService extends ChangeNotifier {
     return null;
   }
 
-  /// Consulta un entorno DoH. `reachable: false` significa que el entorno no
-  /// contestó (bloqueo o apagón), distinto de "el dominio no existe".
+  /// Consulta un entorno DoH reutilizando conexión TLS keep-alive.
+  /// `reachable: false` significa que el entorno no contestó (bloqueo o apagón),
+  /// distinto de "el dominio no existe".
   Future<({String? ip, bool reachable})> _queryOnce(
     String base,
     String host,
@@ -411,13 +435,7 @@ class NetworkConfigService extends ChangeNotifier {
   ) async {
     // El propio DoH SIEMPRE usa el DNS del sistema: si se resolviera con DoH
     // habría recursión infinita cuando la red también bloquea cloudflare-dns.
-    final client = HttpClient()..connectionTimeout = _dohQueryTimeout;
-    client.connectionFactory = (uri, proxyHost, proxyPort) => _plainConnect(
-          uri,
-          proxyHost,
-          proxyPort,
-          timeout: _dohQueryTimeout,
-        );
+    final client = _getDohClient();
     try {
       final uri = Uri.parse(base).replace(
         queryParameters: {'name': host, 'type': type},
@@ -427,7 +445,10 @@ class NetworkConfigService extends ChangeNotifier {
       req.headers.set('accept', 'application/dns-json');
       final res = await req.close().timeout(_dohQueryTimeout);
       _dbg('queryOnce $host $type: estado ${res.statusCode}');
-      if (res.statusCode != 200) return (ip: null, reachable: false);
+      if (res.statusCode != 200) {
+        await res.drain<void>().catchError((_) {});
+        return (ip: null, reachable: false);
+      }
       final body = await utf8.decoder
           .bind(res)
           .join()
@@ -451,8 +472,6 @@ class NetworkConfigService extends ChangeNotifier {
     } catch (_) {
       // red muy lenta o DoH bloqueado: se prueba el siguiente entorno
       return (ip: null, reachable: false);
-    } finally {
-      client.close(force: true);
     }
   }
 
@@ -515,6 +534,14 @@ class NetworkConfigService extends ChangeNotifier {
     );
   }
 
+  static bool _isLocalOrIpHost(String host) {
+    final lower = host.toLowerCase();
+    return lower == 'localhost' ||
+        lower == '127.0.0.1' ||
+        lower == '::1' ||
+        RegExp(r'^\d{1,3}(\.\d{1,3}){3}$').hasMatch(lower);
+  }
+
   Future<ConnectionTask<Socket>> _directConnect(
     Uri uri, {
     required Duration timeout,
@@ -523,29 +550,76 @@ class NetworkConfigService extends ChangeNotifier {
     final host = uri.host;
     final port = uri.port;
     final needsTls = uri.scheme == 'https';
-    final resolved = await resolve(host);
+    final lower = host.toLowerCase();
+    final isLiteralOrLocal = _isLocalOrIpHost(lower);
 
     Socket? raw;
-    var viaCachedIp = false;
-    // Intento 1: IP real del DNS seguro (si la red filtraba el nombre, esta
-    // es la que funciona).
-    if (resolved != null && resolved != host) {
+    String? targetIp;
+
+    // 1. Si ya tenemos IP válida en caché DoH (0 ms) o detectamos red con DNS filtrado,
+    //    usamos DoH primero. En redes normales/móviles lentas evitamos pagar un roundtrip
+    //    extra de DoH por cada subdominio efímero de CDN y vamos directo al DNS del sistema
+    //    (5-15 ms), con fallback instantáneo a DoH si el DNS local falla o bloquea el host.
+    final cachedDoh = _dnsCache[lower];
+    final hasFreshDohCache =
+        cachedDoh != null && cachedDoh.expiresAt.isAfter(DateTime.now());
+    final preferDohFirst = !isLiteralOrLocal &&
+        _secureDns &&
+        (hasFreshDohCache ||
+            (_preferDohFirstUntil != null &&
+                _preferDohFirstUntil!.isAfter(DateTime.now())));
+
+    if (preferDohFirst) {
+      final resolved = hasFreshDohCache ? cachedDoh.ip : await resolve(host);
+      if (resolved != null && resolved != host) {
+        try {
+          raw = await Socket.connect(resolved, port, timeout: timeout);
+          targetIp = resolved;
+        } catch (_) {
+          raw = null;
+        }
+      }
+      if (raw == null) {
+        try {
+          raw = await Socket.connect(host, port, timeout: timeout);
+        } on SocketException {
+          if (resolved == null) _lastIssue = NetworkIssue.dnsBlocked;
+          rethrow;
+        }
+      }
+    } else {
+      // Ruta rápida: DNS del sistema primero (0 ms de sobrecarga en Wi-Fi / 4G / red lenta)
       try {
-        raw = await Socket.connect(resolved, port, timeout: timeout);
-        viaCachedIp = true;
+        raw = await Socket.connect(host, port, timeout: timeout);
+        // Si un firewall envenenó el DNS devolviendo 0.0.0.0/127.x para un host externo,
+        // descartar y resolver por DoH.
+        if (!isLiteralOrLocal &&
+            (raw.remoteAddress.address == '0.0.0.0' ||
+                raw.remoteAddress.isLoopback)) {
+          raw.destroy();
+          raw = null;
+        }
       } catch (_) {
         raw = null;
       }
-    }
-    // Intento 2 (o único): DNS del sistema, comportamiento original.
-    if (raw == null) {
-      try {
-        raw = await Socket.connect(host, port, timeout: timeout);
-      } on SocketException {
-        // El DNS del sistema tampoco resolvió y no hay IP segura: la red está
-        // filtrando los nombres (típico en WiFi de empresa o de hotel).
-        if (resolved == null) _lastIssue = NetworkIssue.dnsBlocked;
-        rethrow;
+
+      if (raw == null && !isLiteralOrLocal && _secureDns) {
+        final resolved = await resolve(host);
+        if (resolved != null && resolved != host) {
+          try {
+            raw = await Socket.connect(resolved, port, timeout: timeout);
+            targetIp = resolved;
+            // La red local filtró o falló pero DoH sí conectó: preferir DoH los próximos 10 min.
+            _preferDohFirstUntil = DateTime.now().add(const Duration(minutes: 10));
+          } catch (_) {
+            raw = null;
+          }
+        }
+      }
+
+      if (raw == null) {
+        _lastIssue = NetworkIssue.dnsBlocked;
+        throw SocketException('No se pudo conectar a $host:$port');
       }
     }
     _lastIssue = NetworkIssue.none;
@@ -561,7 +635,7 @@ class NetworkConfigService extends ChangeNotifier {
     final secure = await _handshake(
       raw,
       sniHost: host,
-      target: viaCachedIp ? resolved! : host,
+      target: targetIp ?? host,
       port: port,
       timeout: timeout,
       tolerateBadCertificates: tolerateBadCertificates,

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -310,62 +311,97 @@ class CuevanaPoseidonService {
       return [];
     }
 
-    final resolved = <StreamSource>[];
+    final verified = <StreamSource>[];
+    final timeoutFallbacks = <StreamSource>[];
     final seenUrls = <String>{};
 
-    // Carrera en lotes paralelos de 3 hosts para resolución rápida (~2-3s)
+    // Carrera en lotes paralelos de 3 hosts (sin doble validación y con respaldo
+    // para redes lentas si la sonda excede el tiempo pero el servidor sí extrajo URL).
     const batchSize = 3;
-    for (var i = 0; i < candidates.length && resolved.length < 2; i += batchSize) {
+    for (var i = 0; i < candidates.length && verified.isEmpty; i += batchSize) {
       final batch = candidates.skip(i).take(batchSize).toList();
       final first = batch.first;
       onStatus?.call(
         'Verificando servidor (${first.language})...',
       );
 
-      final batchResults = await Future.wait(batch.map((cand) async {
-        final embedUrl = await _resolvePlayerRedirect(cand.playerPhpUrl);
-        if (embedUrl == null) return null;
+      final batchResults = await collectBatchWithFastWin(
+        batch.map((cand) async {
+          final embedUrl = await _resolvePlayerRedirect(cand.playerPhpUrl);
+          if (embedUrl == null) {
+            return (null as StreamSource?, StreamValidationStatus.invalid);
+          }
 
-        StreamSource? source;
-        if (cand.cyberlocker == 'vidhide') {
-          source = await extractVidHide(
-            embedUrl,
-            label: 'HD · ${cand.language}',
-          );
-        } else if (cand.cyberlocker == 'streamwish') {
-          source = await extractStreamWish(
-            embedUrl,
-            label: 'HD · ${cand.language}',
-          );
-        } else if (cand.cyberlocker == 'vidara') {
-          source = await extractVidara(
-            embedUrl,
-            label: 'HD · ${cand.language}',
-          );
-        } else if (cand.cyberlocker == 'doodstream') {
-          source = await _extractDoodstream(
-            embedUrl,
-            referer: cand.playerPhpUrl,
-            label: 'HD · ${cand.language}',
-          );
-        }
+          List<StreamSource> extracted = const [];
+          if (cand.cyberlocker == 'vidhide') {
+            extracted = await extractVidHideCandidates(
+              embedUrl,
+              label: 'HD · ${cand.language}',
+            );
+          } else if (cand.cyberlocker == 'streamwish') {
+            extracted = await extractStreamWishCandidates(
+              embedUrl,
+              label: 'HD · ${cand.language}',
+            );
+          } else if (cand.cyberlocker == 'vidara') {
+            final s = await extractVidara(
+              embedUrl,
+              label: 'HD · ${cand.language}',
+            );
+            if (s != null) extracted = [s];
+          } else if (cand.cyberlocker == 'doodstream') {
+            final s = await _extractDoodstream(
+              embedUrl,
+              referer: cand.playerPhpUrl,
+              label: 'HD · ${cand.language}',
+            );
+            if (s != null) extracted = [s];
+          }
 
-        if (source == null) return null;
-        final valid = await StreamValidator.validateUrl(
-          source.url,
-          headers: source.headers,
-        );
-        return valid ? source : null;
-      }));
+          if (extracted.isEmpty) {
+            return (null as StreamSource?, StreamValidationStatus.invalid);
+          }
+          StreamSource? timedOutCandidate;
+          for (final source in extracted) {
+            final status = await StreamValidator.validateUrlDetailed(
+              source.url,
+              headers: source.headers,
+              timeout: const Duration(seconds: 9),
+            );
+            if (status == StreamValidationStatus.valid) {
+              return (source, status);
+            }
+            if (status == StreamValidationStatus.timeout &&
+                timedOutCandidate == null) {
+              timedOutCandidate = source;
+            }
+          }
+          if (timedOutCandidate != null) {
+            return (timedOutCandidate, StreamValidationStatus.timeout);
+          }
+          return (null as StreamSource?, StreamValidationStatus.invalid);
+        }).toList(growable: false),
+      );
 
-      for (final source in batchResults) {
-        if (source != null && seenUrls.add(source.url)) {
-          resolved.add(source);
+      for (final (source, status) in batchResults) {
+        if (source == null || !seenUrls.add(source.url)) continue;
+        if (status == StreamValidationStatus.valid) {
+          verified.add(source);
+        } else if (status == StreamValidationStatus.timeout) {
+          timeoutFallbacks.add(source);
         }
       }
     }
 
-    if (resolved.isNotEmpty) {
+    // Priorizar siempre los validados por bytes; si la red es muy lenta y sólo
+    // hubo timeouts (no DMCA/404), entregar los extraídos para que HlsStreamProxy
+    // los reproduzca con reintentos y timeout amplio.
+    final resolved = <StreamSource>[
+      ...verified,
+      if (verified.length < 2) ...timeoutFallbacks,
+    ];
+
+    if (verified.isNotEmpty) {
       _streamCache[path] = _CachedStreams(
         resolved,
         DateTime.now().add(const Duration(hours: 2)),
@@ -375,209 +411,284 @@ class CuevanaPoseidonService {
     return resolved;
   }
 
+  /// Ejecuta un lote de candidatos en paralelo y devuelve inmediatamente en cuanto
+  /// todos terminan o tras una ventana de gracia de [graceWindow] desde el primer
+  /// servidor `valid` (evita esperar 6-10s por un Doodstream o espejo colgado cuando
+  /// VidHide o StreamWish ya respondieron en ~1s).
+  static Future<List<(StreamSource?, StreamValidationStatus)>>
+      collectBatchWithFastWin(
+    List<Future<(StreamSource?, StreamValidationStatus)>> tasks, {
+    Duration graceWindow = const Duration(milliseconds: 700),
+  }) async {
+    if (tasks.isEmpty) return const [];
+    final completer =
+        Completer<List<(StreamSource?, StreamValidationStatus)>>();
+    final collected = <(StreamSource?, StreamValidationStatus)>[];
+    var remaining = tasks.length;
+    Timer? graceTimer;
+
+    void finish() {
+      graceTimer?.cancel();
+      if (!completer.isCompleted) {
+        completer.complete(List.of(collected));
+      }
+    }
+
+    for (final task in tasks) {
+      task.then((res) {
+        collected.add(res);
+        remaining--;
+        final isValid = res.$1 != null && res.$2 == StreamValidationStatus.valid;
+        if (remaining <= 0) {
+          finish();
+        } else if (isValid && graceTimer == null) {
+          graceTimer = Timer(graceWindow, finish);
+        }
+      }).catchError((Object _) {
+        remaining--;
+        if (remaining <= 0) finish();
+      });
+    }
+    return completer.future;
+  }
+
+  /// Ejecuta [tasks] en paralelo y devuelve el PRIMER resultado no-nulo apenas
+  /// responde (sin esperar a que los espejos lentos o caídos agoten timeout).
+  @visibleForTesting
+  static Future<T?> raceFirstNonNull<T>(List<Future<T?>> tasks) async {
+    if (tasks.isEmpty) return null;
+    final completer = Completer<T?>();
+    var remaining = tasks.length;
+    for (final task in tasks) {
+      task.then((value) {
+        if (value != null && !completer.isCompleted) {
+          completer.complete(value);
+          return;
+        }
+        remaining--;
+        if (remaining <= 0 && !completer.isCompleted) {
+          completer.complete(null);
+        }
+      }).catchError((Object _) {
+        remaining--;
+        if (remaining <= 0 && !completer.isCompleted) {
+          completer.complete(null);
+        }
+      });
+    }
+    return completer.future;
+  }
+
   // ── Extracción de hosts reales ─────────────────────────────────────────────
 
+  // Espejos directos primero (200 OK sin redirección 302 extra) para mínima latencia
   static const List<String> _streamWishMirrors = [
-    'cdnwish.com',
-    'jodwish.com',
     'swhoi.com',
-    'uqloads.xyz',
+    'jodwish.com',
     'embedwish.com',
     'swishsrv.com',
+    'uqloads.xyz',
     'iplayerhls.com',
+    'cdnwish.com',
   ];
 
-  /// Extrae todos los `.m3u8` del JS desempaquetado y los ordena priorizando
-  /// rutas `/stream/.../master.m3u8` (200 OK) por encima de CDNs `premilkyway.com/hls2`
-  /// (que suelen devolver 502 Bad Gateway).
+  /// Extrae todos los `.m3u8` (y respaldos `master.txt` / `/stream/...`) del JS
+  /// desempaquetado y los ordena priorizando rutas `/stream/.../master.m3u8`
+  /// (200 OK) por encima de CDNs `premilkyway.com/hls2` (que suelen dar 502).
   @visibleForTesting
   static List<String> rankExtractedM3u8Urls(String hay, String host) {
     final matches = RegExp(
-      r'''(https?://[^\s"'<>]+\.m3u8[^\s"'<>]*|/stream/[^\s"'<>]+\.m3u8[^\s"'<>]*)''',
+      r'''(https?://[^\s"'<>]+\.(?:m3u8|txt)(?:\?[^\s"'<>]*)?|/stream/[^\s"'<>]+\.(?:m3u8|txt)(?:\?[^\s"'<>]*)?)''',
     ).allMatches(hay);
     final urls = <String>[];
     final seen = <String>{};
     for (final m in matches) {
       var u = m.group(1)!;
+      final lower = u.toLowerCase();
+      // Filtrar .txt que no sean playlists HLS (solo aceptar master.txt / hls / stream)
+      if (lower.contains('.txt') &&
+          !lower.contains('master.txt') &&
+          !lower.contains('/hls') &&
+          !lower.contains('/stream/')) {
+        continue;
+      }
       if (u.startsWith('/')) u = 'https://$host$u';
       if (seen.add(u)) urls.add(u);
     }
 
     int score(String u) {
       final l = u.toLowerCase();
-      if (l.contains('/stream/')) return 0; // Más confiable (200 OK)
-      if (l.contains('premilkyway.com/hls2')) return 3; // Suele dar 502
+      if (l.contains('/stream/') && l.contains('.m3u8')) return 0; // Más confiable
+      if (l.contains('premilkyway.com/hls2')) return 4; // Suele dar 502
       if (l.contains('master.m3u8')) return 1;
-      return 2;
+      if (l.contains('.m3u8')) return 2;
+      if (l.contains('master.txt')) return 3; // Respaldo HLS3/HLS4 válido
+      return 5;
     }
 
     urls.sort((a, b) => score(a).compareTo(score(b)));
     return urls;
   }
 
-  /// Extrae HLS 1080p desde StreamWish probando sus 7 espejos activos en paralelo
-  /// y priorizando `/stream/.../master.m3u8`.
-  Future<StreamSource?> extractStreamWish(
+  /// Extrae candidatos HLS ordenados desde StreamWish usando carrera de primer ganador.
+  Future<List<StreamSource>> extractStreamWishCandidates(
     String embedUrl, {
     required String label,
   }) async {
     try {
       final uri = Uri.parse(embedUrl);
       final segs = uri.pathSegments.where((s) => s.isNotEmpty).toList();
-      if (segs.isEmpty) return null;
+      if (segs.isEmpty) return const [];
       final code = segs.last;
 
       const batchSize = 3;
       for (var i = 0; i < _streamWishMirrors.length; i += batchSize) {
         final batch = _streamWishMirrors.skip(i).take(batchSize).toList();
-        final results = await Future.wait(batch.map((host) async {
-          try {
-            final mirrorUrl = 'https://$host/e/$code';
-            final res = await http
-                .get(
-                  Uri.parse(mirrorUrl),
-                  headers: {
-                    ..._headers,
-                    'Referer': 'https://player.poseidonhd2.co/',
-                  },
-                )
-                .timeout(const Duration(seconds: 6));
-            if (res.statusCode != 200) return null;
+        final winner = await raceFirstNonNull<List<StreamSource>>(
+          batch.map((host) async {
+            try {
+              final mirrorUrl = 'https://$host/e/$code';
+              final res = await http
+                  .get(
+                    Uri.parse(mirrorUrl),
+                    headers: {
+                      ..._headers,
+                      'Referer': 'https://player.poseidonhd2.co/',
+                    },
+                  )
+                  .timeout(const Duration(seconds: 10));
+              if (res.statusCode != 200) return null;
 
-            final unpacked = _unpackDeanEdwards(res.body);
-            final hay = unpacked ?? res.body;
-            final ranked = rankExtractedM3u8Urls(hay, host);
-            if (ranked.isEmpty) return null;
+              final effectiveHost = res.request?.url.host.isNotEmpty == true
+                  ? res.request!.url.host
+                  : host;
+              final unpacked = _unpackDeanEdwards(res.body);
+              final hay = unpacked ?? res.body;
+              final ranked = rankExtractedM3u8Urls(hay, effectiveHost);
+              if (ranked.isEmpty) return null;
 
-            final headers = {
-              'Referer': 'https://$host/',
-              'Origin': 'https://$host',
-              'User-Agent': StreamValidator.defaultUserAgent,
-            };
-
-            // Si hay más de un m3u8 (p. ej. /stream/ + premilkyway), elegir el primero vivo
-            for (final candidateUrl in ranked) {
-              if (ranked.length == 1) {
-                return StreamSource(
-                  url: candidateUrl,
-                  quality: label,
-                  server: 'streamwish',
-                  headers: headers,
-                );
-              }
-              final ok = await StreamValidator.validateUrl(
-                candidateUrl,
-                headers: headers,
-                timeout: const Duration(seconds: 5),
-              );
-              if (ok) {
-                return StreamSource(
-                  url: candidateUrl,
-                  quality: label,
-                  server: 'streamwish',
-                  headers: headers,
-                );
-              }
+              final headers = {
+                'Referer': 'https://$effectiveHost/',
+                'Origin': 'https://$effectiveHost',
+                'User-Agent': StreamValidator.defaultUserAgent,
+              };
+              return [
+                for (final candidateUrl in ranked)
+                  StreamSource(
+                    url: candidateUrl,
+                    quality: label,
+                    server: 'streamwish',
+                    headers: headers,
+                  ),
+              ];
+            } catch (_) {
+              return null;
             }
-          } catch (_) {}
-          return null;
-        }));
+          }).toList(growable: false),
+        );
 
-        for (final r in results) {
-          if (r != null) return r;
-        }
+        if (winner != null && winner.isNotEmpty) return winner;
       }
     } catch (e) {
       debugPrint('[CuevanaPoseidon] StreamWish err: $e');
     }
-    return null;
+    return const [];
   }
 
+  /// Extrae HLS 1080p desde StreamWish probando sus espejos activos en paralelo.
+  Future<StreamSource?> extractStreamWish(
+    String embedUrl, {
+    required String label,
+  }) async {
+    final cands = await extractStreamWishCandidates(embedUrl, label: label);
+    return cands.isNotEmpty ? cands.first : null;
+  }
+
+  // Espejos directos primero (callistanise / peytonepre / smoothpre responden 200
+  // directo sin redirección 302 ni errores SSL como dhtpre.com).
   static const List<String> _vidHideMirrors = [
+    'callistanise.com',
+    'peytonepre.com',
+    'smoothpre.com',
     'vidhidevip.com',
     'vidhideplus.com',
-    'callistanise.com',
-    'dhtpre.com',
-    'peytonepre.com',
     'bingezove.com',
-    'smoothpre.com',
+    'niikaplayerr.com',
   ];
 
-  /// Extrae HLS 1080p desde VidHide probando sus 7 espejos activos en paralelo
+  /// Extrae candidatos HLS ordenados desde VidHide usando carrera de primer ganador
   /// y desempaquetando el bloque Dean Edwards `eval(function(p,a,c,k,e,d))`.
-  Future<StreamSource?> extractVidHide(
+  Future<List<StreamSource>> extractVidHideCandidates(
     String embedUrl, {
     required String label,
   }) async {
     try {
       final uri = Uri.parse(embedUrl);
       final segs = uri.pathSegments.where((s) => s.isNotEmpty).toList();
-      if (segs.isEmpty) return null;
+      if (segs.isEmpty) return const [];
       final code = segs.last;
 
       const batchSize = 3;
       for (var i = 0; i < _vidHideMirrors.length; i += batchSize) {
         final batch = _vidHideMirrors.skip(i).take(batchSize).toList();
-        final results = await Future.wait(batch.map((host) async {
-          try {
-            final mirrorUrl = 'https://$host/v/$code';
-            final res = await http
-                .get(
-                  Uri.parse(mirrorUrl),
-                  headers: {
-                    ..._headers,
-                    'Referer': 'https://player.poseidonhd2.co/',
-                  },
-                )
-                .timeout(const Duration(seconds: 6));
-            if (res.statusCode != 200) return null;
+        final winner = await raceFirstNonNull<List<StreamSource>>(
+          batch.map((host) async {
+            try {
+              final mirrorUrl = 'https://$host/v/$code';
+              final res = await http
+                  .get(
+                    Uri.parse(mirrorUrl),
+                    headers: {
+                      ..._headers,
+                      'Referer': 'https://player.poseidonhd2.co/',
+                    },
+                  )
+                  .timeout(const Duration(seconds: 10));
+              if (res.statusCode != 200) return null;
 
-            final unpacked = _unpackDeanEdwards(res.body);
-            final hay = unpacked ?? res.body;
-            final ranked = rankExtractedM3u8Urls(hay, host);
-            if (ranked.isEmpty) return null;
+              final effectiveHost = res.request?.url.host.isNotEmpty == true
+                  ? res.request!.url.host
+                  : host;
+              final unpacked = _unpackDeanEdwards(res.body);
+              final hay = unpacked ?? res.body;
+              final ranked = rankExtractedM3u8Urls(hay, effectiveHost);
+              if (ranked.isEmpty) return null;
 
-            final headers = {
-              'Referer': 'https://$host/',
-              'Origin': 'https://$host',
-              'User-Agent': StreamValidator.defaultUserAgent,
-            };
-
-            for (final candidateUrl in ranked) {
-              if (ranked.length == 1) {
-                return StreamSource(
-                  url: candidateUrl,
-                  quality: label,
-                  server: 'vidhide',
-                  headers: headers,
-                );
-              }
-              final ok = await StreamValidator.validateUrl(
-                candidateUrl,
-                headers: headers,
-                timeout: const Duration(seconds: 5),
-              );
-              if (ok) {
-                return StreamSource(
-                  url: candidateUrl,
-                  quality: label,
-                  server: 'vidhide',
-                  headers: headers,
-                );
-              }
+              final headers = {
+                'Referer': 'https://$effectiveHost/',
+                'Origin': 'https://$effectiveHost',
+                'User-Agent': StreamValidator.defaultUserAgent,
+              };
+              return [
+                for (final candidateUrl in ranked)
+                  StreamSource(
+                    url: candidateUrl,
+                    quality: label,
+                    server: 'vidhide',
+                    headers: headers,
+                  ),
+              ];
+            } catch (_) {
+              return null;
             }
-          } catch (_) {}
-          return null;
-        }));
+          }).toList(growable: false),
+        );
 
-        for (final r in results) {
-          if (r != null) return r;
-        }
+        if (winner != null && winner.isNotEmpty) return winner;
       }
     } catch (e) {
       debugPrint('[CuevanaPoseidon] VidHide err: $e');
     }
-    return null;
+    return const [];
+  }
+
+  /// Extrae HLS 1080p desde VidHide probando sus espejos activos en paralelo.
+  Future<StreamSource?> extractVidHide(
+    String embedUrl, {
+    required String label,
+  }) async {
+    final cands = await extractVidHideCandidates(embedUrl, label: label);
+    return cands.isNotEmpty ? cands.first : null;
   }
 
   /// Desempaquetador nativo puro en Dart para bloques JS `eval(function(p,a,c,k,e,d)...)`.
@@ -631,7 +742,7 @@ class CuevanaPoseidonService {
             Uri.parse(playerPhpUrl),
             headers: {..._headers, 'Referer': '$_activeMirror/'},
           )
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(seconds: 12));
       if (res.statusCode != 200) return null;
       final m = RegExp(r"""var\s+url\s*=\s*['"]([^'"]+)['"]""")
               .firstMatch(res.body) ??

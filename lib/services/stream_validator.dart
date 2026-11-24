@@ -3,6 +3,13 @@ import 'dart:io';
 
 import 'network_config_service.dart';
 
+/// Resultado granular de la validación de un enlace de video:
+/// - [valid]: bytes multimedia reales verificados (MPEG-TS, MP4, MKV, AES-128).
+/// - [invalid]: el servidor respondió con error HTTP (403/404/5xx) o HTML/DMCA.
+/// - [timeout]: la red no alcanzó a responder dentro del límite (útil en redes
+///   lentas para conservar el candidato como respaldo si ningún otro ganó rápido).
+enum StreamValidationStatus { valid, invalid, timeout }
+
 /// Validador real de streams de video (HLS / MP4 / MPEG-TS) para InútilTV.
 ///
 /// Resuelve el problema clásico de "pantalla negra en 0:00": muchos servidores
@@ -165,9 +172,12 @@ class StreamValidator {
   }
 
   /// Cliente HTTP de validación: respeta el proxy corporativo y el DNS seguro
-  /// configurados en Ajustes (ver `NetworkConfigService`).
+  /// configurados en Ajustes (ver `NetworkConfigService`) y mantiene keep-alive
+  /// entre master.m3u8 -> index.m3u8 -> primer segmento .ts (1 solo handshake TLS).
   static HttpClient _validationClient(Duration timeout) {
     final client = HttpClient()
+      ..idleTimeout = const Duration(seconds: 15)
+      ..maxConnectionsPerHost = 4
       ..badCertificateCallback = (_, __, ___) => true;
     NetworkConfigService.instance.apply(
       client,
@@ -181,12 +191,34 @@ class StreamValidator {
   static Future<bool> validateUrl(
     String url, {
     Map<String, String> headers = const {},
-    Duration timeout = const Duration(seconds: 6),
+    Duration timeout = const Duration(seconds: 10),
     int depth = 0,
   }) async {
-    if (depth > 3 || !url.startsWith('http')) return false;
+    final status = await validateUrlDetailed(
+      url,
+      headers: headers,
+      timeout: timeout,
+      depth: depth,
+    );
+    return status == StreamValidationStatus.valid;
+  }
 
-    final client = _validationClient(timeout);
+  /// Igual que [validateUrl] pero distingue entre rechazo real (`invalid`: 403/404/DMCA)
+  /// y vencimiento de tiempo por red lenta (`timeout`), reutilizando el mismo
+  /// `HttpClient` keep-alive en toda la cadena HLS para ahorrar 2 handshakes TLS.
+  static Future<StreamValidationStatus> validateUrlDetailed(
+    String url, {
+    Map<String, String> headers = const {},
+    Duration timeout = const Duration(seconds: 10),
+    int depth = 0,
+    HttpClient? sharedClient,
+  }) async {
+    if (depth > 3 || !url.startsWith('http')) {
+      return StreamValidationStatus.invalid;
+    }
+
+    final ownsClient = sharedClient == null;
+    final client = sharedClient ?? _validationClient(timeout);
 
     try {
       final uri = Uri.parse(url);
@@ -197,15 +229,23 @@ class StreamValidator {
           req.headers.set(k, v);
         }
       });
-      req.headers.set('Range', 'bytes=0-16383');
+      final lowerUrl = url.toLowerCase();
+      final looksLikePlaylistUrl = lowerUrl.contains('.m3u8') ||
+          lowerUrl.contains('master.txt') ||
+          lowerUrl.contains('/playlist');
+      // No enviar Range en playlists .m3u8/.txt (algunos CDNs devuelven 416/403).
+      if (!looksLikePlaylistUrl) {
+        req.headers.set('Range', 'bytes=0-16383');
+      }
 
       final res = await req.close().timeout(timeout);
       if (res.statusCode < 200 || res.statusCode >= 400) {
-        return false;
+        await res.drain<void>().catchError((_) {});
+        return StreamValidationStatus.invalid;
       }
 
       final bytes = await _readUpTo(res, 16384).timeout(timeout);
-      if (bytes.isEmpty) return false;
+      if (bytes.isEmpty) return StreamValidationStatus.invalid;
 
       // ¿Es un playlist HLS (#EXTM3U)?
       final prefixLen = bytes.length < 128 ? bytes.length : 128;
@@ -219,47 +259,62 @@ class StreamValidator {
             .map((l) => l.trim())
             .where((l) => l.isNotEmpty && !l.startsWith('#'))
             .toList();
-        if (lines.isEmpty) return false;
+        if (lines.isEmpty) return StreamValidationStatus.invalid;
 
-        final nextUri = uri.resolve(lines.first).toString();
-        final isSubPlaylist = nextUri.contains('.m3u8') ||
-            nextUri.contains('master') ||
-            nextUri.contains('index') ||
-            nextUri.contains('chunklist') ||
-            nextUri.contains('playlist');
+        var resolvedBase = uri;
+        for (final r in res.redirects) {
+          resolvedBase = resolvedBase.resolveUri(r.location);
+        }
+        final nextUri = resolvedBase.resolve(lines.first).toString();
+        final nextLower = nextUri.toLowerCase();
+        final isSubPlaylist = nextLower.contains('.m3u8') ||
+            nextLower.contains('master') ||
+            nextLower.contains('index') ||
+            nextLower.contains('chunklist') ||
+            nextLower.contains('playlist');
 
         if (isSubPlaylist && depth < 2) {
-          return await validateUrl(
+          return await validateUrlDetailed(
             nextUri,
             headers: headers,
             timeout: timeout,
             depth: depth + 1,
+            sharedClient: client,
           );
         }
 
-        // Verificar bytes reales del primer segmento de video
-        return await _validateSegmentBytes(
+        // Verificar bytes reales del primer segmento de video usando el MISMO client keep-alive
+        return await _validateSegmentBytesDetailed(
           nextUri,
           headers: headers,
           timeout: timeout,
+          client: client,
         );
       }
 
       // Stream directo (MP4 / TS / MKV)
-      return isPlayableMediaBytes(bytes);
+      return isPlayableMediaBytes(bytes)
+          ? StreamValidationStatus.valid
+          : StreamValidationStatus.invalid;
+    } on TimeoutException {
+      return StreamValidationStatus.timeout;
+    } on SocketException {
+      return StreamValidationStatus.timeout;
     } catch (_) {
-      return false;
+      return StreamValidationStatus.invalid;
     } finally {
-      client.close(force: true);
+      if (ownsClient) {
+        client.close(force: true);
+      }
     }
   }
 
-  static Future<bool> _validateSegmentBytes(
+  static Future<StreamValidationStatus> _validateSegmentBytesDetailed(
     String segmentUrl, {
     required Map<String, String> headers,
     required Duration timeout,
+    required HttpClient client,
   }) async {
-    final client = _validationClient(timeout);
     try {
       final req = await client.getUrl(Uri.parse(segmentUrl)).timeout(timeout);
       req.headers.set('User-Agent', headers['User-Agent'] ?? defaultUserAgent);
@@ -271,14 +326,21 @@ class StreamValidator {
       req.headers.set('Range', 'bytes=0-1023');
 
       final res = await req.close().timeout(timeout);
-      if (res.statusCode < 200 || res.statusCode >= 400) return false;
+      if (res.statusCode < 200 || res.statusCode >= 400) {
+        await res.drain<void>().catchError((_) {});
+        return StreamValidationStatus.invalid;
+      }
 
       final bytes = await _readUpTo(res, 1024).timeout(timeout);
-      return isPlayableMediaBytes(bytes);
+      return isPlayableMediaBytes(bytes)
+          ? StreamValidationStatus.valid
+          : StreamValidationStatus.invalid;
+    } on TimeoutException {
+      return StreamValidationStatus.timeout;
+    } on SocketException {
+      return StreamValidationStatus.timeout;
     } catch (_) {
-      return false;
-    } finally {
-      client.close(force: true);
+      return StreamValidationStatus.invalid;
     }
   }
 

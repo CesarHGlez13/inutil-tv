@@ -390,16 +390,16 @@ class _PlayerScreenState extends State<PlayerScreen>
       'cache': 'yes',
       'cache-pause': 'yes',
       'cache-pause-initial': 'yes',
-      'cache-pause-wait': isVod ? '1.5' : '1.0',
+      'cache-pause-wait': isVod ? '2.0' : '1.0',
       'demuxer-max-bytes': isTv
           ? (isVod ? '16MiB' : '10MiB')
           : (settings.ultraBuffer ? '64MiB' : '32MiB'),
       'demuxer-max-back-bytes': isTv ? '6MiB' : '16MiB',
       'demuxer-readahead-secs':
-          isTv ? (isVod ? '20' : '8') : (isVod ? '60' : '12'),
-      'network-timeout': '15',
+          isTv ? (isVod ? '24' : '8') : (isVod ? '60' : '12'),
+      'network-timeout': '30',
       'stream-lavf-o':
-          'reconnect=1,reconnect_streamed=1,reconnect_delay_max=5,multiple_requests=1',
+          'reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=8,multiple_requests=1',
       'framedrop': 'vo',
       'video-sync': 'audio',
       'hwdec-codecs': 'h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1',
@@ -816,9 +816,9 @@ class _PlayerScreenState extends State<PlayerScreen>
         });
       }
 
-      // Guardián anti-pantalla-negra: si tras 12s no llegan fotogramas reales,
-      // cambia automáticamente al siguiente servidor validado.
-      _stallTimer = Timer(const Duration(seconds: 12), () {
+      // Guardián anti-pantalla-negra: en VOD damos 22s para tolerar redes lentas
+      // (3G/4G débil) sin abortar mientras se descarga el primer segmento; en TV en Vivo 12s.
+      _stallTimer = Timer(Duration(seconds: _isVodMode ? 22 : 12), () {
         if (!mounted || _hasVideo || _error != null || _resolving) return;
         _failoverOrShowError('Tiempo de espera agotado');
       });

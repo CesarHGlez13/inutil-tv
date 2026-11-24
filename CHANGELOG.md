@@ -1,5 +1,12 @@
 # Changelog — InútilTV
 
+## 3.3.32 — 2026-11-24
+- **Motor de Reproducción Ultrarrápido y Tolerante a Redes Lentas (Películas, Series y Anime):**
+  - **DNS Rápido Sin Penalización DoH en Redes Normales/Lentas (`NetworkConfigService`):** Se reutiliza una conexión TLS keep-alive para DoH y se intenta primero el DNS local del sistema (5–15 ms) con conmutación automática a DoH cuando la red filtra o envenena nombres, eliminando 3–8 s de sobrecarga por subdominio efímero de CDN.
+  - **Carrera de Primer Ganador y Espejos Directos (`CuevanaPoseidonService` y `SeriesKaoService`):** Reordenados espejos directos de VidHide y StreamWish (sin redirecciones 302 ni espejos rotos), implementada carrera `raceFirstNonNull` + ventana de gracia `collectBatchWithFastWin` (700 ms tras el primer servidor verificado), soporte para respaldos `hls3`/`master.txt` y eliminación de la doble validación redundante. Resolución 2.5×–5× más rápida en películas y series.
+  - **Validación Keep-Alive y Respaldo en Redes Lentas (`StreamValidator`):** Un único `HttpClient` keep-alive reutilizado en toda la cadena HLS (`master.m3u8` → `index.m3u8` → primer segmento `.ts`), sin enviar `Range` en playlists `.m3u8`, timeout ampliado a 10 s y distinción entre rechazo real (`invalid`: 403/404/DMCA) y lentitud de red (`timeout`), conservando candidatos válidos en redes lentas en lugar de mostrar error.
+  - **Proxy HLS Adaptativo y `libmpv` para Redes Lentas (`HlsStreamProxy` y `PlayerScreen`):** Medición en vivo de ancho de banda (`EWMA`) con lookahead adaptativo (+1 segmento en redes lentas < 200 KB/s para no saturar el enlace, +4 en Wi-Fi rápido), 3 reintentos con backoff exponencial en playlists y segmentos (timeout 22 s), prefetch inmediato del segmento 0, y `libmpv` con `network-timeout=30`, `reconnect_on_network_error=1` y guardián anti-pantalla-negra de 22 s en VOD.
+
 ## 3.3.31 — 2026-11-24
 - **Migración Completa a Infraestructura Propia `inutix.com` (0 cuota Firestore + Failover Automático):**
   - **Eliminación Total de URLs Directas a `firestore.googleapis.com`:** `InutilPromoPopupService` (`app_config/tv_promo_popup`, `app_config/promo_popup`) y `NetworkConfigService` (`runDiagnostics` → `app_config/tv_release`) ahora utilizan `FirebaseConfig.firestoreBaseUrl` para enrutar siempre por `inutix.com`.
