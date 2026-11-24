@@ -93,6 +93,7 @@ class FastArtwork extends StatelessWidget {
   final String? localFilePath;
   final ArtworkTier tier;
   final BoxFit fit;
+  final AlignmentGeometry alignment;
   final int? cacheWidth;
   final int? cacheHeight;
   final FilterQuality filterQuality;
@@ -105,6 +106,7 @@ class FastArtwork extends StatelessWidget {
     this.localFilePath,
     this.tier = ArtworkTier.poster,
     this.fit = BoxFit.cover,
+    this.alignment = Alignment.center,
     this.cacheWidth,
     this.cacheHeight,
     this.filterQuality = FilterQuality.medium,
@@ -134,6 +136,7 @@ class FastArtwork extends StatelessWidget {
             FileImage(f),
           ),
           fit: fit,
+          alignment: alignment,
           filterQuality: filterQuality,
           gaplessPlayback: true,
           errorBuilder: (_, __, ___) => _buildError(context),
@@ -156,6 +159,7 @@ class FastArtwork extends StatelessWidget {
     return Image(
       image: provider,
       fit: fit,
+      alignment: alignment,
       filterQuality: filterQuality,
       gaplessPlayback: true,
       errorBuilder: (_, __, ___) => _buildError(context),

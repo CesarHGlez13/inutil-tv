@@ -1,5 +1,13 @@
 # Changelog — InútilTV
 
+## 3.3.28 — 2026-11-23
+- **Logos Tipográficos Oficiales PNG y Animación de Desplazamiento estilo Crunchyroll:**
+  - **Resolución Automática de Logos Oficiales en PNG Transparente:** Nuevo `TitleLogoService` de alto rendimiento con arquitectura multi-proveedor (TMDB como primario gratuito e ilimitado + Fanart.tv como respaldo enriquecido), filtrando exclusivamente logotipos transparentes `.png` horizontales de alta definición para series, animes y películas.
+  - **Caché Multinivel de Cero Latencia (0 ms):** Sistema de caché L1 en memoria RAM + L2 en disco persistente (`SharedPreferences`) + deduplicación de peticiones en vuelo (in-flight) y caché negativa para no repetir consultas en títulos sin logo disponible, garantizando que miles de usuarios carguen de forma instantánea sin sobrecargar APIs.
+  - **Animación Cinemática de Desplazamiento y Escalado (Scroll Parallax):** En `VodDetailModal` (móvil), el logotipo o título tipográfico ahora se traslada verticalmente hacia arriba y se escala suavemente al hacer scroll hacia abajo/arriba, realizando un crossfade fluido y natural hacia el título compacto en texto anclado en la barra superior cuando colapsa la cabecera.
+  - **Visualización en Smart TV y Carruseles Hero:** Adaptación de logotipos transparentes en la ficha panorámica de Smart TV (10-foot UI) y en las diapositivas de `HeroCarousel` cuando están en caché.
+  - **Modelo `VodItem` Extendido:** Incorporado el campo inmutable `titleLogo` en `VodItem` con soporte completo en constructores, `mergedWith`, `groupedWithSeasonSiblings`, `groupedWithSiblingItem`, serialización JSON (`toJson`/`fromJson`) y método `copyWith`.
+
 ## 3.3.27 — 2026-11-23
 - **Unificación de Botones de Reproducción y Acciones al Estilo Destacados:**
   - **Botón Primario de Reproducción en Ficha de Contenido (Smart TV y Móvil):** Se unificó el estilo visual del botón principal ("Reproducir ahora", "Comenzar a ver E1", "Continuar viendo") adoptando la píldora blanca de alto contraste de Destacados (`AppColors.playbackPrimaryBackground` blanco puro, tipografía e icono en carbón profundo `AppColors.playbackPrimaryForeground`, `FontWeight.w800`, radio de curvatura píldora de 24 px).

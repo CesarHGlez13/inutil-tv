@@ -6,6 +6,7 @@ import '../services/tv_mode_service.dart';
 import '../models/models.dart';
 import '../services/artwork_cache_service.dart';
 import '../services/play_target.dart';
+import '../services/title_logo_service.dart';
 import '../services/tv_remote_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_ui.dart';
@@ -421,17 +422,50 @@ class _HeroCarouselState extends State<HeroCarousel>
                                 ],
                               ),
                               const SizedBox(height: 8),
-                              Text(
-                                item.title,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: -0.5,
-                                  height: 1.12,
-                                ),
+                              Builder(
+                                builder: (_) {
+                                  final logo = item.titleLogo.isNotEmpty
+                                      ? item.titleLogo
+                                      : TitleLogoService.instance.getCachedLogo(item);
+                                  if (logo != null && logo.isNotEmpty) {
+                                    return ConstrainedBox(
+                                      constraints: const BoxConstraints(
+                                        maxHeight: 52,
+                                        maxWidth: 280,
+                                      ),
+                                      child: FastArtwork(
+                                        url: logo,
+                                        tier: ArtworkTier.poster,
+                                        fit: BoxFit.contain,
+                                        alignment: Alignment.centerLeft,
+                                        errorWidget: Text(
+                                          item.title,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 24,
+                                            fontWeight: FontWeight.w900,
+                                            letterSpacing: -0.5,
+                                            height: 1.12,
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                  return Text(
+                                    item.title,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: -0.5,
+                                      height: 1.12,
+                                    ),
+                                  );
+                                },
                               ),
                               if (item.overview.isNotEmpty) ...[
                                 const SizedBox(height: 5),
@@ -917,17 +951,50 @@ class _HeroCarouselState extends State<HeroCarousel>
                         ],
                       ),
                       const SizedBox(height: 8),
-                      Text(
-                        item.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.5,
-                          height: 1.12,
-                        ),
+                      Builder(
+                        builder: (_) {
+                          final logo = item.titleLogo.isNotEmpty
+                              ? item.titleLogo
+                              : TitleLogoService.instance.getCachedLogo(item);
+                          if (logo != null && logo.isNotEmpty) {
+                            return ConstrainedBox(
+                              constraints: const BoxConstraints(
+                                maxHeight: 44,
+                                maxWidth: 240,
+                              ),
+                              child: FastArtwork(
+                                url: logo,
+                                tier: ArtworkTier.poster,
+                                fit: BoxFit.contain,
+                                alignment: Alignment.centerLeft,
+                                errorWidget: Text(
+                                  item.title,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.5,
+                                    height: 1.12,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+                          return Text(
+                            item.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.5,
+                              height: 1.12,
+                            ),
+                          );
+                        },
                       ),
                       if (item.overview.isNotEmpty) ...[
                         const SizedBox(height: 5),

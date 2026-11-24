@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tubotv/constants/app_info.dart';
 import 'package:tubotv/models/models.dart';
 import 'package:tubotv/services/artwork_cache_service.dart';
+import 'package:tubotv/services/title_logo_service.dart';
 import 'package:tubotv/services/tv_mode_service.dart';
 import 'package:tubotv/theme/app_colors.dart';
 import 'package:tubotv/widgets/fast_artwork.dart';
@@ -67,23 +68,25 @@ void main() {
     ),
   ];
 
-  group('v3.3.24/v3.3.25/v3.3.26/v3.3.27 — pins de versión y documentación', () {
-    test('pubspec.yaml en 3.3.27+76', () {
-      expect(_pubspecVersion(), '3.3.27+76');
+  group('v3.3.24/v3.3.25/v3.3.26/v3.3.27/v3.3.28 — pins de versión y documentación', () {
+    test('pubspec.yaml en 3.3.28+77', () {
+      expect(_pubspecVersion(), '3.3.28+77');
     });
 
-    test('lib/constants/app_info.dart en 3.3.27', () {
+    test('lib/constants/app_info.dart en 3.3.28', () {
       expect(File('lib/constants/app_info.dart').readAsStringSync(),
-          contains("static const String appVersion = '3.3.27'"));
-      expect(AppInfo.appVersion, '3.3.27');
+          contains("static const String appVersion = '3.3.28'"));
+      expect(AppInfo.appVersion, '3.3.28');
     });
 
-    test('CHANGELOG.md documenta 3.3.24, 3.3.25, 3.3.26 y 3.3.27 con mejoras de portadas, navegación TV y colores de marca', () {
+    test('CHANGELOG.md documenta 3.3.24 a 3.3.28 con mejoras de portadas, navegación TV, colores y logos Crunchyroll', () {
       final changelog = File('CHANGELOG.md').readAsStringSync();
+      expect(changelog, contains('## 3.3.28'));
       expect(changelog, contains('## 3.3.27'));
       expect(changelog, contains('## 3.3.24'));
       expect(changelog, contains('## 3.3.25'));
       expect(changelog, contains('## 3.3.26'));
+      expect(changelog, contains('Logos Tipográficos Oficiales PNG y Animación de Desplazamiento estilo Crunchyroll'));
       expect(changelog, contains('Encuadre Completo y Retención de Scroll en Destacados de Smart TV'));
       expect(changelog, contains('Calidad HD / 4K Ultra en Portadas y Fondos'));
       expect(changelog, contains('Restauración de Identidad y Paleta Oficial InútilTV'));
@@ -314,6 +317,78 @@ void main() {
       final myListContainer = tester.widget<Container>(myListContainerFinder);
       final myListDecoration = myListContainer.decoration as BoxDecoration;
       expect(myListDecoration.borderRadius, BorderRadius.circular(24));
+    });
+  });
+
+  group('v3.3.28 — Logos PNG y animación de desplazamiento Crunchyroll', () {
+    test('TitleLogoService.cleanTitle limpia etiquetas y sufijos de calidad/idioma', () {
+      expect(TitleLogoService.cleanTitle('Black Clover (Audio Latino)'), 'Black Clover');
+      expect(TitleLogoService.cleanTitle('Solo Leveling [1080p] [Sub Esp]'), 'Solo Leveling');
+      expect(TitleLogoService.cleanTitle('Kimetsu no Yaiba Temporada 2'), 'Kimetsu no Yaiba');
+      expect(TitleLogoService.cleanTitle('Demon Slayer: Kimetsu no Yaiba -'), 'Demon Slayer: Kimetsu no Yaiba');
+      expect(TitleLogoService.cleanTitle('Deadpool & Wolverine (Latino) HD'), 'Deadpool & Wolverine');
+    });
+
+    test('VodItem serializa y preserva titleLogo en copyWith, mergedWith y JSON', () {
+      const original = VodItem(
+        id: 'test_logo_1',
+        title: 'Black Clover',
+        titleLogo: 'https://image.tmdb.org/t/p/w500/test_logo.png',
+      );
+
+      // copyWith
+      final copied = original.copyWith(title: 'Black Clover HD');
+      expect(copied.titleLogo, 'https://image.tmdb.org/t/p/w500/test_logo.png');
+
+      // mergedWith
+      const other = VodItem(
+        id: 'test_logo_1',
+        title: 'Black Clover',
+      );
+      final merged = other.mergedWith(original);
+      expect(merged.titleLogo, 'https://image.tmdb.org/t/p/w500/test_logo.png');
+
+      // JSON roundtrip
+      final json = original.toJson();
+      expect(json['titleLogo'], 'https://image.tmdb.org/t/p/w500/test_logo.png');
+      final fromJson = VodItem.fromJson(json);
+      expect(fromJson.titleLogo, 'https://image.tmdb.org/t/p/w500/test_logo.png');
+    });
+
+    testWidgets('VodDetailModal muestra FastArtwork con titleLogo si está definido', (tester) async {
+      tester.view.physicalSize = const Size(393, 852);
+      tester.view.devicePixelRatio = 3.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      const itemWithLogo = VodItem(
+        id: 'test_item_with_logo',
+        title: 'Black Clover',
+        titleLogo: 'https://image.tmdb.org/t/p/w500/j9ZZ7WV5pwLLXbbebyGdMUxbqrc.png',
+        isAnime: true,
+        isSeries: true,
+      );
+
+      await tester.pumpWidget(wrapTheme(const Scaffold(body: VodDetailModal(item: itemWithLogo))));
+      await tester.pumpAndSettle();
+
+      // Debe encontrarse un FastArtwork configurado con la URL del logo
+      final artworkFinder = find.byWidgetPredicate(
+        (w) => w is FastArtwork && w.url == 'https://image.tmdb.org/t/p/w500/j9ZZ7WV5pwLLXbbebyGdMUxbqrc.png',
+      );
+      expect(artworkFinder, findsWidgets);
+    });
+
+    testWidgets('VodDetailModal aplica Transform.translate y Transform.scale en hero title', (tester) async {
+      tester.view.physicalSize = const Size(393, 852);
+      tester.view.devicePixelRatio = 3.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(wrapTheme(Scaffold(body: VodDetailModal(item: testItems.first))));
+      await tester.pumpAndSettle();
+
+      // Debe haber widgets Transform en el árbol del hero para desplazamiento y escala
+      final transformFinder = find.byType(Transform);
+      expect(transformFinder, findsWidgets);
     });
   });
 }

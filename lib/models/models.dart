@@ -248,6 +248,10 @@ class VodItem {
   /// canvas cae en el arte generado (`DynamicPosterCanvas`).
   final List<String> highlightStills;
 
+  /// URL del logo oficial en PNG transparente (v3.3.28 estilo Crunchyroll).
+  /// Resuelto vía [TitleLogoService] sobre TMDB o Fanart.tv.
+  final String titleLogo;
+
   const VodItem({
     required this.id,
     required this.title,
@@ -270,6 +274,7 @@ class VodItem {
     this.genrePath = '',
     this.seasonRefs = const [],
     this.highlightStills = const [],
+    this.titleLogo = '',
   });
 
   List<int> get seasons {
@@ -346,6 +351,7 @@ class VodItem {
       highlightStills: highlightStills.isNotEmpty
           ? highlightStills
           : selectHighlightStills(merged),
+      titleLogo: titleLogo,
     );
   }
 
@@ -457,6 +463,9 @@ class VodItem {
           withEps.genrePath.isNotEmpty ? withEps.genrePath : sibling.genrePath,
       seasonRefs: mergedRefs,
       highlightStills: withEps.highlightStills,
+      titleLogo: withEps.titleLogo.isNotEmpty
+          ? withEps.titleLogo
+          : sibling.titleLogo,
     );
   }
 
@@ -494,6 +503,7 @@ class VodItem {
                 ? highlightStills
                 : selectHighlightStills(
                     other.episodes.isNotEmpty ? other.episodes : episodes)),
+        titleLogo: other.titleLogo.isNotEmpty ? other.titleLogo : titleLogo,
       );
 
   Map<String, dynamic> toJson() => {
@@ -519,6 +529,7 @@ class VodItem {
         if (seasonRefs.isNotEmpty)
           'seasonRefs': seasonRefs.map((r) => r.toJson()).toList(),
         if (highlightStills.isNotEmpty) 'highlightStills': highlightStills,
+        if (titleLogo.isNotEmpty) 'titleLogo': titleLogo,
       };
 
   factory VodItem.fromJson(Map<String, dynamic> j) => VodItem(
@@ -556,6 +567,56 @@ class VodItem {
                 .where((e) => e.isNotEmpty)
                 .toList() ??
             const [],
+        titleLogo: j['titleLogo'] as String? ?? '',
+      );
+
+  VodItem copyWith({
+    String? id,
+    String? title,
+    String? poster,
+    String? backdrop,
+    String? overview,
+    String? year,
+    String? genre,
+    String? rating,
+    String? duration,
+    bool? isSeries,
+    bool? isAnime,
+    List<StreamSource>? sources,
+    List<VodEpisode>? episodes,
+    String? slug,
+    String? provider,
+    String? quality,
+    int? seasonCount,
+    int? episodeCount,
+    String? genrePath,
+    List<VodSeasonRef>? seasonRefs,
+    List<String>? highlightStills,
+    String? titleLogo,
+  }) =>
+      VodItem(
+        id: id ?? this.id,
+        title: title ?? this.title,
+        poster: poster ?? this.poster,
+        backdrop: backdrop ?? this.backdrop,
+        overview: overview ?? this.overview,
+        year: year ?? this.year,
+        genre: genre ?? this.genre,
+        rating: rating ?? this.rating,
+        duration: duration ?? this.duration,
+        isSeries: isSeries ?? this.isSeries,
+        isAnime: isAnime ?? this.isAnime,
+        sources: sources ?? this.sources,
+        episodes: episodes ?? this.episodes,
+        slug: slug ?? this.slug,
+        provider: provider ?? this.provider,
+        quality: quality ?? this.quality,
+        seasonCount: seasonCount ?? this.seasonCount,
+        episodeCount: episodeCount ?? this.episodeCount,
+        genrePath: genrePath ?? this.genrePath,
+        seasonRefs: seasonRefs ?? this.seasonRefs,
+        highlightStills: highlightStills ?? this.highlightStills,
+        titleLogo: titleLogo ?? this.titleLogo,
       );
 
   /// Stills deterministas de «momentos destacados» para el canvas en vivo

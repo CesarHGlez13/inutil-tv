@@ -7,6 +7,7 @@ import '../screens/player_screen.dart';
 import '../services/artwork_cache_service.dart';
 import '../services/my_list_service.dart';
 import '../services/offline_vault_service.dart';
+import '../services/title_logo_service.dart';
 import '../services/tv_mode_service.dart';
 import '../services/tv_remote_service.dart';
 import '../services/vod_catalog_service.dart';
@@ -170,6 +171,7 @@ class _VodDetailModalState extends State<VodDetailModal>
   int _selectedSeason = 1;
   int _episodeChunkIndex = 0;
   List<VodEpisode> _episodes = [];
+  String? _titleLogoUrl;
 
   bool _loadingEpisodes = false;
   int _requestToken = 0;
@@ -178,6 +180,9 @@ class _VodDetailModalState extends State<VodDetailModal>
   void initState() {
     super.initState();
     _item = widget.item;
+    if (_item.titleLogo.isNotEmpty) {
+      _titleLogoUrl = _item.titleLogo;
+    }
     _history.load();
     _myList.load();
     _vault.initialize();
@@ -201,6 +206,7 @@ class _VodDetailModalState extends State<VodDetailModal>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.item.id != widget.item.id) {
       _item = widget.item;
+      _titleLogoUrl = _item.titleLogo.isNotEmpty ? _item.titleLogo : null;
       _episodes = [];
       _selectedSeason = 1;
       _episodeChunkIndex = 0;
@@ -211,6 +217,7 @@ class _VodDetailModalState extends State<VodDetailModal>
 
   void _initForCurrentItem() {
     final token = ++_requestToken;
+    _loadTitleLogo(token);
     _hydrateMetadata(token);
     if (_item.isSeries) {
       if (_item.episodes.isNotEmpty) {
@@ -219,6 +226,30 @@ class _VodDetailModalState extends State<VodDetailModal>
       } else {
         _loadEpisodes(token);
       }
+    }
+  }
+
+  Future<void> _loadTitleLogo(int token) async {
+    if (_item.titleLogo.isNotEmpty) {
+      if (mounted && _titleLogoUrl != _item.titleLogo) {
+        setState(() => _titleLogoUrl = _item.titleLogo);
+      }
+      return;
+    }
+    final cached = TitleLogoService.instance.getCachedLogo(_item);
+    if (cached != null && cached.isNotEmpty) {
+      if (mounted && _titleLogoUrl != cached) {
+        setState(() => _titleLogoUrl = cached);
+      }
+      return;
+    }
+    final logo = await TitleLogoService.instance.getLogoUrl(_item);
+    if (!mounted || token != _requestToken) return;
+    if (logo != null && logo.isNotEmpty) {
+      setState(() {
+        _titleLogoUrl = logo;
+        _item = _item.copyWith(titleLogo: logo);
+      });
     }
   }
 
@@ -687,9 +718,10 @@ class _VodDetailModalState extends State<VodDetailModal>
                           ),
                         ),
                       ),
-                      // Rótulo dentro del lienzo (v3.3.19): tipografía display
-                      // sobre el arte. Se desvanece al colapsar (crossfade con
-                      // el título anclado en la barra pinned).
+                      // Rótulo dentro del lienzo estilo Crunchyroll (v3.3.28):
+                      // Logo PNG transparente (TMDB / Fanart.tv) con desplazamiento
+                      // vertical hacia arriba y escalado al scrollear (crossfade
+                      // con el título compacto anclado en la barra pinned).
                       Positioned(
                         left: 20,
                         right: 20,
@@ -697,34 +729,41 @@ class _VodDetailModalState extends State<VodDetailModal>
                         child: Builder(
                           builder: (context) {
                             final k = _collapseFraction(context);
-                            return Opacity(
-                              opacity: (1.0 - k * 2.5).clamp(0.0, 1.0),
-                              child: Center(
-                                child: Text(
-                                  item.title,
-                                  textAlign: TextAlign.center,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: appTabTitleStyle(context).copyWith(
-                                    fontSize:
-                                        TvModeService.of(context) ? 46 : 31,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing:
-                                        TvModeService.of(context)
-                                            ? -1.0
-                                            : -0.65,
-                                    color: Colors.white,
-                                    shadows: const [
-                                      Shadow(
-                                        blurRadius: 28,
-                                        color: Colors.black87,
-                                        offset: Offset(0, 3),
-                                      ),
-                                      Shadow(
-                                        blurRadius: 10,
-                                        color: Colors.black54,
-                                      ),
-                                    ],
+                            final dy = -k * 54.0;
+                            final scale = (1.0 - k * 0.18).clamp(0.75, 1.0);
+                            final opacity = (1.0 - k * 2.2).clamp(0.0, 1.0);
+                            final logo = _titleLogoUrl;
+
+                            return Transform.translate(
+                              offset: Offset(0, dy),
+                              child: Transform.scale(
+                                scale: scale,
+                                alignment: Alignment.bottomCenter,
+                                child: Opacity(
+                                  opacity: opacity,
+                                  child: Center(
+                                    child: (logo != null && logo.isNotEmpty)
+                                        ? ConstrainedBox(
+                                            constraints: BoxConstraints(
+                                              maxHeight: isTv ? 130 : 86,
+                                              maxWidth: isTv ? 500 : 310,
+                                            ),
+                                            child: FastArtwork(
+                                              url: logo,
+                                              tier: ArtworkTier.poster,
+                                              fit: BoxFit.contain,
+                                              errorWidget: _buildHeroTitleText(
+                                                context,
+                                                item.title,
+                                                isTv,
+                                              ),
+                                            ),
+                                          )
+                                        : _buildHeroTitleText(
+                                            context,
+                                            item.title,
+                                            isTv,
+                                          ),
                                   ),
                                 ),
                               ),
@@ -1336,28 +1375,64 @@ class _VodDetailModalState extends State<VodDetailModal>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Título principal en estilo display
-                        Text(
-                          item.title,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 42,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.8,
-                            height: 1.15,
-                            shadows: [
-                              Shadow(
-                                blurRadius: 24,
-                                color: Colors.black87,
-                                offset: Offset(0, 3),
+                        // Título principal en estilo display o Logo PNG Crunchyroll (v3.3.28)
+                        if (_titleLogoUrl != null && _titleLogoUrl!.isNotEmpty) ...[
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(
+                              maxHeight: 110,
+                              maxWidth: 520,
+                            ),
+                            child: FastArtwork(
+                              url: _titleLogoUrl!,
+                              tier: ArtworkTier.poster,
+                              fit: BoxFit.contain,
+                              alignment: Alignment.centerLeft,
+                              errorWidget: Text(
+                                item.title,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 42,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: -0.8,
+                                  height: 1.15,
+                                  shadows: [
+                                    Shadow(
+                                      blurRadius: 24,
+                                      color: Colors.black87,
+                                      offset: Offset(0, 3),
+                                    ),
+                                    Shadow(
+                                      blurRadius: 10,
+                                      color: Colors.black54,
+                                    ),
+                                  ],
+                                ),
                               ),
-                              Shadow(
-                                blurRadius: 10,
-                                color: Colors.black54,
-                              ),
-                            ],
+                            ),
                           ),
-                        ),
+                        ] else ...[
+                          Text(
+                            item.title,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 42,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.8,
+                              height: 1.15,
+                              shadows: [
+                                Shadow(
+                                  blurRadius: 24,
+                                  color: Colors.black87,
+                                  offset: Offset(0, 3),
+                                ),
+                                Shadow(
+                                  blurRadius: 10,
+                                  color: Colors.black54,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 14),
 
                         // Badges y metadatos TV
@@ -2882,6 +2957,32 @@ class _VodDetailModalState extends State<VodDetailModal>
               fontSize: tv ? 20 : 15,
               fontWeight: FontWeight.w800,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeroTitleText(BuildContext context, String title, bool isTv) {
+    return Text(
+      title,
+      textAlign: TextAlign.center,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: appTabTitleStyle(context).copyWith(
+        fontSize: isTv ? 46 : 31,
+        fontWeight: FontWeight.w900,
+        letterSpacing: isTv ? -1.0 : -0.65,
+        color: Colors.white,
+        shadows: const [
+          Shadow(
+            blurRadius: 28,
+            color: Colors.black87,
+            offset: Offset(0, 3),
+          ),
+          Shadow(
+            blurRadius: 10,
+            color: Colors.black54,
           ),
         ],
       ),
