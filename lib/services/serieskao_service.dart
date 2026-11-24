@@ -7,6 +7,7 @@ import 'package:pointycastle/export.dart' as pc;
 
 import '../models/models.dart';
 import 'cuevana_poseidon_service.dart';
+import 'remote_providers_config.dart';
 import 'stream_validator.dart';
 
 /// Proveedor sólido de Series en Español Latino / Sub (`serieskao.top` + Embed69).
@@ -25,7 +26,7 @@ class SeriesKaoService {
   factory SeriesKaoService() => _instance;
   SeriesKaoService._internal();
 
-  static const String baseUrl = 'https://serieskao.top';
+  static String get baseUrl => RemoteProvidersConfig.instance.seriesKaoBaseUrl;
   static const Map<String, String> _headers = {
     'User-Agent': StreamValidator.defaultUserAgent,
     'Accept-Language': 'es-MX,es;q=0.9,en;q=0.8',

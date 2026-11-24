@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/models.dart';
+import 'remote_providers_config.dart';
 import 'stream_validator.dart';
 
 /// Proveedor de respaldo automático de Anime en Español (`tioanime.com`).
@@ -14,7 +15,7 @@ class TioAnimeService {
   factory TioAnimeService() => _instance;
   TioAnimeService._internal();
 
-  static const String baseUrl = 'https://tioanime.com';
+  static String get baseUrl => RemoteProvidersConfig.instance.tioAnimeBaseUrl;
   static const Map<String, String> _headers = {
     'User-Agent': StreamValidator.defaultUserAgent,
     'Accept-Language': 'es-MX,es;q=0.9',

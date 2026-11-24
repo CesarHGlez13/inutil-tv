@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/models.dart';
+import 'remote_providers_config.dart';
 
 /// Servicio de resolución y caché de logos tipográficos transparentes (PNG)
 /// para carátulas y cabeceras de títulos estilo Crunchyroll 2026.
@@ -122,22 +123,33 @@ class TitleLogoService {
       }
     } catch (_) {}
 
-    // 4. Resolver ID de TMDB y tipo de medio
-    final (tmdbId, mediaType) = await _findTmdbIdentity(item);
+    // 4. Intentar primero el Edge Gateway propio (`meta.inutix.com/logo`, caché
+    //    global de 7 días en Cloudflare Edge sin depender de acceso directo a TMDB).
+    final (localId, localType) = _extractLocalTmdbIdentity(item);
+    final edgeResult = await _fetchEdgeLogo(
+      item: item,
+      tmdbId: localId,
+      mediaType: localType,
+    );
 
     String? logoUrl;
+    if (edgeResult.handled) {
+      logoUrl = edgeResult.logoUrl;
+    } else {
+      // 5. Fallback directo a TMDB Bearer Auth + Fanart.tv si el Edge no respondió
+      final (tmdbId, mediaType) = localId != null && localId > 0
+          ? (localId, localType)
+          : await _findTmdbIdentity(item);
 
-    if (tmdbId != null && tmdbId > 0) {
-      // 5. Consultar TMDB /images
-      logoUrl = await _fetchTmdbLogo(tmdbId, mediaType);
-
-      // 6. Si TMDB no tiene logo, consultar Fanart.tv como fallback
-      if (logoUrl == null || logoUrl.isEmpty) {
-        logoUrl = await _fetchFanartLogo(tmdbId, mediaType);
+      if (tmdbId != null && tmdbId > 0) {
+        logoUrl = await _fetchTmdbLogo(tmdbId, mediaType);
+        if (logoUrl == null || logoUrl.isEmpty) {
+          logoUrl = await _fetchFanartLogo(tmdbId, mediaType);
+        }
       }
     }
 
-    // 7. Guardar en memoria y disco (incluso cadena vacía para caché negativa)
+    // 6. Guardar en memoria y disco (incluso cadena vacía para caché negativa)
     final resolved = logoUrl ?? '';
     _memoryCache[key] = resolved;
     try {
@@ -146,6 +158,76 @@ class TitleLogoService {
     } catch (_) {}
 
     return resolved.isNotEmpty ? resolved : null;
+  }
+
+  /// Extrae ID numérico de TMDB localmente (0 ms, sin red) si está presente en
+  /// `item.id` o `item.slug`.
+  (int?, String) _extractLocalTmdbIdentity(VodItem item) {
+    final isSeries = item.isSeries || item.isAnime;
+    final defaultType = isSeries ? 'tv' : 'movie';
+
+    final idMatch = RegExp(r'^cp_[sm]_(\d+)$').firstMatch(item.id);
+    if (idMatch != null) {
+      final id = int.tryParse(idMatch.group(1)!);
+      if (id != null) {
+        final type = item.id.startsWith('cp_s_') ? 'tv' : 'movie';
+        return (id, type);
+      }
+    }
+
+    final slugMatch =
+        RegExp(r'(?:series|serie|movies|movie)/(\d+)').firstMatch(item.slug);
+    if (slugMatch != null) {
+      final id = int.tryParse(slugMatch.group(1)!);
+      if (id != null) {
+        final type = item.slug.startsWith('movie') ? 'movie' : 'tv';
+        return (id, type);
+      }
+    }
+
+    return (null, defaultType);
+  }
+
+  /// Consulta `https://meta.inutix.com/logo?type=...&id=...` (o `&q=...`).
+  Future<({bool handled, String? logoUrl})> _fetchEdgeLogo({
+    required VodItem item,
+    required int? tmdbId,
+    required String mediaType,
+  }) async {
+    final base = RemoteProvidersConfig.instance.metaBaseUrl;
+    if (base.isEmpty) return (handled: false, logoUrl: null);
+
+    final params = <String, String>{'type': mediaType};
+    if (tmdbId != null && tmdbId > 0) {
+      params['id'] = '$tmdbId';
+    } else {
+      final query = cleanTitle(item.title);
+      if (query.isEmpty) return (handled: false, logoUrl: null);
+      params['q'] = query;
+    }
+
+    try {
+      final uri = Uri.parse('$base/logo').replace(queryParameters: params);
+      final resp = await _client
+          .get(uri, headers: const {'Accept': 'application/json'})
+          .timeout(const Duration(seconds: 4));
+      if (resp.statusCode != 200) return (handled: false, logoUrl: null);
+
+      final decoded = jsonDecode(resp.body);
+      if (decoded is! Map<String, dynamic> || decoded['ok'] != true) {
+        return (handled: false, logoUrl: null);
+      }
+      final logo = decoded['logo']?.toString().trim() ?? '';
+      if (logo.startsWith('http://') || logo.startsWith('https://')) {
+        return (handled: true, logoUrl: logo);
+      }
+      if (decoded['source'] == 'none') {
+        return (handled: true, logoUrl: null);
+      }
+      return (handled: false, logoUrl: null);
+    } catch (_) {
+      return (handled: false, logoUrl: null);
+    }
   }
 
   /// Determina el id numérico de TMDB y el tipo de medio ('tv' o 'movie').

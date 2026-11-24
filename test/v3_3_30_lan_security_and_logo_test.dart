@@ -150,9 +150,12 @@ void main() {
 
   group('v3.3.30 — TMDB Read Access Token (Bearer Auth) en TitleLogoService', () {
     test('envía header Authorization Bearer en peticiones TMDB y resuelve logo PNG', () async {
-      final capturedHeaders = <Map<String, String>>[];
+      final capturedTmdbHeaders = <Map<String, String>>[];
       TitleLogoService.instance.testClient = MockClient((req) async {
-        capturedHeaders.add(Map<String, String>.from(req.headers));
+        if (req.url.host == 'meta.inutix.com') {
+          return http.Response('edge_unavailable', 503);
+        }
+        capturedTmdbHeaders.add(Map<String, String>.from(req.headers));
         if (req.url.path.endsWith('/images')) {
           return http.Response(
             jsonEncode({
@@ -187,9 +190,9 @@ void main() {
 
       final url = await TitleLogoService.instance.getLogoUrl(item);
       expect(url, 'https://image.tmdb.org/t/p/w500/black_clover_logo.png');
-      expect(capturedHeaders, isNotEmpty);
+      expect(capturedTmdbHeaders, isNotEmpty);
       expect(
-        capturedHeaders.first['Authorization'],
+        capturedTmdbHeaders.first['Authorization'],
         'Bearer ${TitleLogoService.tmdbReadAccessToken}',
       );
     });

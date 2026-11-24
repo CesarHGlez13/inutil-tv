@@ -24,6 +24,7 @@ import 'services/liquid_nav_metrics.dart';
 import 'services/my_list_service.dart';
 import 'services/network_config_service.dart';
 import 'services/offline_vault_service.dart';
+import 'services/remote_providers_config.dart';
 import 'services/tv_mode_service.dart';
 import 'services/tv_remote_service.dart';
 import 'services/vod_catalog_service.dart';
@@ -50,6 +51,9 @@ void main() {
   // Sonda de alcance al relay propio (S7) para que un build horneado con
   // FB_RELAY_HOST no quede incomunicado si se ejecuta fuera de la LAN.
   unawaited(FirebaseConfig.probeRelayReachability());
+  // Carga espejos dinámicos VOD y gateways Edge (`meta.inutix.com` / `ota.inutix.com`)
+  // desde `app_config/providers` en `api.inutix.com` con caché local instantánea.
+  unawaited(RemoteProvidersConfig.instance.loadAndRefresh());
   final imageCache = PaintingBinding.instance.imageCache;
   imageCache.maximumSize = 400;
   imageCache.maximumSizeBytes = 96 * 1024 * 1024;

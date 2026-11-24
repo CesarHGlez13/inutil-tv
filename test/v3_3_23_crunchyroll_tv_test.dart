@@ -61,18 +61,19 @@ void main() {
         isSeries: true,
       );
 
-  group('v3.3.23 a v3.3.32 — pins de versión', () {
-    test('pubspec.yaml en 3.3.32+81', () {
-      expect(_pubspecVersion(), '3.3.32+81');
+  group('v3.3.23 a v3.3.33 — pins de versión', () {
+    test('pubspec.yaml en 3.3.33+82', () {
+      expect(_pubspecVersion(), '3.3.33+82');
     });
 
-    test('lib/constants/app_info.dart en 3.3.32', () {
+    test('lib/constants/app_info.dart en 3.3.33', () {
       expect(File('lib/constants/app_info.dart').readAsStringSync(),
-          contains("static const String appVersion = '3.3.32'"));
-      expect(AppInfo.appVersion, '3.3.32');
+          contains("static const String appVersion = '3.3.33'"));
+      expect(AppInfo.appVersion, '3.3.33');
     });
 
-    test('CHANGELOG.md documenta 3.3.32', () {
+    test('CHANGELOG.md documenta 3.3.33', () {
+      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.33'));
       expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.32'));
       expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.31'));
       expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.30'));

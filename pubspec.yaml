@@ -1,7 +1,7 @@
 name: tubotv
 description: "InútilTV — Plataforma Premium de Streaming y TV en Vivo 1080p con Autenticación VIP y Control de Acceso"
 publish_to: "none"
-version: 3.3.32+81
+version: 3.3.33+82
 
 environment:
   sdk: ">=3.5.0 <4.0.0"

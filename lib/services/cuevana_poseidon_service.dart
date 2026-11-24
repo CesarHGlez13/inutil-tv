@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/models.dart';
 import 'network_config_service.dart';
+import 'remote_providers_config.dart';
 import 'stream_validator.dart';
 
 /// Proveedor VOD principal multi-espejo de InútilTV (PoseidonHD2 + Cuevana3).
@@ -27,12 +28,12 @@ class CuevanaPoseidonService {
   factory CuevanaPoseidonService() => _instance;
   CuevanaPoseidonService._internal();
 
-  static const List<String> mirrors = [
-    'https://www.poseidonhd2.co',
-    'https://wv3.cuevana3.eu',
-  ];
+  static const List<String> mirrors = RemoteProvidersConfig.defaultPoseidonMirrors;
 
-  String _activeMirror = mirrors.first;
+  List<String> get _poseidonMirrors =>
+      RemoteProvidersConfig.instance.poseidonMirrors;
+
+  String _activeMirror = RemoteProvidersConfig.defaultPoseidonMirrors.first;
 
   static const Map<String, String> _headers = {
     'User-Agent': StreamValidator.defaultUserAgent,
@@ -481,16 +482,10 @@ class CuevanaPoseidonService {
 
   // ── Extracción de hosts reales ─────────────────────────────────────────────
 
-  // Espejos directos primero (200 OK sin redirección 302 extra) para mínima latencia
-  static const List<String> _streamWishMirrors = [
-    'swhoi.com',
-    'jodwish.com',
-    'embedwish.com',
-    'swishsrv.com',
-    'uqloads.xyz',
-    'iplayerhls.com',
-    'cdnwish.com',
-  ];
+  // Espejos directos primero (200 OK sin redirección 302 extra) para mínima latencia.
+  // Se leen dinámicamente desde `RemoteProvidersConfig` (`app_config/providers`).
+  List<String> get _streamWishMirrors =>
+      RemoteProvidersConfig.instance.streamWishMirrors;
 
   /// Extrae todos los `.m3u8` (y respaldos `master.txt` / `/stream/...`) del JS
   /// desempaquetado y los ordena priorizando rutas `/stream/.../master.m3u8`
@@ -606,15 +601,9 @@ class CuevanaPoseidonService {
 
   // Espejos directos primero (callistanise / peytonepre / smoothpre responden 200
   // directo sin redirección 302 ni errores SSL como dhtpre.com).
-  static const List<String> _vidHideMirrors = [
-    'callistanise.com',
-    'peytonepre.com',
-    'smoothpre.com',
-    'vidhidevip.com',
-    'vidhideplus.com',
-    'bingezove.com',
-    'niikaplayerr.com',
-  ];
+  // Se leen dinámicamente desde `RemoteProvidersConfig` (`app_config/providers`).
+  List<String> get _vidHideMirrors =>
+      RemoteProvidersConfig.instance.vidHideMirrors;
 
   /// Extrae candidatos HLS ordenados desde VidHide usando carrera de primer ganador
   /// y desempaquetando el bloque Dean Edwards `eval(function(p,a,c,k,e,d))`.
@@ -894,9 +883,10 @@ class CuevanaPoseidonService {
   // ── Parsing Next.js __NEXT_DATA__ con failover de espejos ──────────────────
 
   Future<Map<String, dynamic>?> _fetchPageProps(String path) async {
+    final currentMirrors = _poseidonMirrors;
     final orderedMirrors = [
-      _activeMirror,
-      ...mirrors.where((m) => m != _activeMirror),
+      if (currentMirrors.contains(_activeMirror)) _activeMirror,
+      ...currentMirrors.where((m) => m != _activeMirror),
     ];
 
     for (final base in orderedMirrors) {

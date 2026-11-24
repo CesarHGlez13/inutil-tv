@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/models.dart';
+import 'remote_providers_config.dart';
 import 'stream_validator.dart';
 import 'tioanime_service.dart';
 
@@ -30,7 +31,7 @@ class JkAnimeService {
   factory JkAnimeService() => _instance;
   JkAnimeService._internal();
 
-  static const String baseUrl = 'https://jkanime.net';
+  static String get baseUrl => RemoteProvidersConfig.instance.jkAnimeBaseUrl;
   static const Map<String, String> _headers = {
     'User-Agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36',

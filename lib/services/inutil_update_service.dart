@@ -13,6 +13,7 @@ import 'firebase_auth_service.dart';
 import 'firebase_config.dart';
 import 'firebase_firestore_service.dart';
 import 'ota_download_manager.dart';
+import 'remote_providers_config.dart';
 
 /// Información de lanzamiento OTA y Kill Switch (OTA forzosa) de InútilTV.
 /// Compatible 100% con el mismo modelo de Inútil Music, guardado en
@@ -173,6 +174,26 @@ class InutilUpdateService {
   String get _githubManifestUrl =>
       'https://github.com/$releaseRepo/releases/latest/download/release.json';
 
+  String get _edgeManifestUrl =>
+      '${RemoteProvidersConfig.instance.otaBaseUrl}/release.json';
+
+  /// Convierte un enlace de descarga de GitHub Releases en su espejo Edge
+  /// (`https://ota.inutix.com/download/<tag>/<asset.apk>`) para redes que
+  /// bloquean o estrangulan `github.com`.
+  static String otaFallbackUrlFor(String url, {String? otaBaseUrl}) {
+    final uri = Uri.tryParse(url.trim());
+    if (uri == null || uri.host.toLowerCase() != 'github.com') return '';
+    final match = RegExp(
+      r'^/[^/]+/[^/]+/releases/download/(v[0-9]+\.[0-9]+\.[0-9]+)/([A-Za-z0-9._-]+\.apk)$',
+    ).firstMatch(uri.path);
+    if (match == null) return '';
+    final base = (otaBaseUrl ?? RemoteProvidersConfig.instance.otaBaseUrl)
+        .trim()
+        .replaceAll(RegExp(r'/+$'), '');
+    if (base.isEmpty) return '';
+    return '$base/download/${match.group(1)}/${match.group(2)}';
+  }
+
   final OtaDownloadManager downloadManager = OtaDownloadManager();
 
   String get _releaseDocumentUrl =>
@@ -259,14 +280,13 @@ class InutilUpdateService {
       }
     }
 
-    // 2. Consultar Firestore `app_config/tv_release` y GitHub Releases en paralelo
+    // 2. Consultar `app_config/tv_release` (LAN → api.inutix.com → backup.inutix.com)
+    //    y GitHub Releases en paralelo, con respaldo automático `ota.inutix.com/release.json`
+    //    si `github.com` falla o está bloqueado en la red.
     final results = await Future.wait<InutilTvReleaseInfo?>([
       _fetchFirestoreRelease(currentVersion: effectiveCurrent),
       if (!FirebaseConfig.useEmulator)
-        _fetchFromManifestUrl(
-          _githubManifestUrl,
-          currentVersion: effectiveCurrent,
-        )
+        _fetchGithubOrEdgeManifest(currentVersion: effectiveCurrent)
       else
         Future.value(null),
     ]);
@@ -343,6 +363,20 @@ class InutilUpdateService {
       return firestore;
     }
     return github.androidDownloads.isNotEmpty ? github : firestore;
+  }
+
+  Future<InutilTvReleaseInfo?> _fetchGithubOrEdgeManifest({
+    required String currentVersion,
+  }) async {
+    final fromGithub = await _fetchFromManifestUrl(
+      _githubManifestUrl,
+      currentVersion: currentVersion,
+    );
+    if (fromGithub != null) return fromGithub;
+    return _fetchFromManifestUrl(
+      _edgeManifestUrl,
+      currentVersion: currentVersion,
+    );
   }
 
   Future<InutilTvReleaseInfo?> _fetchFromManifestUrl(
@@ -474,19 +508,41 @@ class InutilUpdateService {
     );
     final fileName = 'inutil_tv_v$safeVer.apk';
 
-    final localPath = await downloadManager.download(
-      url: url,
-      fileName: fileName,
-      onProgress: onProgress,
-    );
+    var activeUrl = url;
+    String localPath;
+    try {
+      localPath = await downloadManager.download(
+        url: activeUrl,
+        fileName: fileName,
+        onProgress: onProgress,
+      );
+    } on OtaDownloadException catch (_) {
+      final fallbackUrl = otaFallbackUrlFor(url);
+      if (fallbackUrl.isEmpty || fallbackUrl == url) rethrow;
+      debugPrint(
+        '[InutilUpdateService] Descarga directa falló; reintentando vía Edge OTA: $fallbackUrl',
+      );
+      activeUrl = fallbackUrl;
+      localPath = await downloadManager.download(
+        url: activeUrl,
+        fileName: fileName,
+        onProgress: onProgress,
+      );
+    }
 
     if (Platform.isAndroid) {
       final installed = await installApk(localPath);
       if (!installed) {
-        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+        await launchUrl(
+          Uri.parse(activeUrl),
+          mode: LaunchMode.externalApplication,
+        );
       }
     } else {
-      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      await launchUrl(
+        Uri.parse(activeUrl),
+        mode: LaunchMode.externalApplication,
+      );
     }
 
     return localPath;

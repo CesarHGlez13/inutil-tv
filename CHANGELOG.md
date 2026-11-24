@@ -1,5 +1,11 @@
 # Changelog — InútilTV
 
+## 3.3.33 — 2026-11-24
+- **Blindaje Total sobre Cloudflare Edge (`inutix.com`) y Configuración Remota Dinámica de Proveedores:**
+  - **Gateway Edge Propio de Metadatos y Logos (`meta.inutix.com`):** Worker en Cloudflare Edge que resuelve y cachea logos tipográficos PNG (7 días globales) y proxy TMDB/Fanart sin exponer credenciales ni depender de cuotas o bloqueos regionales. `TitleLogoService` consulta `meta.inutix.com/logo` primero con respaldo automático a TMDB Bearer Auth + Fanart.tv.
+  - **Espejo Edge de Actualizaciones OTA (`ota.inutix.com`):** `InutilUpdateService` respalda la verificación de `release.json` y la descarga reanudable de APKs con `https://ota.inutix.com/release.json` y `https://ota.inutix.com/download/<tag>/<asset.apk>` cuando una red bloquea o estrangula `github.com`.
+  - **Rotación Dinámica de Espejos VOD Sin Recompilar (`RemoteProvidersConfig` → `app_config/providers` en `api.inutix.com`):** Los espejos de Poseidon/Cuevana, VidHide, StreamWish, SeriesKao, JKAnime y TioAnime (además de `metaBaseUrl` y `otaBaseUrl`) ahora se actualizan en caliente desde `api.inutix.com` (0 cuota Firestore, failover `LAN → api → backup`, caché local de 6 h), permitiendo cambiar dominios caídos en segundos sin lanzar nueva APK.
+
 ## 3.3.32 — 2026-11-24
 - **Motor de Reproducción Ultrarrápido y Tolerante a Redes Lentas (Películas, Series y Anime):**
   - **DNS Rápido Sin Penalización DoH en Redes Normales/Lentas (`NetworkConfigService`):** Se reutiliza una conexión TLS keep-alive para DoH y se intenta primero el DNS local del sistema (5–15 ms) con conmutación automática a DoH cuando la red filtra o envenena nombres, eliminando 3–8 s de sobrecarga por subdominio efímero de CDN.

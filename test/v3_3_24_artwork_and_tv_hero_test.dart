@@ -68,20 +68,20 @@ void main() {
     ),
   ];
 
-  group('v3.3.24 a v3.3.32 — pins de versión y documentación', () {
-    test('pubspec.yaml en 3.3.32+81', () {
-      expect(_pubspecVersion(), '3.3.32+81');
+  group('v3.3.24 a v3.3.33 — pins de versión y documentación', () {
+    test('pubspec.yaml en 3.3.33+82', () {
+      expect(_pubspecVersion(), '3.3.33+82');
     });
 
-    test('lib/constants/app_info.dart en 3.3.32', () {
+    test('lib/constants/app_info.dart en 3.3.33', () {
       expect(File('lib/constants/app_info.dart').readAsStringSync(),
-          contains("static const String appVersion = '3.3.32'"));
-      expect(AppInfo.appVersion, '3.3.32');
+          contains("static const String appVersion = '3.3.33'"));
+      expect(AppInfo.appVersion, '3.3.33');
     });
 
-    test('CHANGELOG.md documenta 3.3.24 a 3.3.32 con mejoras de portadas, navegación TV, colores, logos Crunchyroll, seguridad LAN, inutix.com y redes lentas', () {
+    test('CHANGELOG.md documenta 3.3.24 a 3.3.33 con mejoras de portadas, navegación TV, colores, logos Crunchyroll, seguridad LAN, inutix.com, redes lentas y Cloudflare Edge', () {
       final changelog = File('CHANGELOG.md').readAsStringSync();
-      expect(changelog, contains('## 3.3.32'));
+      expect(changelog, contains('## 3.3.33'));
       expect(changelog, contains('## 3.3.31'));
       expect(changelog, contains('## 3.3.30'));
       expect(changelog, contains('## 3.3.29'));
