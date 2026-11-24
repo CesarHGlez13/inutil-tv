@@ -201,11 +201,13 @@ void main() {
       );
     });
 
-    test('el modal de detalle lleva cabecera con LiveCanvasPreview', () {
-      expect(
-        File('lib/widgets/vod_detail_modal.dart').readAsStringSync(),
-        contains('LiveCanvasPreview'),
-      );
+    test('el modal de detalle conserva cabecera con portada fija (el canvas dinámico se retiró del detalle en v3.3.21)', () {
+      final src = File('lib/widgets/vod_detail_modal.dart').readAsStringSync();
+      // Decisión tomada en v3.3.21: portada fija HD sin canvas dinámico en el
+      // detalle. El canvas sigue vivo en tarjetas y héroe, que es donde se pidió.
+      expect(src, isNot(contains('LiveCanvasPreview')));
+      expect(src, contains('FastArtwork('));
+      expect(src, contains('_buildHeroTitleText'));
     });
   });
 

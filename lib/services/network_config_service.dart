@@ -91,8 +91,33 @@ class NetworkConfigService extends ChangeNotifier {
     'https://dns.google/resolve',
   ];
 
+  /// Entornos DoH por IP literal. Son los que salvan una red corporativa: si el
+  /// DNS de la empresa miente sobre `cloudflare-dns.com`, el DNS cifrado moriría
+  /// justo cuando más se necesita. Con la IP escrita no hay nada que resolver.
+  static const List<String> _kDohEndpointsIpLiteral = [
+    'https://1.1.1.1/dns-query',
+    'https://1.0.0.1/dns-query',
+    'https://8.8.8.8/resolve',
+    'https://8.8.4.4/resolve',
+  ];
+
+  /// Orden en red doméstica: nombres primero (soportan HTTP/3, más rápido).
+  static const List<String> _kDohOrderNormal = [
+    ..._kDohEndpoints,
+    ..._kDohEndpointsIpLiteral,
+  ];
+
+  /// Orden en red corporativa: IP literal primero, por lo dicho arriba.
+  static const List<String> _kDohOrderCorporate = [
+    ..._kDohEndpointsIpLiteral,
+    ..._kDohEndpoints,
+  ];
+
   /// Entornos DoH en uso (se pueden sustituir en las pruebas).
-  List<String> _dohEndpoints = _kDohEndpoints;
+  List<String>? _dohEndpointsOverride;
+  List<String> get _dohEndpoints =>
+      _dohEndpointsOverride ??
+      (corporateModeActive ? _kDohOrderCorporate : _kDohOrderNormal);
 
   static const Duration _dohQueryTimeout = Duration(seconds: 3);
   static const Duration _tlsHandshakeTimeout = Duration(seconds: 10);
@@ -112,6 +137,9 @@ class NetworkConfigService extends ChangeNotifier {
   bool _tlsFallback = true;
   String _proxy = '';
   String _systemProxy = '';
+  // La red de la empresa está filtrando de verdad: el DNS del sistema respondió
+  // una IP de sumidero (loopback / 0.0.0.0) para un dominio externo.
+  bool _dnsPoisoned = false;
 
   final Map<String, _DnsEntry> _dnsCache = {};
   final Map<String, Future<String?>> _dnsPending = {};
@@ -144,14 +172,44 @@ class NetworkConfigService extends ChangeNotifier {
 
   bool get systemProxyDetected => _proxy.isEmpty && _systemProxy.isNotEmpty;
 
+  /// true cuando la red muestra señales de estar filtrando: proxy obligatorio
+  /// (manual o detectado del Wi-Fi), DNS que mintió alguna vez, o inspección TLS
+  /// ya confirmada. En ese modo el DNS cifrado usa primero los entornos por IP
+  /// (no dependen del resolver de la empresa) y acepta el certificado del proxy,
+  /// que es el que firma las conexiones.
+  bool get corporateModeActive =>
+      _systemProxy.isNotEmpty || _dnsPoisoned || _tlsInspectedHosts.isNotEmpty;
+
   bool get proxyEnabled => effectiveProxyHostPort.isNotEmpty;
 
   /// true cuando hay alguna restricción activada (proxy manual/sistema o DNS seguro).
-  bool get restrictionsActive => effectiveProxyHostPort.isNotEmpty || _secureDns;
+  bool get restrictionsActive =>
+      effectiveProxyHostPort.isNotEmpty || _secureDns;
 
   /// Valor para la propiedad `proxy-url` de libmpv (null = sin proxy).
   String? get mpvProxyUrl =>
       effectiveProxyHostPort.isEmpty ? null : 'http://$effectiveProxyHostPort';
+
+  /// `proxy-url` que le corresponde a una URL concreta de libmpv. Las URLs de
+  /// `127.0.0.1` (nuestro proxy local de video) van SIEMPRE directas: el proxy
+  /// de la empresa no puede bajarse nada desde el teléfono, y si libmpv le
+  /// manda esa petición la reproducción se cae.
+  static String? mpvProxyForUrl(String url) {
+    final host = Uri.parse(url).host.toLowerCase();
+    if (host == 'localhost' || host == '127.0.0.1' || host == '::1') {
+      return null;
+    }
+    final effective = instance.effectiveProxyHostPort;
+    return effective.isEmpty ? null : 'http://$effective';
+  }
+
+  /// El DNS cifrado acepta el certificado de la red sólo cuando la red ya dio
+  /// señales de inspeccionar (proxy obligatorio, DNS envenenado o MITM confirmado).
+  bool get dohToleratesCertificates => _tlsFallback && corporateModeActive;
+
+  /// Entornos DoH en orden de uso, expuesto para las pruebas.
+  @visibleForTesting
+  List<String> get dohEndpointsForAssertions => _dohEndpoints;
 
   NetworkIssue get lastIssue => _lastIssue;
 
@@ -193,7 +251,7 @@ class NetworkConfigService extends ChangeNotifier {
   /// Entornos DoH usados por las pruebas (un servidor local hace de DNS).
   @visibleForTesting
   set dohEndpointsForTest(List<String> endpoints) =>
-      _dohEndpoints = List<String>.unmodifiable(endpoints);
+      _dohEndpointsOverride = List<String>.unmodifiable(endpoints);
 
   /// Deja el servicio como recién instalado, para pruebas aisladas.
   @visibleForTesting
@@ -203,10 +261,11 @@ class NetworkConfigService extends ChangeNotifier {
     _tlsInspectedHosts.clear();
     _dohDownUntil = null;
     _preferDohFirstUntil = null;
+    _dnsPoisoned = false;
     _dohClient?.close(force: true);
     _dohClient = null;
     _lastIssue = NetworkIssue.none;
-    _dohEndpoints = _kDohEndpoints;
+    _dohEndpointsOverride = null;
     _systemProxy = '';
   }
 
@@ -440,12 +499,24 @@ class NetworkConfigService extends ChangeNotifier {
       ..connectionTimeout = _dohQueryTimeout
       ..idleTimeout = const Duration(seconds: 45)
       ..maxConnectionsPerHost = 4;
+    // Redes sin salida directa (empresas que sólo dejan pasar al proxy): el
+    // propio DoH tiene que tunelizar por ese proxy, o se queda mudo justo
+    // cuando el DNS de la red es el que miente.
+    client.findProxy = resolveProxyDirectiveForUri;
     client.connectionFactory = (uri, proxyHost, proxyPort) => _plainConnect(
           uri,
           proxyHost,
           proxyPort,
           timeout: _dohQueryTimeout,
+          tolerateBadCertificates: dohToleratesCertificates,
         );
+    // Un proxy que inspecciona TLS firma él mismo el certificado del resolver;
+    // rechazarlo dejaría el DNS seguro inutilizable en la red que más lo usa.
+    client.badCertificateCallback = (cert, host, port) {
+      if (!dohToleratesCertificates) return false;
+      _lastIssue = NetworkIssue.tlsInspected;
+      return true;
+    };
     _dohClient = client;
     return client;
   }
@@ -461,7 +532,8 @@ class NetworkConfigService extends ChangeNotifier {
       for (final base in _dohEndpoints) {
         _dbg('queryDoh($host) antes de _queryOnce $type en $base');
         final result = await _queryOnce(base, host, type);
-        _dbg('queryDoh($host) volvio $type -> ${result.ip} reachable=${result.reachable}');
+        _dbg(
+            'queryDoh($host) volvio $type -> ${result.ip} reachable=${result.reachable}');
         if (result.ip != null) return result.ip;
         if (result.reachable) anyReachable = true;
       }
@@ -541,7 +613,8 @@ class NetworkConfigService extends ChangeNotifier {
     if (proxyHost != null && proxyPort != null) {
       return _plainConnect(uri, proxyHost, proxyPort, timeout: timeout);
     }
-    return _directConnect(uri, timeout: timeout, tolerateBadCertificates: tolerateBadCertificates);
+    return _directConnect(uri,
+        timeout: timeout, tolerateBadCertificates: tolerateBadCertificates);
   }
 
   /// Conexión TCP simple. Con proxy, `dart:io` hace el `CONNECT` y el TLS
@@ -647,6 +720,11 @@ class NetworkConfigService extends ChangeNotifier {
                 raw.remoteAddress.isLoopback)) {
           raw.destroy();
           raw = null;
+          // El DNS de la red mintió: a partir de ahora resolver por el camino
+          // cifrado, que es lo que hace funcionar la app en redes corporativas.
+          _dnsPoisoned = true;
+          _preferDohFirstUntil =
+              DateTime.now().add(const Duration(minutes: 10));
         }
       } catch (_) {
         raw = null;
@@ -659,7 +737,8 @@ class NetworkConfigService extends ChangeNotifier {
             raw = await Socket.connect(resolved, port, timeout: timeout);
             targetIp = resolved;
             // La red local filtró o falló pero DoH sí conectó: preferir DoH los próximos 10 min.
-            _preferDohFirstUntil = DateTime.now().add(const Duration(minutes: 10));
+            _preferDohFirstUntil =
+                DateTime.now().add(const Duration(minutes: 10));
           } catch (_) {
             raw = null;
           }
@@ -688,6 +767,10 @@ class NetworkConfigService extends ChangeNotifier {
       port: port,
       timeout: timeout,
       tolerateBadCertificates: tolerateBadCertificates,
+      // Si el nombre lo resolvió el DNS de la red, ese IP puede ser un sumidero
+      // corporativo: el handshake lo delata y se reintenta contra la IP real.
+      dohRetry:
+          (targetIp == null && !isLiteralOrLocal) ? () => resolve(host) : null,
     );
     return ConnectionTask.fromSocket(
       Future.value(secure),
@@ -695,8 +778,11 @@ class NetworkConfigService extends ChangeNotifier {
     );
   }
 
-  /// TLS con SNI estricto; si la red inspecciona el tráfico (certificado
-  /// emitido por el propio firewall) reintenta una vez confiando en él.
+  /// TLS con SNI estricto. Dos reintentos según lo que la red hizo:
+  /// si el handshake falló contra una IP que dio el DNS de la red, se prueba
+  /// contra la IP real del DNS cifrado (sumidero corporativo); si la IP era la
+  /// correcta, el que falla es el certificado: la red inspecciona el tráfico y
+  /// se reintenta una sola vez confiando en él.
   Future<SecureSocket> _handshake(
     Socket raw, {
     required String sniHost,
@@ -704,6 +790,7 @@ class NetworkConfigService extends ChangeNotifier {
     required int port,
     required Duration timeout,
     required bool tolerateBadCertificates,
+    Future<String?> Function()? dohRetry,
   }) async {
     final trusted =
         tolerateBadCertificates || _tlsInspectedHosts.contains(sniHost);
@@ -715,6 +802,25 @@ class NetworkConfigService extends ChangeNotifier {
       ).timeout(_tlsHandshakeTimeout);
     } on HandshakeException {
       raw.destroy();
+      // 1) La IP venía del DNS de la red: puede ser un sumidero. Reintentar
+      //    contra la IP real antes de acusar a la red de inspeccionar.
+      if (dohRetry != null) {
+        final real = await dohRetry();
+        if (real != null && real != target) {
+          try {
+            final viaDoh = await Socket.connect(real, port, timeout: timeout);
+            _dnsPoisoned = true;
+            _lastIssue = NetworkIssue.dnsBlocked;
+            return await SecureSocket.secure(
+              viaDoh,
+              host: sniHost,
+              onBadCertificate: (_) => true,
+            ).timeout(_tlsHandshakeTimeout);
+          } catch (_) {
+            // No era la IP: se continúa con la tolerancia de certificado.
+          }
+        }
+      }
       // El cortocorte fue el certificado: la red esta cifrando lo que navega.
       _lastIssue = NetworkIssue.tlsInspected;
       if (trusted || !_tlsFallback) rethrow;
@@ -737,9 +843,11 @@ class NetworkConfigService extends ChangeNotifier {
     _dbg('diagnostico: inicio');
     await refreshSystemProxy();
     final checks = <NetworkCheck>[];
-    checks.add(await _probe('Cuenta', Uri.parse(
-      '${FirebaseConfig.firestoreBaseUrl}/app_config/tv_release',
-    )));
+    checks.add(await _probe(
+        'Cuenta',
+        Uri.parse(
+          '${FirebaseConfig.firestoreBaseUrl}/app_config/tv_release',
+        )));
     checks.add(await _probeAlguna('Catálogo', const [
       'https://meta.inutix.com/healthz',
       'https://www.themoviedb.org/',
@@ -751,6 +859,12 @@ class NetworkConfigService extends ChangeNotifier {
     checks.add(await _probeAlguna('Actualizaciones', const [
       'https://ota.inutix.com/release.json',
       'https://github.com/CesarHGlez13/inutil-tv/releases/latest/download/release.json',
+    ]));
+    // El frente nuevo: si el DNS cifrado está vivo. En una red corporativa es
+    // lo que sostiene todo lo demás, y conviene verlo antes de echar a andar.
+    checks.add(await _probeAlguna('DNS cifrado', const [
+      'https://1.1.1.1/dns-query?type=A&name=example.com',
+      'https://8.8.8.8/resolve?type=A&name=example.com',
     ]));
     return NetworkReport(checks, proxyEnabled, secureDnsEnabled);
   }

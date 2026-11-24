@@ -253,7 +253,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       expect(find.byType(InutilAuthScreen), findsOneWidget);
-      expect(find.text('INÚTIL TV'), findsOneWidget);
+      expect(find.text('INUTIX TV'), findsOneWidget);
       expect(find.text('Iniciar Sesión'), findsOneWidget);
       expect(find.text('Crear Cuenta'), findsOneWidget);
       expect(find.text('Continuar con Google'), findsOneWidget);

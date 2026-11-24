@@ -420,6 +420,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     final proxyUrl = NetworkConfigService.instance.mpvProxyUrl;
     if (proxyUrl != null) {
       props['proxy-url'] = proxyUrl;
+      _mpvProxyApplied = proxyUrl;
     }
     for (final e in props.entries) {
       try {
@@ -429,6 +430,31 @@ class _PlayerScreenState extends State<PlayerScreen>
           np.command(['set_option', e.key, e.value]);
         } catch (_) {}
       }
+    }
+  }
+
+  /// Último `proxy-url` enviado a libmpv, para no reescribirlo en cada apertura.
+  String? _mpvProxyApplied;
+
+  /// Proxy para libmpv según la URL que se va a abrir.
+  ///
+  /// `proxy-url` se aplica a TODAS las peticiones de libmpv, incluidas las de
+  /// `127.0.0.1`. Si el video pasa por nuestro proxy local y la red tiene proxy
+  /// obligatorio, libmpv le mandaría la URL de loopback al proxy corporativo,
+  /// que no puede ver el teléfono, y la reproducción se caería. Por eso cada
+  /// apertura fija el valor que le toca a esa URL concreta.
+  Future<void> _applyMpvProxyForUrl(String url) async {
+    if (_player.platform is! NativePlayer) return;
+    final np = _player.platform as NativePlayer;
+    final desired = NetworkConfigService.mpvProxyForUrl(url) ?? '';
+    if (desired == _mpvProxyApplied) return;
+    _mpvProxyApplied = desired;
+    try {
+      np.setProperty('proxy-url', desired);
+    } catch (_) {
+      try {
+        np.command(['set_option', 'proxy-url', desired]);
+      } catch (_) {}
     }
   }
 
@@ -794,6 +820,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         urlToOpen = reg.localUrl;
         headersToOpen = null;
       }
+
+      await _applyMpvProxyForUrl(urlToOpen);
 
       await _player.open(
         Media(urlToOpen, httpHeaders: headersToOpen),

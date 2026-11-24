@@ -539,7 +539,20 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      // La lista de la pantalla creció (v3.3.x): las filas se construyen al
+      // hacer scroll, igual que en SettingsScreen.
+      final aboutScroll = find.byType(Scrollable).first;
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('about-wrapped')),
+        250,
+        scrollable: aboutScroll,
+      );
       expect(find.byKey(const ValueKey('about-wrapped')), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('about-onboarding')),
+        250,
+        scrollable: aboutScroll,
+      );
       expect(find.byKey(const ValueKey('about-onboarding')), findsOneWidget);
     });
   });

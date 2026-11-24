@@ -1,5 +1,10 @@
 # Changelog — Inutix TV
 
+## 3.3.37 — 2026-11-24
+- **Ahora funciona en redes de empresa, hoteles y aeropuertos:** Inutix TV se adapta solo cuando tu red filtra el video: usa el punto de salida que la red ya exige, busca los servidores por un camino cifrado y acepta el certificado de la propia red cuando es ella quien revisa el tráfico. Todo automático, sin VPN.
+- **Lo que reproduce tu teléfono no sale de él:** La app sigue usando su propio servicio interno en modo directo, incluso cuando la red obliga a pasar por un punto de salida.
+- **Diagnóstico ampliado:** La prueba de conexión en *Ajustes > Red y conexión* ahora también verifica el camino cifrado de búsqueda de servidores.
+
 ## 3.3.36 — 2026-11-24
 - **Mejor compatibilidad con redes Wi-Fi con proxy:** Inutix TV ahora detecta y respeta automáticamente el proxy HTTP configurado en los ajustes Wi-Fi de tu dispositivo Android, mejorando la conexión y reproducción de video en redes con proxy sin afectar la reproducción local.
 - **Diagnóstico de red más preciso:** La prueba de conexión en *Ajustes > Red y conexión* ahora verifica los servidores actuales de catálogo y actualizaciones.

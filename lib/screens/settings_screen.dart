@@ -1094,9 +1094,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       context,
                       glyph: InutilGlyph.shield,
                       title: 'Salida por proxy',
-                      subtitle: _network.proxyEnabled
-                          ? '${_network.proxyHostPort} · el video sale por ahí'
-                          : 'Directo (lo normal en casa)',
+                      subtitle: _network.systemProxyDetected
+                          ? 'Detectado en tu red: ${_network.systemProxyHostPort} · se usa solo, sin VPN'
+                          : _network.proxyEnabled
+                              ? '${_network.proxyHostPort} · el video sale por ahí'
+                              : 'Directo (lo normal en casa)',
                       onTap: _editProxySetting,
                     ),
                     Divider(color: AppColors.dividerFor(context), height: 1),

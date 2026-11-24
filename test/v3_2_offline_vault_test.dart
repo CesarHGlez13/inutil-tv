@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tubotv/models/models.dart';
 import 'package:tubotv/screens/downloads_screen.dart';
 import 'package:tubotv/screens/settings_screen.dart';
+import 'package:tubotv/services/firebase_auth_service.dart';
 import 'package:tubotv/services/hls_stream_proxy.dart';
 import 'package:tubotv/services/offline_vault_service.dart';
 import 'package:tubotv/services/vault_crypto.dart';
@@ -18,6 +19,11 @@ import 'package:tubotv/widgets/vod_detail_modal.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  // Convención del repo (ver v3_2_3, v3_2_7, v3_3_0): el timer periódico de
+  // validación de Firebase no debe quedar pendiente al cerrar un test.
+  setUp(() => InutilAuthService.testSkipOnlineValidation = true);
+  tearDown(() => InutilAuthService.testSkipOnlineValidation = false);
 
   group('VaultCrypto AES-256-CTR (O(1) Random Access)', () {
     test('cifra y descifra en offset 0, bloque alineado y offset arbitrario', () {
@@ -563,7 +569,8 @@ void main() {
       await tester.pumpWidget(wrapTheme(Scaffold(body: VodDetailModal(item: movie))));
       await tester.pump(const Duration(milliseconds: 200));
 
-      expect(find.byKey(const ValueKey('vod-movie-download-btn')), findsOneWidget);
+      // v3.3.22 rediseñó la ficha estilo Crunchyroll: la descarga de película
+      // es un action-item con icono y etiqueta, sin el key antiguo.
       expect(find.text('Descargar'), findsOneWidget);
 
       final series = VodItem(
@@ -593,6 +600,10 @@ void main() {
       expect(find.byKey(const ValueKey('vod-batch-download-btn')), findsOneWidget);
       expect(find.byKey(const ValueKey('vod-ep-dl-s1-e1')), findsOneWidget);
       expect(find.byKey(const ValueKey('vod-ep-dl-s1-e2')), findsOneWidget);
+      // Con descargas previas en la bóveda el modal deja un timer corto
+      // pendiente al cerrar; se adelanta el reloj para que cumpla antes del
+      // cierre del test (el framework no perdona timers pendientes).
+      await tester.pump(const Duration(seconds: 20));
     });
 
     testWidgets('SettingsScreen muestra acceso limpio a Descargas sin conexión',
