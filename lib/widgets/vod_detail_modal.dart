@@ -1120,7 +1120,7 @@ class _VodDetailModalState extends State<VodDetailModal>
     required List<VodEpisode> visibleEpisodes,
   }) {
     final size = MediaQuery.sizeOf(context);
-    const orangeCta = Color(0xFFFF640A);
+    final brandAccent = accent;
 
     return Scaffold(
       backgroundColor: sheetBg,
@@ -1260,8 +1260,8 @@ class _VodDetailModalState extends State<VodDetailModal>
                         item.isAnime
                             ? 'ANIME'
                             : (item.isSeries ? 'SERIE' : 'PELÍCULA'),
-                        style: const TextStyle(
-                          color: orangeCta,
+                        style: TextStyle(
+                          color: brandAccent,
                           fontWeight: FontWeight.w900,
                           fontSize: 13,
                           letterSpacing: 1.5,
@@ -1315,7 +1315,7 @@ class _VodDetailModalState extends State<VodDetailModal>
                                 vertical: 4,
                               ),
                               decoration: BoxDecoration(
-                                color: orangeCta,
+                                color: brandAccent,
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
@@ -1406,11 +1406,11 @@ class _VodDetailModalState extends State<VodDetailModal>
                                   vertical: 15,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: orangeCta,
+                                  color: brandAccent,
                                   borderRadius: BorderRadius.circular(28),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: orangeCta.withValues(alpha: 0.45),
+                                      color: brandAccent.withValues(alpha: 0.45),
                                       blurRadius: 18,
                                       offset: const Offset(0, 4),
                                     ),
@@ -1472,12 +1472,12 @@ class _VodDetailModalState extends State<VodDetailModal>
                                 ),
                                 decoration: BoxDecoration(
                                   color: inMyList
-                                      ? orangeCta.withValues(alpha: 0.25)
+                                      ? brandAccent.withValues(alpha: 0.25)
                                       : Colors.white.withValues(alpha: 0.12),
                                   borderRadius: BorderRadius.circular(28),
                                   border: Border.all(
                                     color: inMyList
-                                        ? orangeCta
+                                        ? brandAccent
                                         : Colors.white24,
                                     width: 1.5,
                                   ),
@@ -1490,7 +1490,7 @@ class _VodDetailModalState extends State<VodDetailModal>
                                           ? Icons.bookmark_added_rounded
                                           : Icons.bookmark_add_outlined,
                                       color: inMyList
-                                          ? orangeCta
+                                          ? brandAccent
                                           : Colors.white,
                                       size: 22,
                                     ),
@@ -1499,7 +1499,7 @@ class _VodDetailModalState extends State<VodDetailModal>
                                       inMyList ? 'En Mi Lista' : 'Mi Lista',
                                       style: TextStyle(
                                         color: inMyList
-                                            ? orangeCta
+                                            ? brandAccent
                                             : Colors.white,
                                         fontWeight: FontWeight.w800,
                                         fontSize: 15,
@@ -1530,11 +1530,11 @@ class _VodDetailModalState extends State<VodDetailModal>
                         ),
                         const SizedBox(width: 14),
                         if (_loadingEpisodes)
-                          const SizedBox(
+                          SizedBox(
                             width: 18,
                             height: 18,
                             child: CircularProgressIndicator(
-                              color: orangeCta,
+                              color: brandAccent,
                               strokeWidth: 2,
                             ),
                           ),
@@ -1607,12 +1607,12 @@ class _VodDetailModalState extends State<VodDetailModal>
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
                                   color: active
-                                      ? orangeCta
+                                      ? brandAccent
                                       : Colors.white.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(20),
                                   border: Border.all(
                                     color: active
-                                        ? orangeCta
+                                        ? brandAccent
                                         : Colors.white24,
                                     width: 1.2,
                                   ),
@@ -1656,12 +1656,12 @@ class _VodDetailModalState extends State<VodDetailModal>
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
                                   color: active
-                                      ? orangeCta
+                                      ? brandAccent
                                       : Colors.white.withValues(alpha: 0.08),
                                   borderRadius: BorderRadius.circular(18),
                                   border: Border.all(
                                     color: active
-                                        ? orangeCta
+                                        ? brandAccent
                                         : Colors.white12,
                                   ),
                                 ),
@@ -1788,6 +1788,7 @@ class _VodDetailModalState extends State<VodDetailModal>
     int globalIndex,
     WatchProgress? saved,
   ) {
+    final brandAccent = AppColors.accentFor(context);
     final watched = _history.isEpisodeWatched(
       _item.id,
       ep.seasonNumber,
@@ -1800,15 +1801,13 @@ class _VodDetailModalState extends State<VodDetailModal>
         ? (saved.positionSec / saved.durationSec).clamp(0.0, 1.0)
         : (watched ? 1.0 : 0.0);
 
-    const orangeCta = Color(0xFFFF640A);
-
     return SizedBox(
       width: 250,
       child: TvFocusable(
         borderRadius: BorderRadius.circular(14),
         focusScale: 1.06,
         showFocusBorder: true,
-        focusColor: orangeCta,
+        focusColor: brandAccent,
         onTap: () => _openPlayer(
           episode: ep,
           episodeList: _episodes,
@@ -1880,7 +1879,7 @@ class _VodDetailModalState extends State<VodDetailModal>
                           child: Container(
                             color: watched
                                 ? const Color(0xFF18C75A)
-                                : orangeCta,
+                                : brandAccent,
                           ),
                         ),
                       ),
@@ -1965,7 +1964,8 @@ class _VodDetailModalState extends State<VodDetailModal>
               : (item.isSeries ? 'Comenzar a ver E1' : 'Reproducir'));
     }
 
-    const orangeCta = Color(0xFFFF640A);
+    final brandAccent = AppColors.accentFor(context);
+    final onBrandAccent = AppColors.onAccentFor(context);
     final bottomInset = MediaQuery.paddingOf(context).bottom;
 
     return Container(
@@ -1992,15 +1992,15 @@ class _VodDetailModalState extends State<VodDetailModal>
                 playOnTv
                     ? Icons.cast_connected_rounded
                     : Icons.play_arrow_rounded,
-                color: Colors.white,
+                color: playOnTv ? Colors.white : onBrandAccent,
                 size: 24,
               ),
               label: Text(
                 mainLabel,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: playOnTv ? Colors.white : onBrandAccent,
                   fontWeight: FontWeight.w900,
                   fontSize: 15,
                   letterSpacing: 0.2,
@@ -2009,7 +2009,7 @@ class _VodDetailModalState extends State<VodDetailModal>
               style: ElevatedButton.styleFrom(
                 backgroundColor: playOnTv
                     ? const Color(0xFF18C75A)
-                    : orangeCta,
+                    : brandAccent,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(28),
@@ -2017,7 +2017,7 @@ class _VodDetailModalState extends State<VodDetailModal>
                 elevation: 6,
                 shadowColor: (playOnTv
                         ? const Color(0xFF18C75A)
-                        : orangeCta)
+                        : brandAccent)
                     .withValues(alpha: 0.4),
               ),
             ),
@@ -2028,12 +2028,12 @@ class _VodDetailModalState extends State<VodDetailModal>
               shape: BoxShape.circle,
               border: Border.all(
                 color: inMyList
-                    ? orangeCta
+                    ? brandAccent
                     : Colors.white.withValues(alpha: 0.25),
                 width: 1.5,
               ),
               color: inMyList
-                  ? orangeCta.withValues(alpha: 0.2)
+                  ? brandAccent.withValues(alpha: 0.2)
                   : Colors.black.withValues(alpha: 0.45),
             ),
             child: IconButton(
@@ -2056,7 +2056,7 @@ class _VodDetailModalState extends State<VodDetailModal>
                 inMyList
                     ? Icons.bookmark_added_rounded
                     : Icons.bookmark_add_outlined,
-                color: inMyList ? orangeCta : Colors.white,
+                color: inMyList ? brandAccent : Colors.white,
                 size: 22,
               ),
               tooltip: inMyList ? 'En Mi Lista' : 'Guardar en Mi Lista',
@@ -2073,7 +2073,7 @@ class _VodDetailModalState extends State<VodDetailModal>
     OfflineDownloadItem? movieDl,
     Color accent,
   ) {
-    const orangeCta = Color(0xFFFF640A);
+    final brandAccent = accent;
     final inMyList = _myList.contains(item.id);
     final isSeries = item.isSeries;
     final seasonEpisodes = _episodesForCurrentSeason;
@@ -2088,7 +2088,7 @@ class _VodDetailModalState extends State<VodDetailModal>
                 ? Icons.bookmark_added_rounded
                 : Icons.add_rounded,
             label: inMyList ? 'En Mi Lista' : 'Mi Lista',
-            color: inMyList ? orangeCta : Colors.white,
+            color: inMyList ? brandAccent : Colors.white,
             onTap: () async {
               final added = await _myList.toggle(item);
               if (context.mounted) {
@@ -2264,7 +2264,7 @@ class _VodDetailModalState extends State<VodDetailModal>
                       ? Icons.bookmark_remove_rounded
                       : Icons.bookmark_add_rounded,
                   color: _myList.contains(_item.id)
-                      ? const Color(0xFFFF640A)
+                      ? AppColors.accentFor(context)
                       : Colors.white,
                 ),
                 title: Text(

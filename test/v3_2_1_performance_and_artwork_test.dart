@@ -38,19 +38,19 @@ void main() {
 
       expect(
         ArtworkCacheService.optimizeUrl(orig, tier: ArtworkTier.poster),
-        'https://image.tmdb.org/t/p/w342/abc123.jpg',
+        'https://image.tmdb.org/t/p/w500/abc123.jpg',
       );
       expect(
         ArtworkCacheService.optimizeUrl(w500, tier: ArtworkTier.poster),
-        'https://image.tmdb.org/t/p/w342/abc123.jpg',
+        'https://image.tmdb.org/t/p/w500/abc123.jpg',
       );
       expect(
         ArtworkCacheService.optimizeUrl(orig, tier: ArtworkTier.backdrop),
-        'https://image.tmdb.org/t/p/w780/abc123.jpg',
+        'https://image.tmdb.org/t/p/w1280/abc123.jpg',
       );
       expect(
         ArtworkCacheService.optimizeUrl(w500, tier: ArtworkTier.thumbnail),
-        'https://image.tmdb.org/t/p/w185/abc123.jpg',
+        'https://image.tmdb.org/t/p/w300/abc123.jpg',
       );
       expect(
         ArtworkCacheService.optimizeUrl('https://cdn.site/404x.jpg'),

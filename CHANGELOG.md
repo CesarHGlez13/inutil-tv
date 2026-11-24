@@ -1,5 +1,18 @@
 # Changelog — InútilTV
 
+## 3.3.24 — 2026-11-23
+- **Navegación D-Pad fluida y selección de Destacados en Smart TV (Inicio):**
+  - **Focusable Top-Level en Carrusel:** Se resolvió la imposibilidad de navegar y seleccionar en el carrusel de destacados (`HeroCarousel`) en Android TV. El slide activo ahora es un elemento `TvFocusable` con auto-foco y atajo directo a la ficha de detalles.
+  - **Navegación Direccional D-Pad (Flechas Izquierda / Derecha):** Se agregaron botones de flechas visibles en Smart TV (`chevron_left_rounded` / `chevron_right_rounded`) y manejadores de teclado D-Pad: presionar Izquierda en "Reproducir" cambia a la diapositiva anterior; presionar Derecha en "Detalles" avanza a la siguiente diapositiva.
+  - **Altura ampliada a 370 px en TV:** Proporción panorámica óptima para visualización a 3 metros sin superposiciones.
+- **Calidad HD / 4K Ultra en Portadas y Fondos:**
+  - **Optimización de tamaños TMDB:** En `ArtworkCacheService`, los pósters se actualizaron de `w342` a `w500` (alta fidelidad en pantallas de alta densidad), fondos / backdrops de `w780` a `w1280` (resolución panorámica HD/4K), y miniaturas de `w185` a `w300`.
+  - **Resampling y caché en `FastArtwork` y `PosterCard`:** El decodificador en memoria subió a `500` px para pósters, `1280` px para backdrops y `300` px para thumbnails, elevando el filtrado a `FilterQuality.medium` con mipmapping suave para eliminar artefactos pixelados.
+- **Restauración de Identidad y Paleta Oficial InútilTV:**
+  - **Eliminación de colores externos:** Se eliminaron las referencias al naranja duro ajeno (`#FF640A`) en la ficha de detalles y componentes principales.
+  - **Acento Dinámico de Marca:** Toda la interfaz ahora respeta la paleta oficial de InútilTV gobernada por `AppColors.accentFor(context)` y `AppColors.onAccentFor(context)` (esmeralda menta, oro sutil, o el acento configurado por el usuario sobre fondo Carbono puro).
+
+
 ## 3.3.23 — 2026-11-23
 - **Experiencia Smart TV / Android TV estilo Crunchyroll 2026 (10-foot UI cinemática):**
   - **Apertura Full Screen Inmersiva en TV:** Eliminado el cuadro de diálogo flotante acotado a 880 px con bordes negros. En Android TV la ficha de detalle se abre en pantalla completa panorámica (16:9 / 1080p y 4K) mediante `PageRouteBuilder` con transición cinematográfica de fade suave.

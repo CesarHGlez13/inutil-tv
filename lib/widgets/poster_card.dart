@@ -260,7 +260,7 @@ class _PosterCardState extends State<PosterCard> {
               FastArtwork(
                 url: item.poster,
                 tier: ArtworkTier.poster,
-                cacheWidth: 320,
+                cacheWidth: 500,
                 fit: BoxFit.cover,
                 placeholder: placeholderCanvas,
                 errorWidget: placeholderCanvas,

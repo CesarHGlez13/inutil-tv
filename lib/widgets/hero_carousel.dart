@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../services/tv_mode_service.dart';
 
 import '../models/models.dart';
 import '../services/artwork_cache_service.dart';
@@ -102,6 +104,30 @@ class _HeroCarouselState extends State<HeroCarousel>
     _startTimer();
   }
 
+  void _prevSlide() {
+    _autoTimer?.cancel();
+    _resumeTimer?.cancel();
+    if (widget.featured.isEmpty) return;
+    final prev = (_currentIndex - 1 + widget.featured.length) % widget.featured.length;
+    _pageController.animateToPage(
+      prev,
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  void _nextSlide() {
+    _autoTimer?.cancel();
+    _resumeTimer?.cancel();
+    if (widget.featured.isEmpty) return;
+    final next = (_currentIndex + 1) % widget.featured.length;
+    _pageController.animateToPage(
+      next,
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
   @override
   void didUpdateWidget(covariant HeroCarousel oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -133,32 +159,96 @@ class _HeroCarouselState extends State<HeroCarousel>
   Widget build(BuildContext context) {
     if (widget.featured.isEmpty) return const SizedBox.shrink();
     final accent = AppColors.accentFor(context);
+    final isTv = TvModeService.of(context);
+    final carouselHeight = isTv ? 370.0 : 310.0;
 
     return Column(
       children: [
         SizedBox(
-          height: 310,
-          child: NotificationListener<ScrollNotification>(
-            onNotification: (n) {
-              if (n is ScrollStartNotification) {
-                _pause();
-              } else if (n is ScrollEndNotification) {
-                _resumeTimer?.cancel();
-                _resumeTimer =
-                    Timer(const Duration(milliseconds: 2500), _resume);
-              }
-              return false;
-            },
-            child: PageView.builder(
-              controller: _pageController,
-              itemCount: widget.featured.length,
-              onPageChanged: (i) => setState(() {
-                _currentIndex = i;
-                if (widget.active) _kenBurns.forward(from: 0);
-              }),
-              itemBuilder: (context, index) =>
-                  _buildHeroSlide(context, widget.featured[index], index),
-            ),
+          height: carouselHeight,
+          child: Stack(
+            children: [
+              NotificationListener<ScrollNotification>(
+                onNotification: (n) {
+                  if (n is ScrollStartNotification) {
+                    _pause();
+                  } else if (n is ScrollEndNotification) {
+                    _resumeTimer?.cancel();
+                    _resumeTimer =
+                        Timer(const Duration(milliseconds: 2500), _resume);
+                  }
+                  return false;
+                },
+                child: PageView.builder(
+                  controller: _pageController,
+                  itemCount: widget.featured.length,
+                  onPageChanged: (i) => setState(() {
+                    _currentIndex = i;
+                    if (widget.active) _kenBurns.forward(from: 0);
+                  }),
+                  itemBuilder: (context, index) =>
+                      _buildHeroSlide(context, widget.featured[index], index),
+                ),
+              ),
+              if (isTv && widget.featured.length > 1) ...[
+                // Flecha anterior para TV
+                Positioned(
+                  left: 6,
+                  top: 0,
+                  bottom: 0,
+                  child: Center(
+                    child: TvFocusable(
+                      onTap: _prevSlide,
+                      borderRadius: BorderRadius.circular(20),
+                      focusColor: accent,
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.55),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.25),
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.chevron_left_rounded,
+                          color: Colors.white,
+                          size: 26,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                // Flecha siguiente para TV
+                Positioned(
+                  right: 6,
+                  top: 0,
+                  bottom: 0,
+                  child: Center(
+                    child: TvFocusable(
+                      onTap: _nextSlide,
+                      borderRadius: BorderRadius.circular(20),
+                      focusColor: accent,
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.55),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.25),
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.chevron_right_rounded,
+                          color: Colors.white,
+                          size: 26,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
         const SizedBox(height: 10),
@@ -170,8 +260,8 @@ class _HeroCarouselState extends State<HeroCarousel>
               duration: const Duration(milliseconds: 280),
               curve: Curves.easeOut,
               margin: const EdgeInsets.symmetric(horizontal: 3),
-              width: active ? 24 : 6,
-              height: 4,
+              width: active ? (isTv ? 28 : 24) : 6,
+              height: isTv ? 5 : 4,
               decoration: BoxDecoration(
                 color: active
                     ? accent
@@ -190,9 +280,17 @@ class _HeroCarouselState extends State<HeroCarousel>
     final image = item.backdrop.isNotEmpty ? item.backdrop : item.poster;
     final isActive = index == _currentIndex;
     final accent = AppColors.accentFor(context);
+    final isTv = TvModeService.of(context);
 
     return RepaintBoundary(
-      child: Container(
+      child: TvFocusable(
+        onTap: () => widget.onDetails(item),
+        borderRadius: BorderRadius.circular(20),
+        focusColor: accent,
+        focusScale: isTv ? 1.02 : 1.0,
+        showFocusBorder: false,
+        descendantsAreFocusable: true,
+        child: Container(
         margin:
             const EdgeInsets.symmetric(horizontal: appPagePaddingHorizontal),
         decoration: BoxDecoration(
@@ -244,7 +342,7 @@ class _HeroCarouselState extends State<HeroCarousel>
                   child: FastArtwork(
                     url: image,
                     tier: ArtworkTier.backdrop,
-                    cacheWidth: 860,
+                    cacheWidth: TvModeService.of(context) ? 1280 : 860,
                     fit: BoxFit.cover,
                     placeholder: _buildDegradado(title: item.title),
                     errorWidget: _buildFallback(
@@ -388,11 +486,20 @@ class _HeroCarouselState extends State<HeroCarousel>
                     Row(
                       children: [
                         // CTA Principal Blanco Puro (estética exacta Inútil Music)
-                        TvFocusable(
-                          onTap: () => widget.onPlay(item),
-                          borderRadius: BorderRadius.circular(24),
-                          focusColor: const Color(0xFF38BDF8),
-                          focusScale: 1.05,
+                        Focus(
+                          onKeyEvent: (node, event) {
+                            if (event is KeyDownEvent &&
+                                event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                              _prevSlide();
+                              return KeyEventResult.handled;
+                            }
+                            return KeyEventResult.ignored;
+                          },
+                          child: TvFocusable(
+                            onTap: () => widget.onPlay(item),
+                            borderRadius: BorderRadius.circular(24),
+                            focusColor: accent,
+                            focusScale: 1.05,
                           // El CTA anuncia el destino real: con "Destino: TV"
                           // activo el contenido arranca en la Smart TV, y el
                           // botón lo dice en lugar de prometer un play local.
@@ -436,13 +543,23 @@ class _HeroCarouselState extends State<HeroCarousel>
                             },
                           ),
                         ),
+                      ),
                         const SizedBox(width: 10),
                         // CTA Secundario vidrio sutil
-                        TvFocusable(
-                          onTap: () => widget.onDetails(item),
-                          borderRadius: BorderRadius.circular(24),
-                          focusColor: const Color(0xFF38BDF8),
-                          focusScale: 1.05,
+                        Focus(
+                          onKeyEvent: (node, event) {
+                            if (event is KeyDownEvent &&
+                                event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                              _nextSlide();
+                              return KeyEventResult.handled;
+                            }
+                            return KeyEventResult.ignored;
+                          },
+                          child: TvFocusable(
+                            onTap: () => widget.onDetails(item),
+                            borderRadius: BorderRadius.circular(24),
+                            focusColor: accent,
+                            focusScale: 1.05,
                           child: Container(
                             decoration: BoxDecoration(
                               color: Colors.white.withValues(alpha: 0.12),
@@ -477,6 +594,7 @@ class _HeroCarouselState extends State<HeroCarousel>
                             ),
                           ),
                         ),
+                      ),
                       ],
                     ),
                   ],
@@ -507,6 +625,7 @@ class _HeroCarouselState extends State<HeroCarousel>
             ],
           ),
         ),
+      ),
       ),
     );
   }

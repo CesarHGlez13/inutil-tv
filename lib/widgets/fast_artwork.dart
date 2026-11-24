@@ -107,15 +107,15 @@ class FastArtwork extends StatelessWidget {
     this.fit = BoxFit.cover,
     this.cacheWidth,
     this.cacheHeight,
-    this.filterQuality = FilterQuality.low,
+    this.filterQuality = FilterQuality.medium,
     this.placeholder,
     this.errorWidget,
   });
 
   int? get _defaultCacheWidth => switch (tier) {
-        ArtworkTier.thumbnail => 180,
-        ArtworkTier.poster => 340,
-        ArtworkTier.backdrop => 820,
+        ArtworkTier.thumbnail => 300,
+        ArtworkTier.poster => 500,
+        ArtworkTier.backdrop => 1280,
       };
 
   @override

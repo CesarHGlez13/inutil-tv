@@ -97,9 +97,9 @@ class ArtworkCacheService {
 
     if (url.contains('image.tmdb.org/t/p/')) {
       final target = switch (tier) {
-        ArtworkTier.thumbnail => 'w185',
-        ArtworkTier.poster => 'w342',
-        ArtworkTier.backdrop => 'w780',
+        ArtworkTier.thumbnail => 'w300',
+        ArtworkTier.poster => 'w500',
+        ArtworkTier.backdrop => 'w1280',
       };
       return url.replaceFirst(
         RegExp(r'image\.tmdb\.org/t/p/(?:original|w\d+)/'),
