@@ -1,5 +1,12 @@
 # Changelog — InútilTV
 
+## 3.3.29 — 2026-11-23
+- **Fidelidad Total Crunchyroll Mobile & Smart TV (Anclaje de Logo y Layout Compacto):**
+  - **Móvil — Logo PNG Anclado a la Hoja de Contenido:** El logotipo PNG transparente oficial ahora está anclado directamente en la cabecera de la hoja negra de contenido (`SliverList`). Al hacer scroll, se desplaza solidariamente hacia arriba junto con la sinopsis, tags y episodios (en lugar de ser tapado como cortina), escalándose suavemente y ejecutando el crossfade hacia el título compacto fijado en la barra superior.
+  - **Smart TV — Layout Compacto 10-Foot ("Menos Amplio"):** Se redujeron márgenes, alturas y espaciados de la cabecera en TV (botón Volver, logo PNG max 65 px, sinopsis a 2 líneas compactas, botones de reproducción y carrusel de episodios), permitiendo que todos los elementos clave quepan simultáneamente en pantalla sin forzar el scroll ni desbordar hacia abajo.
+  - **Smart TV — Eliminación del Desplazamiento Involuntario al Abrir:** Configurado `ensureVisible: false` en los botones primarios ("Reproducir", "Mi Lista", "Volver") para que al abrir la ficha o seleccionar títulos/capítulos con el D-pad no se desplace la pantalla hacia abajo, manteniendo el logo visible al 100% en la posición inicial (offset 0.0) sin requerir pulsar "Arriba".
+  - **Restauración Suave al Volver al Botón Primario:** Al enfocar nuevamente el botón primario de reproducción desde la sección inferior de episodios, la pantalla restaura de manera fluida el desplazamiento a offset 0.0.
+
 ## 3.3.28 — 2026-11-23
 - **Logos Tipográficos Oficiales PNG y Animación de Desplazamiento estilo Crunchyroll:**
   - **Resolución Automática de Logos Oficiales en PNG Transparente:** Nuevo `TitleLogoService` de alto rendimiento con arquitectura multi-proveedor (TMDB como primario gratuito e ilimitado + Fanart.tv como respaldo enriquecido), filtrando exclusivamente logotipos transparentes `.png` horizontales de alta definición para series, animes y películas.

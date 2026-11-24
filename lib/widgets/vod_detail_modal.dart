@@ -173,12 +173,19 @@ class _VodDetailModalState extends State<VodDetailModal>
   List<VodEpisode> _episodes = [];
   String? _titleLogoUrl;
 
+  late final ScrollController _scrollController;
+  late final ScrollController _tvScrollController;
+  double _scrollK = 0.0;
+
   bool _loadingEpisodes = false;
   int _requestToken = 0;
 
   @override
   void initState() {
     super.initState();
+    _scrollController = widget.scrollController ?? ScrollController();
+    _scrollController.addListener(_updateScrollK);
+    _tvScrollController = widget.scrollController ?? ScrollController();
     _item = widget.item;
     if (_item.titleLogo.isNotEmpty) {
       _titleLogoUrl = _item.titleLogo;
@@ -195,8 +202,26 @@ class _VodDetailModalState extends State<VodDetailModal>
     }
   }
 
+  void _updateScrollK() {
+    if (!_scrollController.hasClients) return;
+    final heroH = _heroHeight(context);
+    final delta = heroH - kToolbarHeight;
+    if (delta <= 0) return;
+    final k = (_scrollController.position.pixels / delta).clamp(0.0, 1.0);
+    if ((k - _scrollK).abs() > 0.001) {
+      setState(() {
+        _scrollK = k;
+      });
+    }
+  }
+
   @override
   void dispose() {
+    _scrollController.removeListener(_updateScrollK);
+    if (widget.scrollController == null) {
+      _scrollController.dispose();
+      _tvScrollController.dispose();
+    }
     _reveal?.dispose();
     super.dispose();
   }
@@ -204,6 +229,16 @@ class _VodDetailModalState extends State<VodDetailModal>
   @override
   void didUpdateWidget(covariant VodDetailModal oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.scrollController != widget.scrollController) {
+      _scrollController.removeListener(_updateScrollK);
+      if (oldWidget.scrollController == null) {
+        _scrollController.dispose();
+        _tvScrollController.dispose();
+      }
+      _scrollController = widget.scrollController ?? ScrollController();
+      _scrollController.addListener(_updateScrollK);
+      _tvScrollController = widget.scrollController ?? ScrollController();
+    }
     if (oldWidget.item.id != widget.item.id) {
       _item = widget.item;
       _titleLogoUrl = _item.titleLogo.isNotEmpty ? _item.titleLogo : null;
@@ -569,7 +604,7 @@ class _VodDetailModalState extends State<VodDetailModal>
           body: Stack(
             children: [
               CustomScrollView(
-                controller: widget.scrollController,
+                controller: _scrollController,
                 slivers: [
                   // ── Cabecera (SliverAppBar Collapsing Toolbar estilo Crunchyroll 2026):
                   // El póster hace parallax y fade-out al subir; el título sube y se ancla
@@ -718,60 +753,6 @@ class _VodDetailModalState extends State<VodDetailModal>
                           ),
                         ),
                       ),
-                      // Rótulo dentro del lienzo estilo Crunchyroll (v3.3.28):
-                      // Logo PNG transparente (TMDB / Fanart.tv) con desplazamiento
-                      // vertical hacia arriba y escalado al scrollear (crossfade
-                      // con el título compacto anclado en la barra pinned).
-                      Positioned(
-                        left: 20,
-                        right: 20,
-                        bottom: 24,
-                        child: Builder(
-                          builder: (context) {
-                            final k = _collapseFraction(context);
-                            final dy = -k * 54.0;
-                            final scale = (1.0 - k * 0.18).clamp(0.75, 1.0);
-                            final opacity = (1.0 - k * 2.2).clamp(0.0, 1.0);
-                            final logo = _titleLogoUrl;
-
-                            return Transform.translate(
-                              offset: Offset(0, dy),
-                              child: Transform.scale(
-                                scale: scale,
-                                alignment: Alignment.bottomCenter,
-                                child: Opacity(
-                                  opacity: opacity,
-                                  child: Center(
-                                    child: (logo != null && logo.isNotEmpty)
-                                        ? ConstrainedBox(
-                                            constraints: BoxConstraints(
-                                              maxHeight: isTv ? 130 : 86,
-                                              maxWidth: isTv ? 500 : 310,
-                                            ),
-                                            child: FastArtwork(
-                                              url: logo,
-                                              tier: ArtworkTier.poster,
-                                              fit: BoxFit.contain,
-                                              errorWidget: _buildHeroTitleText(
-                                                context,
-                                                item.title,
-                                                isTv,
-                                              ),
-                                            ),
-                                          )
-                                        : _buildHeroTitleText(
-                                            context,
-                                            item.title,
-                                            isTv,
-                                          ),
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-
                     ],
                   ),
                 ),
@@ -780,10 +761,46 @@ class _VodDetailModalState extends State<VodDetailModal>
               SliverList(
                 delegate: SliverChildListDelegate([
                   Padding(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
+                        // 0. Logo PNG oficial Crunchyroll (anclado a la barra de contenido, se desplaza con ella)
+                        Opacity(
+                          opacity: (1.0 - _scrollK * 2.5).clamp(0.0, 1.0),
+                          child: Transform.scale(
+                            scale: (1.0 - _scrollK * 0.15).clamp(0.85, 1.0),
+                            alignment: Alignment.center,
+                            child: Transform.translate(
+                              offset: const Offset(0, -30),
+                              child: Center(
+                                child: (_titleLogoUrl != null &&
+                                        _titleLogoUrl!.isNotEmpty)
+                                    ? ConstrainedBox(
+                                        constraints: const BoxConstraints(
+                                          maxHeight: 82,
+                                          maxWidth: 290,
+                                        ),
+                                        child: FastArtwork(
+                                          url: _titleLogoUrl!,
+                                          tier: ArtworkTier.poster,
+                                          fit: BoxFit.contain,
+                                          errorWidget: _buildHeroTitleText(
+                                            context,
+                                            item.title,
+                                            false,
+                                          ),
+                                        ),
+                                      )
+                                    : _buildHeroTitleText(
+                                        context,
+                                        item.title,
+                                        false,
+                                      ),
+                              ),
+                            ),
+                          ),
+                        ),
                         // 1. Badge • Audio/Sub • Género (jerarquía Crunchyroll 2026)
                         Wrap(
                           alignment: WrapAlignment.center,
@@ -1306,8 +1323,8 @@ class _VodDetailModalState extends State<VodDetailModal>
           // 5. Contenido interactivo desplazable (10-foot UI para Smart TV)
           Positioned.fill(
             child: SingleChildScrollView(
-              controller: widget.scrollController,
-              padding: const EdgeInsets.symmetric(horizontal: 52, vertical: 32),
+              controller: _tvScrollController,
+              padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 14),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1315,6 +1332,7 @@ class _VodDetailModalState extends State<VodDetailModal>
                   Row(
                     children: [
                       TvFocusable(
+                        ensureVisible: false,
                         onTap: () => Navigator.of(context).pop(),
                         borderRadius: BorderRadius.circular(24),
                         child: Container(
@@ -1365,7 +1383,7 @@ class _VodDetailModalState extends State<VodDetailModal>
                       ),
                     ],
                   ),
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 10),
 
                   // Columna izquierda de Hero Info (máximo 60% del ancho)
                   ConstrainedBox(
@@ -1379,8 +1397,8 @@ class _VodDetailModalState extends State<VodDetailModal>
                         if (_titleLogoUrl != null && _titleLogoUrl!.isNotEmpty) ...[
                           ConstrainedBox(
                             constraints: const BoxConstraints(
-                              maxHeight: 110,
-                              maxWidth: 520,
+                              maxHeight: 70,
+                              maxWidth: 360,
                             ),
                             child: FastArtwork(
                               url: _titleLogoUrl!,
@@ -1391,7 +1409,7 @@ class _VodDetailModalState extends State<VodDetailModal>
                                 item.title,
                                 style: const TextStyle(
                                   color: Colors.white,
-                                  fontSize: 42,
+                                  fontSize: 30,
                                   fontWeight: FontWeight.w900,
                                   letterSpacing: -0.8,
                                   height: 1.15,
@@ -1415,7 +1433,7 @@ class _VodDetailModalState extends State<VodDetailModal>
                             item.title,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 42,
+                              fontSize: 30,
                               fontWeight: FontWeight.w900,
                               letterSpacing: -0.8,
                               height: 1.15,
@@ -1433,12 +1451,12 @@ class _VodDetailModalState extends State<VodDetailModal>
                             ),
                           ),
                         ],
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 8),
 
                         // Badges y metadatos TV
                         Wrap(
                           spacing: 10,
-                          runSpacing: 8,
+                          runSpacing: 4,
                           crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             Container(
@@ -1500,19 +1518,19 @@ class _VodDetailModalState extends State<VodDetailModal>
                               ),
                           ],
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 8),
 
                         // Sinopsis legible para TV
                         Text(
                           item.overview.isNotEmpty
                               ? item.overview
                               : 'Título disponible en alta definición con cambio automático de servidor en InútilTV.',
-                          maxLines: 4,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: Colors.white.withValues(alpha: 0.86),
-                            fontSize: 16,
-                            height: 1.5,
+                            fontSize: 13.5,
+                            height: 1.35,
                             shadows: const [
                               Shadow(
                                 blurRadius: 10,
@@ -1521,22 +1539,35 @@ class _VodDetailModalState extends State<VodDetailModal>
                             ],
                           ),
                         ),
-                        const SizedBox(height: 24),
+                        const SizedBox(height: 12),
 
                         // Fila de botones de acción TV (Enfocables con control remoto D-pad)
                         Row(
                           children: [
-                            // Botón Primario: REPRODUCIR (Autofocus: true)
+                            // Botón Primario: REPRODUCIR (Autofocus: true, ensureVisible: false para no desplazar ni ocultar el logo)
                             TvFocusable(
                               autofocus: true,
+                              ensureVisible: false,
+                              onFocusChange: (focused) {
+                                if (focused &&
+                                    _tvScrollController.hasClients &&
+                                    _tvScrollController.offset > 0) {
+                                  _tvScrollController.animateTo(
+                                    0.0,
+                                    duration:
+                                        const Duration(milliseconds: 150),
+                                    curve: Curves.easeOutCubic,
+                                  );
+                                }
+                              },
                               onTap: _playMainAction,
                               borderRadius: BorderRadius.circular(24),
                               focusScale: 1.05,
                               focusColor: accent,
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 22,
-                                  vertical: 12,
+                                  horizontal: 20,
+                                  vertical: 10,
                                 ),
                                 decoration: BoxDecoration(
                                   color: AppColors.playbackPrimaryBackground,
@@ -1577,6 +1608,7 @@ class _VodDetailModalState extends State<VodDetailModal>
 
                             // Botón Secundario: Mi Lista
                             TvFocusable(
+                              ensureVisible: false,
                               onTap: () async {
                                 final added = await _myList.toggle(item);
                                 if (context.mounted) {
@@ -1597,8 +1629,8 @@ class _VodDetailModalState extends State<VodDetailModal>
                               focusColor: accent,
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 18,
-                                  vertical: 12,
+                                  horizontal: 16,
+                                  vertical: 10,
                                 ),
                                 decoration: BoxDecoration(
                                   color: inMyList
@@ -1643,7 +1675,7 @@ class _VodDetailModalState extends State<VodDetailModal>
 
                   // Sección de Episodios para TV (Carrusel horizontal 16:9)
                   if (item.isSeries) ...[
-                    const SizedBox(height: 40),
+                    const SizedBox(height: 20),
                     Row(
                       children: [
                         const Text(
@@ -2093,8 +2125,6 @@ class _VodDetailModalState extends State<VodDetailModal>
               : (item.isSeries ? 'Comenzar a ver E1' : 'Reproducir'));
     }
 
-    final brandAccent = AppColors.accentFor(context);
-    final onBrandAccent = AppColors.onAccentFor(context);
     final bottomInset = MediaQuery.paddingOf(context).bottom;
 
     return Container(

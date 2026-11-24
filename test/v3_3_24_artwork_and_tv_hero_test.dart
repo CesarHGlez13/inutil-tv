@@ -68,19 +68,20 @@ void main() {
     ),
   ];
 
-  group('v3.3.24/v3.3.25/v3.3.26/v3.3.27/v3.3.28 — pins de versión y documentación', () {
-    test('pubspec.yaml en 3.3.28+77', () {
-      expect(_pubspecVersion(), '3.3.28+77');
+  group('v3.3.24 a v3.3.29 — pins de versión y documentación', () {
+    test('pubspec.yaml en 3.3.29+78', () {
+      expect(_pubspecVersion(), '3.3.29+78');
     });
 
-    test('lib/constants/app_info.dart en 3.3.28', () {
+    test('lib/constants/app_info.dart en 3.3.29', () {
       expect(File('lib/constants/app_info.dart').readAsStringSync(),
-          contains("static const String appVersion = '3.3.28'"));
-      expect(AppInfo.appVersion, '3.3.28');
+          contains("static const String appVersion = '3.3.29'"));
+      expect(AppInfo.appVersion, '3.3.29');
     });
 
-    test('CHANGELOG.md documenta 3.3.24 a 3.3.28 con mejoras de portadas, navegación TV, colores y logos Crunchyroll', () {
+    test('CHANGELOG.md documenta 3.3.24 a 3.3.29 con mejoras de portadas, navegación TV, colores y logos Crunchyroll', () {
       final changelog = File('CHANGELOG.md').readAsStringSync();
+      expect(changelog, contains('## 3.3.29'));
       expect(changelog, contains('## 3.3.28'));
       expect(changelog, contains('## 3.3.27'));
       expect(changelog, contains('## 3.3.24'));
@@ -357,8 +358,8 @@ void main() {
 
     testWidgets('VodDetailModal muestra FastArtwork con titleLogo si está definido', (tester) async {
       tester.view.physicalSize = const Size(393, 852);
-      tester.view.devicePixelRatio = 3.0;
-      addTearDown(tester.view.resetPhysicalSize);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
 
       const itemWithLogo = VodItem(
         id: 'test_item_with_logo',
@@ -380,8 +381,8 @@ void main() {
 
     testWidgets('VodDetailModal aplica Transform.translate y Transform.scale en hero title', (tester) async {
       tester.view.physicalSize = const Size(393, 852);
-      tester.view.devicePixelRatio = 3.0;
-      addTearDown(tester.view.resetPhysicalSize);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
 
       await tester.pumpWidget(wrapTheme(Scaffold(body: VodDetailModal(item: testItems.first))));
       await tester.pumpAndSettle();

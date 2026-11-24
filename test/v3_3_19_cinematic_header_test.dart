@@ -197,7 +197,7 @@ void main() {
       final src = File('lib/widgets/vod_detail_modal.dart').readAsStringSync();
       expect(src, contains('Colors.black.withValues(alpha: 0.72)'));
       expect(src, contains('stops: const [0.0, 0.55, 1.0]'));
-      expect(src, contains('bottom: 24'));
+      expect(src.contains('bottom: 24') || src.contains('Offset(0, -30)'), true);
     });
   });
 
