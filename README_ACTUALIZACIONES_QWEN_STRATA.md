@@ -1,135 +1,62 @@
-# Guía Definitiva de Lanzamiento y Actualizaciones para Qwen Strata
-> **Aplicación Oficial:** **Inútil TV** (en código y branding: `InútilTV`)  
-> **Identificador técnico de paquete (Android ID):** `dev.cesar.tubotv` *(solo namespace interno)*  
-> **Directorio del proyecto:** `/home/cesar/Escritorio/alo/tvtv`  
-> **Repositorio GitHub:** [`CesarHGlez13/inutil-tv`](https://github.com/CesarHGlez13/inutil-tv)  
-> **Destinatario de Telegram:** Cesar (`chat_id=1002362473`)  
-> **Dispositivo TV Box de Pruebas:** Onn 4K Streaming Box en `192.168.100.17` (puertos `5555` o `45741`)
+# Guía Compacta de Desarrollo y Lanzamiento (Qwen Strata / Agentes)
+
+> **App Oficial:** **Inutix TV** (ecosistema **inutix.com** junto con **Inutix Music** / **Familia Inutix**)
+> **Package ID Android:** `dev.cesar.tubotv` *(namespace interno; NO cambiar para no romper OTAs)*
+> **Repo:** `/home/cesar/Escritorio/alo/tvtv` → `CesarHGlez13/inutil-tv` (rama `main`)
+> **Versión base actual:** `3.3.36+85`
 
 ---
 
-## 🚨 Reglas Fundamentales para Qwen Strata
+## Reglas Críticas (No Romper)
 
-1. **El nombre de la aplicación es «Inútil TV» (o «InútilTV»):**  
-   NUNCA la llames "tubo tv", "tuvo tv" ni "tubotv". El nombre comercial y visible es **Inútil TV**. El término `tubotv` es únicamente el identificador técnico de paquete requerido por Android (`dev.cesar.tubotv`).
-
-2. **NUNCA compilar APK universal pesado:**  
-   Siempre compilar con `--split-per-abi`. Las TV Boxes (como la Onn 4K con SoC Amlogic y 2 GB RAM) colapsan si se instala un APK universal de más de 75 MB. Los APKs divididos pesan:
-   - `armeabi-v7a` (32-bit para TV Box Onn 4K): **~35 MB**
-   - `arm64-v8a` (64-bit para teléfonos y Fire TV 4K Max): **~39 MB**
-   - `x86_64` (emuladores / PC): **~45 MB**
-
-3. **Sincronización OBLIGATORIA de la versión en 3 archivos:**  
-   Si subes la versión en `pubspec.yaml` pero no en `lib/constants/app_info.dart`, **la aplicación mostrará un falso diálogo de actualización a los usuarios en cada inicio**.
-   - `pubspec.yaml` -> `version: X.Y.Z+N` (ejemplo: `3.3.6+46`)
-   - `lib/constants/app_info.dart` -> `static const String appVersion = 'X.Y.Z';`
-   - `CHANGELOG.md` -> Sección `## X.Y.Z — YYYY-MM-DD` con las notas del lanzamiento.
-
-4. **Red e Interfaces (Ethernet vs WiFi):**  
-   Si la TV Box (`192.168.100.17`) no responde por Ethernet debido a aislamiento de clientes en el módem/router, la ruta debe forzarse por la interfaz WiFi `wlp6s0`:
-   ```bash
-   sudo ip route add 192.168.100.17/32 dev wlp6s0
-   ```
+1. **Marca visible:** usar siempre **Inutix TV**, **Inutix Music** y **Familia Inutix** (nunca `InútilTV`, `Inútil Music` ni `tubotv` en UI).
+2. **Aislamiento de proyectos y dispositivos:**
+   - **NUNCA** modificar archivos dentro de `/home/cesar/Escritorio/alo/inutil_music`.
+   - **NUNCA** instalar APKs en el Galaxy S7 Edge (`ad09160360308ca38a`) — es el servidor SQLite autoritativo de `api.inutix.com`.
+   - Instalar solo en Onn 4K TV Box (`192.168.100.17:5555`, `armeabi-v7a`) y celular de pruebas (`arm64-v8a`).
+3. **Cero llaves/secretos en el repo ni en el APK:** `api.inutix.com` (S7) y `backup.inutix.com` (failover) manejan datos; `meta.inutix.com` guarda TMDB/Fanart en Cloudflare; `ota.inutix.com` espeja `release.json` y APKs. Las credenciales locales viven fuera del repo (`~/.config/inutil_relay/admin_secret.txt`, `~/.hermes/.env`).
+4. **Changelogs 100% a nivel usuario:** las notas en `CHANGELOG.md` y `AppInfo.whatsNewHighlights` deben describir beneficios claros para el usuario final (sin menciones de panel admin, Firestore, SQLite, scripts internos ni llaves).
+5. **Sincronizar siempre 3 archivos antes de compilar:**
+   - `pubspec.yaml` (`version: X.Y.Z+N`)
+   - `lib/constants/app_info.dart` (`appVersion = 'X.Y.Z'`)
+   - `CHANGELOG.md` (`## X.Y.Z — YYYY-MM-DD`) + pins de versión en `test/v3_3_22_crunchyroll_detail_test.dart`, `test/v3_3_23_crunchyroll_tv_test.dart`, `test/v3_3_24_artwork_and_tv_hero_test.dart`.
 
 ---
 
-## ⚡ El Método Rápido y Automático (Recomendado)
+## Ahorro de Contexto (Obligatorio para Qwen Strata)
 
-Todo el ciclo (validación, compilación split-per-abi, instalación en TV y celular, publicación en GitHub Releases con `release.json` y envío a Telegram) está automatizado en un solo script:
+Varios archivos superan 1,100 líneas (`main.dart`, `vod_detail_modal.dart`, `inutil_auth_gate.dart`, `cuevana_poseidon_service.dart`, `firebase_auth_service.dart`). **NO leas archivos completos**: usa `grep -n` primero y lee solo bloques de 60–150 líneas.
+
+| Área | Archivo principal |
+| :--- | :--- |
+| Marca, versión, novedades | `lib/constants/app_info.dart` |
+| Navegación móvil/TV, barra superior | `lib/main.dart` |
+| Infra `inutix.com` y failover LAN→api→backup | `lib/services/firebase_config.dart`, `lib/services/firebase_firestore_service.dart` |
+| Mirrors VOD dinámicos (`app_config/providers`) | `lib/services/remote_providers_config.dart` |
+| Red, proxy sistema Android, DoH y diagnóstico | `lib/services/network_config_service.dart`, `android/.../MainActivity.kt` |
+| Streaming Películas / Series / Anime | `lib/services/cuevana_poseidon_service.dart`, `serieskao_service.dart`, `jkanime_service.dart`, `tioanime_service.dart` |
+| Validación HLS, proxy adaptativo, reproductor | `lib/services/stream_validator.dart`, `hls_stream_proxy.dart`, `lib/screens/player_screen.dart` |
+| Logos PNG vía `meta.inutix.com/logo` | `lib/services/title_logo_service.dart` |
+| OTA y respaldo `ota.inutix.com` | `lib/services/inutil_update_service.dart`, `lib/services/ota_download_manager.dart` |
+| Control remoto LAN autenticado por cuenta | `lib/services/tv_remote_service.dart`, `lib/widgets/tv_remote_sheet.dart` |
+| Ficha detalle Crunchyroll (móvil + TV) | `lib/widgets/vod_detail_modal.dart` |
+
+---
+
+## Comandos Rápidos de Validación y Lanzamiento
 
 ```bash
 cd /home/cesar/Escritorio/alo/tvtv
-bash tool/full_release_pipeline.sh <VERSION>
+
+# 1. Análisis rápido (filtrando solo errores/warnings para no saturar contexto)
+flutter analyze --no-fatal-infos 2>&1 | grep -E "^\s*(error|warning)" || echo "OK"
+
+# 2. Pruebas clave (evitar correr salidas gigantes sin filtrar)
+python3 tool/test_relay_invalidate.py
+flutter test -r compact test/v3_3_36_user_changelog_and_system_proxy_test.dart test/v3_3_34_inutix_rebrand_and_zero_secrets_test.dart test/v3_3_33_cloudflare_edge_and_remote_providers_test.dart test/v3_3_32_stream_resilience_test.dart
+
+# 3. Pipeline completo (split-per-abi + relay horneado + ADB sin S7 + GitHub + api/backup.inutix.com + Telegram)
+bash tool/full_release_pipeline.sh <VERSION> --urgent
 ```
 
-**Ejemplo de uso:**
-```bash
-bash tool/full_release_pipeline.sh 3.3.6
-```
-
-### Opciones Disponibles:
-- `bash tool/full_release_pipeline.sh 3.3.6 --urgent`: Marca la actualización como obligatoria en Firestore y `release.json` (bloquea versiones anteriores).
-- `bash tool/full_release_pipeline.sh 3.3.6 --skip-build`: Si ya corriste `flutter build` previamente y solo quieres publicar e instalar.
-- `bash tool/full_release_pipeline.sh 3.3.6 --skip-tv-test`: Omite la instalación en la TV Box si está apagada.
-- `bash tool/full_release_pipeline.sh 3.3.6 --skip-telegram`: Omite el envío por Telegram.
-
----
-
-## 🛠️ Procedimiento Manual Paso a Paso (Si el script falla o se requiere control quirúrgico)
-
-### Paso 1: Actualizar los 3 Archivos de Versión
-1. **`pubspec.yaml`**: Modificar la línea 4:
-   ```yaml
-   version: 3.3.6+46
-   ```
-   *(El buildNumber se calcula aumentando en +1 el anterior. Gradle genera: armeabi-v7a = 1046, arm64-v8a = 2046).*
-
-2. **`lib/constants/app_info.dart`**:
-   ```dart
-   static const String appName = 'InútilTV';
-   static const String appVersion = '3.3.6';
-   ```
-
-3. **`CHANGELOG.md`**: Agregar arriba:
-   ```markdown
-   ## 3.3.6 — 2026-11-18
-   - Descripción de la mejora 1.
-   - Descripción de la mejora 2.
-   ```
-
-### Paso 2: Análisis Estático y Tests
-```bash
-cd /home/cesar/Escritorio/alo/tvtv
-flutter analyze --no-fatal-infos
-flutter test test/v3_3_0_tv_connect_test.dart
-```
-
-### Paso 3: Compilar APKs Divididos por ABI
-```bash
-flutter build apk --release --split-per-abi
-```
-Generará en `build/app/outputs/flutter-apk/`:
-- `app-armeabi-v7a-release.apk`
-- `app-arm64-v8a-release.apk`
-- `app-x86_64-release.apk`
-
-### Paso 4: Conectar e Instalar en la TV Box y Celular
-1. Asegurar ruta hacia la TV:
-   ```bash
-   sudo ip route add 192.168.100.17/32 dev wlp6s0 2>/dev/null || true
-   adb connect 192.168.100.17:5555 || adb connect 192.168.100.17:45741
-   ```
-2. Instalar en TV Box (32-bit `armeabi-v7a`):
-   ```bash
-   adb -s 192.168.100.17:5555 install -r -d -g build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
-   ```
-3. Instalar en Celular (64-bit `arm64-v8a` si está conectado por ADB en `192.168.100.15`):
-   ```bash
-   adb -s 192.168.100.15:35713 install -r -d -g build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-   ```
-4. Reiniciar la app en la TV y verificar versión:
-   ```bash
-   adb -s 192.168.100.17:5555 shell am force-stop dev.cesar.tubotv
-   adb -s 192.168.100.17:5555 shell am start -W -n dev.cesar.tubotv/.MainActivity
-   adb -s 192.168.100.17:5555 shell dumpsys package dev.cesar.tubotv | grep -E "versionName|versionCode"
-   ```
-
-### Paso 5: Publicar la Release OTA en GitHub
-```bash
-bash tool/publish_release.sh 3.3.6 --github
-```
-*Este paso crea el tag `v3.3.6` en GitHub, genera el archivo `release.json` con los hashes SHA-256 de cada APK y actualiza la release.*
-
-### Paso 6: Enviar los APKs al Telegram de Cesar
-```bash
-python3 tool/send_release_telegram.py 3.3.6
-```
-*Lee el bot token desde `/home/cesar/.hermes/.env` y envía los APKs listos para descarga al chat `1002362473`.*
-
----
-
-## 📋 Resumen de Puertos y Credenciales
-- **TV Box Onn 4K:** `192.168.100.17:5555` (o puerto dinámico wireless `45741`).
-- **Celular Honor / Android:** `192.168.100.15:35713` (puerto dinámico).
-- **Keystore de firma:** `android/app/tubotv-release.keystore` (`alias: tubotv`, `pass: tubotv2026`).
-- **Telegram Bot Token:** En `/home/cesar/.hermes/.env` (`TELEGRAM_BOT_TOKEN`).
+*(Si la TV Box `192.168.100.17` no responde por Ethernet, enrutar por Wi-Fi: `sudo ip route add 192.168.100.17/32 dev wlp6s0 2>/dev/null || true`.)*
