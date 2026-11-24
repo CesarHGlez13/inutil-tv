@@ -24,6 +24,8 @@ class HeroCarousel extends StatefulWidget {
   final void Function(VodItem item) onPlay;
   final void Function(VodItem item) onDetails;
   final bool active;
+  final VoidCallback? onHeroFocused;
+  final FocusNode? playFocusNode;
 
   const HeroCarousel({
     super.key,
@@ -31,6 +33,8 @@ class HeroCarousel extends StatefulWidget {
     required this.onPlay,
     required this.onDetails,
     this.active = true,
+    this.onHeroFocused,
+    this.playFocusNode,
   });
 
   @override
@@ -43,6 +47,8 @@ class _HeroCarouselState extends State<HeroCarousel>
 
   late final PageController _pageController;
   late final AnimationController _kenBurns;
+  final _detailsFocusNode = FocusNode(debugLabel: 'heroTvDetails');
+  final _internalPlayFocusNode = FocusNode(debugLabel: 'heroTvPlay');
   int _currentIndex = 0;
   Timer? _autoTimer;
   Timer? _resumeTimer;
@@ -180,6 +186,8 @@ class _HeroCarouselState extends State<HeroCarousel>
     _resumeTimer?.cancel();
     _kenBurns.dispose();
     _pageController.dispose();
+    _detailsFocusNode.dispose();
+    _internalPlayFocusNode.dispose();
     super.dispose();
   }
 
@@ -234,8 +242,14 @@ class _HeroCarouselState extends State<HeroCarousel>
     final item = widget.featured[_currentIndex % widget.featured.length];
     final image = item.backdrop.isNotEmpty ? item.backdrop : item.poster;
 
-    return Stack(
-      children: [
+    return Focus(
+      onFocusChange: (hasFocus) {
+        if (hasFocus) {
+          widget.onHeroFocused?.call();
+        }
+      },
+      child: Stack(
+        children: [
         // 1. Tarjeta visual del slide con AnimatedSwitcher
         Container(
           margin: const EdgeInsets.symmetric(
@@ -450,15 +464,24 @@ class _HeroCarouselState extends State<HeroCarousel>
                       // Botón Reproducir fijo
                       Focus(
                         onKeyEvent: (node, event) {
-                          if (event is KeyDownEvent &&
-                              event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                          if (event is! KeyDownEvent) return KeyEventResult.ignored;
+                          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
                             _prevSlide(fromTv: true);
+                            return KeyEventResult.handled;
+                          }
+                          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                            _detailsFocusNode.requestFocus();
                             return KeyEventResult.handled;
                           }
                           return KeyEventResult.ignored;
                         },
                         child: TvFocusable(
                           key: const ValueKey('hero-tv-play-btn'),
+                          focusNode: widget.playFocusNode ?? _internalPlayFocusNode,
+                          ensureVisible: false,
+                          onFocusChange: (focused) {
+                            if (focused) widget.onHeroFocused?.call();
+                          },
                           onTap: () => widget.onPlay(
                             widget.featured[_currentIndex % widget.featured.length],
                           ),
@@ -510,8 +533,12 @@ class _HeroCarouselState extends State<HeroCarousel>
                       // Botón Detalles fijo
                       Focus(
                         onKeyEvent: (node, event) {
-                          if (event is KeyDownEvent &&
-                              event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                          if (event is! KeyDownEvent) return KeyEventResult.ignored;
+                          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                            (widget.playFocusNode ?? _internalPlayFocusNode).requestFocus();
+                            return KeyEventResult.handled;
+                          }
+                          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
                             _nextSlide(fromTv: true);
                             return KeyEventResult.handled;
                           }
@@ -519,6 +546,11 @@ class _HeroCarouselState extends State<HeroCarousel>
                         },
                         child: TvFocusable(
                           key: const ValueKey('hero-tv-details-btn'),
+                          focusNode: _detailsFocusNode,
+                          ensureVisible: false,
+                          onFocusChange: (focused) {
+                            if (focused) widget.onHeroFocused?.call();
+                          },
                           onTap: () => widget.onDetails(
                             widget.featured[_currentIndex % widget.featured.length],
                           ),
@@ -599,24 +631,38 @@ class _HeroCarouselState extends State<HeroCarousel>
             top: 0,
             bottom: 0,
             child: Center(
-              child: TvFocusable(
-                key: const ValueKey('hero-tv-prev-arrow'),
-                onTap: () => _prevSlide(fromTv: true),
-                borderRadius: BorderRadius.circular(20),
-                focusColor: accent,
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.55),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.25),
+              child: Focus(
+                onKeyEvent: (node, event) {
+                  if (event is KeyDownEvent &&
+                      event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                    _prevSlide(fromTv: true);
+                    return KeyEventResult.handled;
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: TvFocusable(
+                  key: const ValueKey('hero-tv-prev-arrow'),
+                  ensureVisible: false,
+                  onFocusChange: (focused) {
+                    if (focused) widget.onHeroFocused?.call();
+                  },
+                  onTap: () => _prevSlide(fromTv: true),
+                  borderRadius: BorderRadius.circular(20),
+                  focusColor: accent,
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.25),
+                      ),
                     ),
-                  ),
-                  child: const Icon(
-                    Icons.chevron_left_rounded,
-                    color: Colors.white,
-                    size: 26,
+                    child: const Icon(
+                      Icons.chevron_left_rounded,
+                      color: Colors.white,
+                      size: 26,
+                    ),
                   ),
                 ),
               ),
@@ -627,24 +673,38 @@ class _HeroCarouselState extends State<HeroCarousel>
             top: 0,
             bottom: 0,
             child: Center(
-              child: TvFocusable(
-                key: const ValueKey('hero-tv-next-arrow'),
-                onTap: () => _nextSlide(fromTv: true),
-                borderRadius: BorderRadius.circular(20),
-                focusColor: accent,
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.55),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.25),
+              child: Focus(
+                onKeyEvent: (node, event) {
+                  if (event is KeyDownEvent &&
+                      event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                    _nextSlide(fromTv: true);
+                    return KeyEventResult.handled;
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: TvFocusable(
+                  key: const ValueKey('hero-tv-next-arrow'),
+                  ensureVisible: false,
+                  onFocusChange: (focused) {
+                    if (focused) widget.onHeroFocused?.call();
+                  },
+                  onTap: () => _nextSlide(fromTv: true),
+                  borderRadius: BorderRadius.circular(20),
+                  focusColor: accent,
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.25),
+                      ),
                     ),
-                  ),
-                  child: const Icon(
-                    Icons.chevron_right_rounded,
-                    color: Colors.white,
-                    size: 26,
+                    child: const Icon(
+                      Icons.chevron_right_rounded,
+                      color: Colors.white,
+                      size: 26,
+                    ),
                   ),
                 ),
               ),
@@ -652,8 +712,9 @@ class _HeroCarouselState extends State<HeroCarousel>
           ),
         ],
       ],
-    );
-  }
+    ),
+  );
+}
 
   /// Experiencia Móvil / Tablet: carrusel con gestos táctiles fluidos mediante PageView.
   Widget _buildMobileHero(

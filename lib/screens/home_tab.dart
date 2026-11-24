@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../constants/app_info.dart';
 import '../models/models.dart';
@@ -56,6 +57,8 @@ class _HomeTabState extends State<HomeTab> {
   final _history = WatchHistory();
   final _myList = MyListService.instance;
   final _vault = OfflineVaultService.instance;
+  final _homeScrollController = ScrollController();
+  final _heroPlayFocusNode = FocusNode(debugLabel: 'heroPlayFocus');
 
   bool _loading = true;
   int _featuredSeed = 0;
@@ -90,6 +93,13 @@ class _HomeTabState extends State<HomeTab> {
   void initState() {
     super.initState();
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    _homeScrollController.dispose();
+    _heroPlayFocusNode.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() => _refreshHomeData(shuffle: false);
@@ -183,6 +193,7 @@ class _HomeTabState extends State<HomeTab> {
           backgroundColor: AppColors.elevatedSurfaceFor(context),
           onRefresh: () => _refreshHomeData(shuffle: true),
           child: ListView(
+            controller: _homeScrollController,
             cacheExtent: 700,
             padding: const EdgeInsets.only(top: 10, bottom: 112),
             children: [
@@ -243,52 +254,63 @@ class _HomeTabState extends State<HomeTab> {
                 ),
               ),
               const SizedBox(height: 10),
-              SizedBox(
-                height: 36,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: appPagePaddingHorizontal,
-                  ),
-                  itemCount: _quickFilters.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
-                  itemBuilder: (context, idx) {
-                    final f = _quickFilters[idx];
-                    final selected = f == _quickFilter;
-                    return TvFocusable(
-                      key: ValueKey('home-filter-$f'),
-                      onTap: () => setState(() => _quickFilter = f),
-                      borderRadius: BorderRadius.circular(18),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 160),
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: selected
-                              ? accent
-                              : AppColors.elevatedSurfaceFor(context),
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
+              Focus(
+                onKeyEvent: (node, event) {
+                  if (showHero &&
+                      event is KeyDownEvent &&
+                      event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                    _heroPlayFocusNode.requestFocus();
+                    return KeyEventResult.handled;
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: SizedBox(
+                  height: 36,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: appPagePaddingHorizontal,
+                    ),
+                    itemCount: _quickFilters.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    itemBuilder: (context, idx) {
+                      final f = _quickFilters[idx];
+                      final selected = f == _quickFilter;
+                      return TvFocusable(
+                        key: ValueKey('home-filter-$f'),
+                        onTap: () => setState(() => _quickFilter = f),
+                        borderRadius: BorderRadius.circular(18),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 160),
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
                             color: selected
                                 ? accent
-                                : AppColors.cardBorderFor(context),
-                            width: 0.8,
+                                : AppColors.elevatedSurfaceFor(context),
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: selected
+                                  ? accent
+                                  : AppColors.cardBorderFor(context),
+                              width: 0.8,
+                            ),
+                          ),
+                          child: Text(
+                            f,
+                            style: TextStyle(
+                              color: selected
+                                  ? AppColors.onAccentFor(context)
+                                  : AppColors.contentSubtitleFor(context),
+                              fontSize: 12,
+                              fontWeight:
+                                  selected ? FontWeight.w800 : FontWeight.w600,
+                            ),
                           ),
                         ),
-                        child: Text(
-                          f,
-                          style: TextStyle(
-                            color: selected
-                                ? AppColors.onAccentFor(context)
-                                : AppColors.contentSubtitleFor(context),
-                            fontSize: 12,
-                            fontWeight:
-                                selected ? FontWeight.w800 : FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
@@ -300,6 +322,17 @@ class _HomeTabState extends State<HomeTab> {
                   active: widget.isTabActive,
                   onPlay: _playVod,
                   onDetails: _showDetails,
+                  playFocusNode: _heroPlayFocusNode,
+                  onHeroFocused: () {
+                    // Scroll al tope para que el hero se vea completo
+                    if (_homeScrollController.hasClients) {
+                      _homeScrollController.animateTo(
+                        0,
+                        duration: const Duration(milliseconds: 250),
+                        curve: Curves.easeOutCubic,
+                      );
+                    }
+                  },
                 ),
                 const SizedBox(height: 8),
               ],
@@ -311,6 +344,7 @@ class _HomeTabState extends State<HomeTab> {
                   onResume: _resumeWatching,
                   onRemove: (e) => _history.remove(e.id),
                   onClear: () => _history.clear(),
+                  upFocusNode: _heroPlayFocusNode,
                 ),
 
               // 3. Mi Lista

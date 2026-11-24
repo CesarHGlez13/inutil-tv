@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../services/artwork_cache_service.dart';
 import '../services/watch_history.dart';
@@ -14,6 +15,7 @@ class ContinueWatchingRail extends StatelessWidget {
   final void Function(WatchProgress entry) onResume;
   final void Function(WatchProgress entry) onRemove;
   final VoidCallback onClear;
+  final FocusNode? upFocusNode;
 
   const ContinueWatchingRail({
     super.key,
@@ -21,6 +23,7 @@ class ContinueWatchingRail extends StatelessWidget {
     required this.onResume,
     required this.onRemove,
     required this.onClear,
+    this.upFocusNode,
   });
 
   @override
@@ -94,12 +97,22 @@ class ContinueWatchingRail extends StatelessWidget {
     final accent = AppColors.accentFor(context);
 
     return RepaintBoundary(
-      child: TvFocusable(
-      onTap: () => onResume(entry),
-      onLongPress: () => _confirmRemove(context, entry),
-      borderRadius: BorderRadius.circular(14),
-      focusScale: 1.04,
-      child: Container(
+      child: Focus(
+        onKeyEvent: (node, event) {
+          if (event is KeyDownEvent &&
+              event.logicalKey == LogicalKeyboardKey.arrowUp &&
+              upFocusNode != null) {
+            upFocusNode!.requestFocus();
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        },
+        child: TvFocusable(
+          onTap: () => onResume(entry),
+          onLongPress: () => _confirmRemove(context, entry),
+          borderRadius: BorderRadius.circular(14),
+          focusScale: 1.04,
+          child: Container(
         width: 222,
         decoration: BoxDecoration(
           color: AppColors.elevatedSurfaceFor(context),
@@ -199,6 +212,7 @@ class ContinueWatchingRail extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
       ),
     );

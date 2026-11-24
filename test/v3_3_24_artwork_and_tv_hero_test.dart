@@ -65,22 +65,23 @@ void main() {
     ),
   ];
 
-  group('v3.3.24/v3.3.25 — pins de versión y documentación', () {
-    test('pubspec.yaml en 3.3.25+74', () {
-      expect(_pubspecVersion(), '3.3.25+74');
+  group('v3.3.24/v3.3.25/v3.3.26 — pins de versión y documentación', () {
+    test('pubspec.yaml en 3.3.26+75', () {
+      expect(_pubspecVersion(), '3.3.26+75');
     });
 
-    test('lib/constants/app_info.dart en 3.3.25', () {
+    test('lib/constants/app_info.dart en 3.3.26', () {
       expect(File('lib/constants/app_info.dart').readAsStringSync(),
-          contains("static const String appVersion = '3.3.25'"));
-      expect(AppInfo.appVersion, '3.3.25');
+          contains("static const String appVersion = '3.3.26'"));
+      expect(AppInfo.appVersion, '3.3.26');
     });
 
-    test('CHANGELOG.md documenta 3.3.24 y 3.3.25 con mejoras de portadas, navegación TV y colores de marca', () {
+    test('CHANGELOG.md documenta 3.3.24, 3.3.25 y 3.3.26 con mejoras de portadas, navegación TV y colores de marca', () {
       final changelog = File('CHANGELOG.md').readAsStringSync();
       expect(changelog, contains('## 3.3.24'));
       expect(changelog, contains('## 3.3.25'));
-      expect(changelog, contains('Resolución Definitiva de Foco D-Pad en Destacados de Smart TV'));
+      expect(changelog, contains('## 3.3.26'));
+      expect(changelog, contains('Encuadre Completo y Retención de Scroll en Destacados de Smart TV'));
       expect(changelog, contains('Calidad HD / 4K Ultra en Portadas y Fondos'));
       expect(changelog, contains('Restauración de Identidad y Paleta Oficial InútilTV'));
     });

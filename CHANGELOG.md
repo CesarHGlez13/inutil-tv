@@ -1,5 +1,11 @@
 # Changelog — InútilTV
 
+## 3.3.26 — 2026-11-23
+- **Encuadre Completo y Retención de Scroll en Destacados de Smart TV:**
+  - **Eliminación del desplazamiento involuntario hacia abajo ("se baja la pantalla"):** Se configuró `ensureVisible: false` en los botones ("Reproducir", "Detalles", flechas) del `HeroCarousel` para evitar que `Scrollable.ensureVisible(alignment: 0.35)` desplace automáticamente el `ListView` 240 píxeles hacia abajo y corte la parte superior del banner.
+  - **Auto-scroll al tope con `onHeroFocused`:** Al recibir foco cualquier control de la sección de destacados o al regresar desde "Seguir viendo", el `ScrollController` principal anima suavemente al offset 0.0, garantizando que el Hero permanezca completamente encuadrado y visible de principio a fin.
+  - **Conexión D-Pad Directa desde Filtros:** Presionar Flecha Abajo desde cualquier píldora de filtro rápido ("Todo", "En Vivo", "Cine", "Anime", "Mi Lista", "Descargas") enruta el foco directamente al botón "Reproducir" mediante `_heroPlayFocusNode`, eliminando saltos o evasión de la sección de destacados.
+
 ## 3.3.25 — 2026-11-23
 - **Resolución Definitiva de Foco D-Pad en Destacados de Smart TV:**
   - **Botones CTA Anclados Permanentes:** Se eliminó el desmontaje y la pérdida de foco causada por las transiciones de `PageView`. En Smart TV los botones de acción ("Reproducir" y "Detalles") y las flechas de navegación permanecen montados en el overlay con claves estáticas (`hero-tv-play-btn`, `hero-tv-details-btn`).
