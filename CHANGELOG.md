@@ -1,5 +1,12 @@
 # Changelog — InútilTV
 
+## 3.3.31 — 2026-11-24
+- **Migración Completa a Infraestructura Propia `inutix.com` (0 cuota Firestore + Failover Automático):**
+  - **Eliminación Total de URLs Directas a `firestore.googleapis.com`:** `InutilPromoPopupService` (`app_config/tv_promo_popup`, `app_config/promo_popup`) y `NetworkConfigService` (`runDiagnostics` → `app_config/tv_release`) ahora utilizan `FirebaseConfig.firestoreBaseUrl` para enrutar siempre por `inutix.com`.
+  - **Failover Automático de 3 Capas en Runtime (`LAN → api.inutix.com → backup.inutix.com`):** En `InutilFirestoreService`, `InutilUpdateService` y `InutilPromoPopupService`, si el relay LAN (`192.168.100.27`) falla por conexión conmuta a `api.inutix.com`; si `api.inutix.com` falla por conexión o responde HTTP `502/503/521/522/524/530`, llama a `FirebaseConfig.markCloudRelayUnreachable()` y reintenta automáticamente contra `backup.inutix.com`.
+  - **Sincronización OTA con `api.inutix.com` y `backup.inutix.com`:** `tool/publish_release.sh` actualiza `app_config/tv_release` en el nodo autoritativo `api.inutix.com` (con `X-Admin-Secret`) e invalida la caché en `backup.inutix.com`, manteniendo compatibilidad con Firestore para clientes antiguos.
+  - **Panel Admin (`tool/firebase_admin.py`) sobre `api.inutix.com`:** Lectura y escritura administrativa dirigida por defecto a `https://api.inutix.com` con `X-Admin-Secret` (0 consumo de cuota Firestore).
+
 ## 3.3.30 — 2026-11-24
 - **Seguridad y Aislamiento Estricto por Cuenta en Control Remoto LAN (InútilTV Connect):**
   - **Autenticación Obligatoria por Cuenta en Puente LAN (HTTP 38443 y UDP 38444):** Se derivó un token criptográfico determinista por cuenta (`SHA-256` sobre el UID de Firebase Auth, header `X-Inutil-Account` y paquete UDP `INUTIL_TV_DISCOVER|<token>`). Las Smart TVs ahora rechazan con `403 Forbidden` cualquier petición de `/api/tv/ping`, `/api/tv/state` o `/api/tv/command` que provenga de un dispositivo con una cuenta distinta en la misma red Wi-Fi.

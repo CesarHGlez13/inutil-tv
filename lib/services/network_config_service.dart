@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'firebase_config.dart';
+
 /// Bitacora de red opcional, pensada para depurar en escritorio y en la
 /// prueba en vivo (`INUTILTV_REAL_NET=1 INUTILTV_NET_DEBUG=1 flutter test ...`).
 /// Solo imprime si existe la variable de entorno `INUTILTV_NET_DEBUG`; en
@@ -612,8 +614,7 @@ class NetworkConfigService extends ChangeNotifier {
     _dbg('diagnostico: inicio');
     final checks = <NetworkCheck>[];
     checks.add(await _probe('Cuenta', Uri.parse(
-      'https://firestore.googleapis.com/v1/projects/inutil-music-app'
-      '/databases/(default)/documents/app_config/tv_release',
+      '${FirebaseConfig.firestoreBaseUrl}/app_config/tv_release',
     )));
     checks.add(await _probe('Catálogo', Uri.parse(
       'https://www.themoviedb.org/',

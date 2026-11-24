@@ -38,10 +38,12 @@ from pathlib import Path
 
 PROJECT_ID = "inutil-music-app"
 API_KEY = "AIzaSyBLg1eN_N7Djc8X1Kri5MQFS-bnS2vVv-c"
-# FB_API_BASE permite enrutar las lecturas/escrituras de Firestore del panel por el
-# relay del S7 (cache SQLite en el telefono => cero cuota despues de la primera vez).
-# Por defecto va directo a Google. Auth (AUTH_URL) NUNCA pasa por el relay.
-FIRESTORE_URL = (f"{os.environ.get('FB_API_BASE', 'https://firestore.googleapis.com')}"
+# FB_API_BASE apunta por defecto al nodo autoritativo propio en S7 Edge
+# (`https://api.inutix.com`, SQLite local con X-Admin-Secret => 0 cuota en Firestore).
+# Puede sobreescribirse con FB_API_BASE=https://firestore.googleapis.com si hiciera falta.
+# Auth (AUTH_URL) NUNCA pasa por el relay: siempre va directo a Firebase Auth.
+FB_API_BASE = os.environ.get("FB_API_BASE", "https://api.inutix.com").strip().rstrip("/")
+FIRESTORE_URL = (f"{FB_API_BASE}"
                  f"/v1/projects/{PROJECT_ID}/databases/(default)/documents")
 AUTH_URL = "https://identitytoolkit.googleapis.com/v1"
 CONFIGSTORE_PATH = Path("/home/cesar/.config/configstore/firebase-tools.json")
@@ -209,34 +211,43 @@ def get_auth_token(force_refresh=False):
             return fresh
     return access_token
 
+def _is_relay_firestore_url(url):
+    """True si la URL apunta al backend propio (api.inutix.com / LAN S7 / backup)
+    en lugar de Google Firestore directo."""
+    return (url.startswith(FIRESTORE_URL)
+            and not url.startswith("https://firestore.googleapis.com"))
+
+
 def make_request(url, method="GET", data=None, token=None):
     explicit_token = token
-    token = explicit_token or get_auth_token()
+    use_admin_secret = _is_relay_firestore_url(url) and bool(RELAY_ADMIN_SECRET)
+    if not use_admin_secret:
+        token = explicit_token or get_auth_token()
     res = _do_request(url, method=method, data=data, token=token)
-    # Token revocado/expirado en el servidor: un reintento con token fresco.
-    if isinstance(res, dict) and res.get("code") == 401 and not explicit_token:
+    # Token revocado/expirado en el servidor (solo Google Auth / Firestore directo).
+    if (not use_admin_secret and isinstance(res, dict)
+            and res.get("code") == 401 and not explicit_token):
         fresh = get_auth_token(force_refresh=True)
         if fresh and fresh != token:
             res = _do_request(url, method=method, data=data, token=fresh)
-    # Escritura pagada -> avisar a las capas de cache. Antes de esto el panel
-    # escribia y las apps seguian viendo el documento VIEJO hasta que caducaba
-    # el TTL del tier por donde leian (S7: cache permanente salvo app_config;
-    # Worker: 60 s). Se avisa solo si la escritura salio bien: un PATCH que
-    # Google rechazo no dejo nada que purgar.
+    # Escritura exitosa -> avisar a las demás capas de cache para invalidación inmediata.
     if method in ("PATCH", "POST", "DELETE") and not (isinstance(res, dict)
                                                        and "error" in res):
         doc = fs_doc_path(url)
         if doc:
-            # Si la escritura ya paso por una de las capas (`FB_API_BASE`
-            # apuntando a ella), esa capa ya actualizo su propio cache: no hay
-            # que purgarla, porque purgarla le costaria una lectura pagada.
+            # Omitir la capa por la que ya pasó la escritura.
             relay_invalidate(doc, skip={b for b in RELAY_INVALIDATE_BASES
                                         if FIRESTORE_URL.startswith(b)})
     return res
 
 def _do_request(url, method="GET", data=None, token=None):
-    headers = {"Content-Type": "application/json"}
-    if token:
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; InutilAdminPanel/1.0)",
+    }
+    if _is_relay_firestore_url(url) and RELAY_ADMIN_SECRET:
+        headers["X-Admin-Secret"] = RELAY_ADMIN_SECRET
+    elif token:
         headers["Authorization"] = f"Bearer {token}"
     body = json.dumps(data).encode("utf-8") if data is not None else None
     req = urllib.request.Request(url, data=body, headers=headers, method=method)

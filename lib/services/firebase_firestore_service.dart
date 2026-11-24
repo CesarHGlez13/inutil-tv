@@ -64,30 +64,80 @@ class InutilFirestoreService {
         text.contains('network unreachable');
   }
 
-  /// Manda una petición de Firestore con red de seguridad del relay del S7.
+  /// Códigos HTTP de túnel/proxy caído (Cloudflare Tunnel / Nginx / gateway)
+  /// que deben activar el failover inmediato hacia `backup.inutix.com`.
+  @visibleForTesting
+  static bool isTunnelUnavailableStatus(int statusCode) =>
+      statusCode == 502 ||
+      statusCode == 503 ||
+      statusCode == 521 ||
+      statusCode == 522 ||
+      statusCode == 524 ||
+      statusCode == 530;
+
+  /// Manda una petición de datos con failover automático en cadena:
+  /// `LAN S7 (192.168.100.27) → api.inutix.com → backup.inutix.com`.
   ///
-  /// Si [FirebaseConfig] tenía el relay por alcanzable y la petición muere por
-  /// conexión (`Connection refused`, `SocketException`, `TimeoutException`),
-  /// se marca como caído y se reintenta UNA sola vez: en cuanto
-  /// `markRelayUnreachable()` corre, `firestoreBaseUrl` devuelve el endpoint de
-  /// Google, así que el reintento va directo a la nube sin reiniciar la app y
-  /// sin volver a tocar el relay en el resto de la sesión.
-  Future<http.Response> _sendWithRelayFallback({
+  /// - Si el relay LAN muere por fallo de conexión, llama a
+  ///   `markRelayUnreachable()` y reintenta contra `api.inutix.com`.
+  /// - Si `api.inutix.com` muere por fallo de conexión o responde
+  ///   `502/503/521/522/524/530`, llama a `markCloudRelayUnreachable()` y
+  ///   reintenta automáticamente contra `backup.inutix.com`.
+  Future<http.Response> sendWithRelayFallback({
     required String label,
     required Uri Function() urlBuilder,
     required Future<http.Response> Function(Uri url) send,
   }) async {
-    final relayWasUsable = FirebaseConfig.relayUsable;
-    try {
-      return await send(urlBuilder());
-    } catch (error) {
-      if (!relayWasUsable || !isConnectionFailure(error)) rethrow;
-      FirebaseConfig.markRelayUnreachable();
-      debugPrint('Relay del S7 sin respuesta en $label: '
-          'reintento directo a Google.');
-      return await send(urlBuilder());
+    for (var attempt = 0; attempt < 3; attempt++) {
+      final lanWasUsable = FirebaseConfig.relayUsable;
+      final cloudWasUsable = !lanWasUsable && FirebaseConfig.cloudRelayUsable;
+      try {
+        final resp = await send(urlBuilder());
+        if (cloudWasUsable &&
+            FirebaseConfig.backupRelayUsable &&
+            isTunnelUnavailableStatus(resp.statusCode)) {
+          FirebaseConfig.markCloudRelayUnreachable();
+          debugPrint(
+            'Nodo principal inutix.com respondió HTTP ${resp.statusCode} en '
+            '$label: conmutando a respaldo ${FirebaseConfig.backupRelayHost}.',
+          );
+          continue;
+        }
+        return resp;
+      } catch (error) {
+        if (!isConnectionFailure(error)) rethrow;
+        if (lanWasUsable) {
+          FirebaseConfig.markRelayUnreachable();
+          debugPrint(
+            'Relay LAN del S7 sin respuesta en $label: '
+            'reintentando en siguiente capa (${FirebaseConfig.firestoreBaseUrl}).',
+          );
+          continue;
+        }
+        if (cloudWasUsable && FirebaseConfig.backupRelayUsable) {
+          FirebaseConfig.markCloudRelayUnreachable();
+          debugPrint(
+            'Nodo principal inutix.com sin respuesta en $label: '
+            'conmutando a respaldo ${FirebaseConfig.backupRelayHost}.',
+          );
+          continue;
+        }
+        rethrow;
+      }
     }
+    return await send(urlBuilder());
   }
+
+  Future<http.Response> _sendWithRelayFallback({
+    required String label,
+    required Uri Function() urlBuilder,
+    required Future<http.Response> Function(Uri url) send,
+  }) =>
+      sendWithRelayFallback(
+        label: label,
+        urlBuilder: urlBuilder,
+        send: send,
+      );
 
   /// Misma ayuda, expuesta para pruebas.
   @visibleForTesting

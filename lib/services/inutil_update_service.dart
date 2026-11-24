@@ -296,28 +296,14 @@ class InutilUpdateService {
     required String currentVersion,
   }) async {
     try {
-      http.Response res;
-      final relayWasUsable = FirebaseConfig.relayUsable;
-      try {
-        res = await http
-            .get(
-              Uri.parse('$_releaseDocumentUrl?${FirebaseConfig.keyParam}'),
-              headers: _headers(),
-            )
-            .timeout(const Duration(seconds: 8));
-      } catch (err) {
-        if (relayWasUsable && InutilFirestoreService.isConnectionFailure(err)) {
-          FirebaseConfig.markRelayUnreachable();
-          res = await http
-              .get(
-                Uri.parse('$_releaseDocumentUrl?${FirebaseConfig.keyParam}'),
-                headers: _headers(),
-              )
-              .timeout(const Duration(seconds: 8));
-        } else {
-          rethrow;
-        }
-      }
+      final res = await InutilFirestoreService.instance.sendWithRelayFallback(
+        label: 'GET app_config/tv_release',
+        urlBuilder: () =>
+            Uri.parse('$_releaseDocumentUrl?${FirebaseConfig.keyParam}'),
+        send: (url) => http
+            .get(url, headers: _headers())
+            .timeout(const Duration(seconds: 8)),
+      );
       if (res.statusCode == 200) {
         final decoded =
             jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
@@ -445,13 +431,15 @@ class InutilUpdateService {
     };
 
     try {
-      final res = await http
-          .patch(
+      final body = jsonEncode({'fields': firestoreFields});
+      final res = await InutilFirestoreService.instance.sendWithRelayFallback(
+        label: 'PATCH app_config/tv_release',
+        urlBuilder: () =>
             Uri.parse('$_releaseDocumentUrl?${FirebaseConfig.keyParam}'),
-            headers: _headers(),
-            body: jsonEncode({'fields': firestoreFields}),
-          )
-          .timeout(const Duration(seconds: 10));
+        send: (url) => http
+            .patch(url, headers: _headers(), body: body)
+            .timeout(const Duration(seconds: 10)),
+      );
       if (res.statusCode >= 200 && res.statusCode < 300) {
         await _saveCachedRelease(releaseInfo);
         return true;

@@ -263,4 +263,39 @@ else
   echo "AVISO: sin FIREBASE_ACCESS_TOKEN válido; se publicó en GitHub Releases (la app igual lo detecta vía release.json)." >&2
 fi
 
+# --- Sincronizar nodo autoritativo api.inutix.com (S7 SQLite) y purgar backup.inutix.com ---
+INUTIX_ADMIN_SECRET="${RELAY_ADMIN_SECRET:-}"
+INUTIX_SECRET_FILE="${RELAY_ADMIN_SECRET_FILE:-$HOME/.config/inutil_relay/admin_secret.txt}"
+if [ -z "$INUTIX_ADMIN_SECRET" ] && [ -f "$INUTIX_SECRET_FILE" ]; then
+  INUTIX_ADMIN_SECRET="$(tr -d '\r\n' < "$INUTIX_SECRET_FILE")"
+fi
+if [ -n "$INUTIX_ADMIN_SECRET" ]; then
+  INUTIX_PRIMARY="${INUTIX_API_BASE:-https://api.inutix.com}"
+  INUTIX_RELEASE_URL="${INUTIX_PRIMARY%/}/v1/projects/$PROJECT_ID/databases/(default)/documents/app_config/tv_release"
+  echo "Actualizando nodo autoritativo $INUTIX_PRIMARY app_config/tv_release ..."
+  if curl -sf -X PATCH "$INUTIX_RELEASE_URL" \
+      -A "Mozilla/5.0 (compatible; InutilReleasePipeline/1.0)" \
+      -H "X-Admin-Secret: $INUTIX_ADMIN_SECRET" \
+      -H "Content-Type: application/json" \
+      --data @"$BODY_FILE" > /dev/null; then
+    echo "OK $INUTIX_PRIMARY app_config/tv_release actualizado!"
+  else
+    echo "AVISO: no se pudo actualizar $INUTIX_PRIMARY app_config/tv_release." >&2
+  fi
+
+  INUTIX_BACKUP="${INUTIX_BACKUP_BASE:-https://backup.inutix.com}"
+  echo "Invalidando caché en $INUTIX_BACKUP (app_config/tv_release) ..."
+  if curl -sf -X POST "${INUTIX_BACKUP%/}/admin/invalidate" \
+      -A "Mozilla/5.0 (compatible; InutilReleasePipeline/1.0)" \
+      -H "X-Admin-Secret: $INUTIX_ADMIN_SECRET" \
+      -H "Content-Type: application/json" \
+      -d '{"path":"app_config/tv_release"}' > /dev/null; then
+    echo "OK $INUTIX_BACKUP invalidado!"
+  else
+    echo "AVISO: no se pudo invalidar $INUTIX_BACKUP." >&2
+  fi
+else
+  echo "AVISO: sin RELAY_ADMIN_SECRET ($INUTIX_SECRET_FILE); omitida sincronización con api.inutix.com y backup.inutix.com." >&2
+fi
+
 echo "Publicado InútilTV $TAG"

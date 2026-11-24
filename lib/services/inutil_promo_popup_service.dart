@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../constants/app_info.dart';
 import 'firebase_config.dart';
+import 'firebase_firestore_service.dart';
 
 enum InutilPopupKind {
   support,
@@ -199,10 +200,14 @@ class InutilPromoPopupService {
 
   Future<InutilPopupCampaign?> _fetchDocCampaign(String docPath) async {
     try {
-      final uri = Uri.parse(
-        'https://firestore.googleapis.com/v1/projects/${FirebaseConfig.projectId}/databases/(default)/documents/$docPath?key=${FirebaseConfig.apiKey}',
+      final response = await InutilFirestoreService.instance
+          .sendWithRelayFallback(
+        label: 'GET $docPath',
+        urlBuilder: () => Uri.parse(
+          '${FirebaseConfig.firestoreBaseUrl}/$docPath?${FirebaseConfig.keyParam}',
+        ),
+        send: (uri) => http.get(uri).timeout(const Duration(seconds: 4)),
       );
-      final response = await http.get(uri).timeout(const Duration(seconds: 4));
       if (response.statusCode != 200) return null;
       final decoded = jsonDecode(utf8.decode(response.bodyBytes));
       if (decoded is! Map<String, dynamic>) return null;

@@ -77,8 +77,22 @@ class FirebaseConfig {
   static DateTime? _cloudRelayFailedAt;
   static const Duration _cloudRelayCooldown = Duration(seconds: 90);
 
+  @visibleForTesting
+  static String? relayHostOverrideForTest;
+  @visibleForTesting
+  static String? cloudRelayHostOverrideForTest;
+  @visibleForTesting
+  static String? backupRelayHostOverrideForTest;
+
+  static String get _activeRelayHost =>
+      (relayHostOverrideForTest ?? relayHost).trim();
+  static String get _activeCloudRelayHost =>
+      (cloudRelayHostOverrideForTest ?? cloudRelayHost).trim();
+  static String get _activeBackupRelayHost =>
+      (backupRelayHostOverrideForTest ?? backupRelayHost).trim();
+
   static bool get cloudRelayUsable {
-    if (useEmulator || cloudRelayHost.trim().isEmpty) return false;
+    if (useEmulator || _activeCloudRelayHost.isEmpty) return false;
     final failedAt = _cloudRelayFailedAt;
     if (failedAt != null &&
         DateTime.now().difference(failedAt) < _cloudRelayCooldown) {
@@ -89,7 +103,7 @@ class FirebaseConfig {
   }
 
   static bool get backupRelayUsable =>
-      !useEmulator && backupRelayHost.trim().isNotEmpty;
+      !useEmulator && _activeBackupRelayHost.isNotEmpty;
 
   static void markCloudRelayUnreachable() {
     _cloudRelayFailedAt = DateTime.now();
@@ -109,7 +123,7 @@ class FirebaseConfig {
   /// `true` sólo cuando hay relay horneado, no estamos en emuladores y la sonda
   /// lo declaró vivo. Es la única puerta de los endpoints redirigidos.
   static bool get relayUsable =>
-      relayHost.trim().isNotEmpty && !useEmulator && _relayReachable == true;
+      _activeRelayHost.isNotEmpty && !useEmulator && _relayReachable == true;
 
   /// Decisión pura de endpoint, expuesta para pruebas: el relay se usa sólo si
   /// está configurado, fuera de emuladores y alcanzable; de lo contrario se
@@ -207,6 +221,16 @@ class FirebaseConfig {
   static void resetRelayReachability() {
     _relayReachable = null;
     _relayRecoveryDesired = false;
+    _cloudRelayFailedAt = null;
+    relayHostOverrideForTest = null;
+    cloudRelayHostOverrideForTest = null;
+    backupRelayHostOverrideForTest = null;
+  }
+
+  /// Permite fijar el estado LAN en pruebas unitarias de failover.
+  @visibleForTesting
+  static void setRelayReachableForTest(bool? reachable) {
+    _relayReachable = reachable;
   }
 
   /// Estado actual conocido, para telemetría y pruebas.
@@ -225,13 +249,13 @@ class FirebaseConfig {
 
   static String get firestoreBaseUrl {
     if (relayUsable) {
-      return 'http://$relayHost:$relayPort/v1/projects/$projectId/databases/(default)/documents';
+      return 'http://$_activeRelayHost:$relayPort/v1/projects/$projectId/databases/(default)/documents';
     }
     if (cloudRelayUsable) {
-      return 'https://${cloudRelayHost.trim()}/v1/projects/$projectId/databases/(default)/documents';
+      return 'https://$_activeCloudRelayHost/v1/projects/$projectId/databases/(default)/documents';
     }
     if (backupRelayUsable) {
-      return 'https://${backupRelayHost.trim()}/v1/projects/$projectId/databases/(default)/documents';
+      return 'https://$_activeBackupRelayHost/v1/projects/$projectId/databases/(default)/documents';
     }
     return useEmulator
         ? 'http://$emulatorHost:$emulatorFirestorePort/v1/projects/$projectId/databases/(default)/documents'
