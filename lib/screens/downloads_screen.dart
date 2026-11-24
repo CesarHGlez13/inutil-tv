@@ -693,7 +693,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                       ),
                       minimumSize: Size.zero,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20),
+                        borderRadius: BorderRadius.circular(24),
                       ),
                     ),
                     icon: const Icon(Icons.play_arrow_rounded, size: 18),

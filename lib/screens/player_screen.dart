@@ -2072,14 +2072,14 @@ class _PlayerScreenState extends State<PlayerScreen>
                   TvFocusable(
                     autofocus: TvModeService.of(context),
                     focusColor: const Color(0xFF38BDF8),
-                    borderRadius: BorderRadius.circular(22),
+                    borderRadius: BorderRadius.circular(24),
                     descendantsAreFocusable: false,
                     descendantsAreTraversable: false,
                     onTap: _retryCurrent,
                     child: Container(
                       decoration: BoxDecoration(
                         color: AppColors.playbackPrimaryBackground,
-                        borderRadius: BorderRadius.circular(22),
+                        borderRadius: BorderRadius.circular(24),
                       ),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 20,
@@ -3132,10 +3132,10 @@ class _PlayerScreenState extends State<PlayerScreen>
                   Expanded(
                     child: Material(
                       color: AppColors.playbackPrimaryBackground,
-                      borderRadius: BorderRadius.circular(18),
+                      borderRadius: BorderRadius.circular(24),
                       child: InkWell(
                         onTap: () => _playEpisode(_episodeIndex + 1),
-                        borderRadius: BorderRadius.circular(18),
+                        borderRadius: BorderRadius.circular(24),
                         child: const Padding(
                           padding: EdgeInsets.symmetric(vertical: 8),
                           child: Center(

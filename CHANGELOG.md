@@ -1,5 +1,11 @@
 # Changelog — InútilTV
 
+## 3.3.27 — 2026-11-23
+- **Unificación de Botones de Reproducción y Acciones al Estilo Destacados:**
+  - **Botón Primario de Reproducción en Ficha de Contenido (Smart TV y Móvil):** Se unificó el estilo visual del botón principal ("Reproducir ahora", "Comenzar a ver E1", "Continuar viendo") adoptando la píldora blanca de alto contraste de Destacados (`AppColors.playbackPrimaryBackground` blanco puro, tipografía e icono en carbón profundo `AppColors.playbackPrimaryForeground`, `FontWeight.w800`, radio de curvatura píldora de 24 px).
+  - **Botones Secundarios Translúcidos ("Mi Lista", "Detalles", "Volver", "Descargar Temporada"):** Se homogeneizaron los botones secundarios con el acabado frosted glass de Destacados (`Colors.white.withValues(alpha: 0.12)`, borde blanco sutil de 0.8 px con opacidad de 0.20 a 0.35, texto e iconos en blanco puro `FontWeight.w700`, radio de 24 px).
+  - **Píldoras de Reproducción en Reproductor y Descargas:** Se estandarizó el radio de esquina a 24 px en los botones "Reintentar", "Reproducir ahora" del temporizador de siguiente episodio y botón "Ver" de descargas sin conexión.
+
 ## 3.3.26 — 2026-11-23
 - **Encuadre Completo y Retención de Scroll en Destacados de Smart TV:**
   - **Eliminación del desplazamiento involuntario hacia abajo ("se baja la pantalla"):** Se configuró `ensureVisible: false` en los botones ("Reproducir", "Detalles", flechas) del `HeroCarousel` para evitar que `Scrollable.ensureVisible(alignment: 0.35)` desplace automáticamente el `ListView` 240 píxeles hacia abajo y corte la parte superior del banner.

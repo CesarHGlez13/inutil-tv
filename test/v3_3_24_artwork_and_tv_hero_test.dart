@@ -7,8 +7,10 @@ import 'package:tubotv/constants/app_info.dart';
 import 'package:tubotv/models/models.dart';
 import 'package:tubotv/services/artwork_cache_service.dart';
 import 'package:tubotv/services/tv_mode_service.dart';
+import 'package:tubotv/theme/app_colors.dart';
 import 'package:tubotv/widgets/fast_artwork.dart';
 import 'package:tubotv/widgets/hero_carousel.dart';
+import 'package:tubotv/widgets/vod_detail_modal.dart';
 
 String _pubspecVersion() {
   final match = RegExp(r'^version:\s*(\d+\.\d+\.\d+\+\d+)', multiLine: true)
@@ -65,19 +67,20 @@ void main() {
     ),
   ];
 
-  group('v3.3.24/v3.3.25/v3.3.26 — pins de versión y documentación', () {
-    test('pubspec.yaml en 3.3.26+75', () {
-      expect(_pubspecVersion(), '3.3.26+75');
+  group('v3.3.24/v3.3.25/v3.3.26/v3.3.27 — pins de versión y documentación', () {
+    test('pubspec.yaml en 3.3.27+76', () {
+      expect(_pubspecVersion(), '3.3.27+76');
     });
 
-    test('lib/constants/app_info.dart en 3.3.26', () {
+    test('lib/constants/app_info.dart en 3.3.27', () {
       expect(File('lib/constants/app_info.dart').readAsStringSync(),
-          contains("static const String appVersion = '3.3.26'"));
-      expect(AppInfo.appVersion, '3.3.26');
+          contains("static const String appVersion = '3.3.27'"));
+      expect(AppInfo.appVersion, '3.3.27');
     });
 
-    test('CHANGELOG.md documenta 3.3.24, 3.3.25 y 3.3.26 con mejoras de portadas, navegación TV y colores de marca', () {
+    test('CHANGELOG.md documenta 3.3.24, 3.3.25, 3.3.26 y 3.3.27 con mejoras de portadas, navegación TV y colores de marca', () {
       final changelog = File('CHANGELOG.md').readAsStringSync();
+      expect(changelog, contains('## 3.3.27'));
       expect(changelog, contains('## 3.3.24'));
       expect(changelog, contains('## 3.3.25'));
       expect(changelog, contains('## 3.3.26'));
@@ -277,6 +280,40 @@ void main() {
           reason: 'El código del modal aún contiene referencias a FF640A');
       expect(heroSrc.contains('0xFFFF640A'), isFalse,
           reason: 'El carrusel aún contiene el naranja ajeno');
+    });
+  });
+
+  group('v3.3.27 — Unificación de botones al estilo Destacados', () {
+    testWidgets('VodDetailModal en TV utiliza píldora blanca playbackPrimaryBackground en Reproducir', (tester) async {
+      TvModeService.instance.setForTest(detectedTv: true);
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        TvModeService.instance.setForTest(detectedTv: false);
+      });
+
+      await tester.pumpWidget(wrapTheme(Scaffold(body: VodDetailModal(item: testItems.first))));
+      await tester.pumpAndSettle();
+
+      // Botón de reproducción en TV debe ser píldora blanca
+      final playText = find.text('Comenzar a ver E1');
+      expect(playText, findsOneWidget);
+
+      final containerFinder = find.ancestor(of: playText, matching: find.byType(Container)).first;
+      final container = tester.widget<Container>(containerFinder);
+      final decoration = container.decoration as BoxDecoration;
+
+      expect(decoration.color, AppColors.playbackPrimaryBackground);
+      expect(decoration.borderRadius, BorderRadius.circular(24));
+
+      // Botón Mi Lista debe tener estilo translúcido con radio 24
+      final myListText = find.text('Mi Lista');
+      expect(myListText, findsOneWidget);
+      final myListContainerFinder = find.ancestor(of: myListText, matching: find.byType(Container)).first;
+      final myListContainer = tester.widget<Container>(myListContainerFinder);
+      final myListDecoration = myListContainer.decoration as BoxDecoration;
+      expect(myListDecoration.borderRadius, BorderRadius.circular(24));
     });
   });
 }

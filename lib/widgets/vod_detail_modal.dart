@@ -1277,7 +1277,7 @@ class _VodDetailModalState extends State<VodDetailModal>
                     children: [
                       TvFocusable(
                         onTap: () => Navigator.of(context).pop(),
-                        borderRadius: BorderRadius.circular(20),
+                        borderRadius: BorderRadius.circular(24),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 16,
@@ -1285,8 +1285,11 @@ class _VodDetailModalState extends State<VodDetailModal>
                           ),
                           decoration: BoxDecoration(
                             color: Colors.white.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: Colors.white24),
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.2),
+                              width: 0.8,
+                            ),
                           ),
                           child: const Row(
                             mainAxisSize: MainAxisSize.min,
@@ -1452,33 +1455,30 @@ class _VodDetailModalState extends State<VodDetailModal>
                             TvFocusable(
                               autofocus: true,
                               onTap: _playMainAction,
-                              borderRadius: BorderRadius.circular(28),
+                              borderRadius: BorderRadius.circular(24),
                               focusScale: 1.05,
+                              focusColor: accent,
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 28,
-                                  vertical: 15,
+                                  horizontal: 22,
+                                  vertical: 12,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: brandAccent,
-                                  borderRadius: BorderRadius.circular(28),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: brandAccent.withValues(alpha: 0.45),
-                                      blurRadius: 18,
-                                      offset: const Offset(0, 4),
-                                    ),
-                                  ],
+                                  color: AppColors.playbackPrimaryBackground,
+                                  borderRadius: BorderRadius.circular(24),
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(
-                                      Icons.play_arrow_rounded,
-                                      color: Colors.white,
-                                      size: 28,
+                                    Icon(
+                                      TvRemoteService.instance.playOnTv
+                                          ? Icons.cast_connected_rounded
+                                          : Icons.play_arrow_rounded,
+                                      color:
+                                          AppColors.playbackPrimaryForeground,
+                                      size: 22,
                                     ),
-                                    const SizedBox(width: 10),
+                                    const SizedBox(width: 8),
                                     Text(
                                       canResume
                                           ? (item.isSeries
@@ -1488,17 +1488,17 @@ class _VodDetailModalState extends State<VodDetailModal>
                                               ? 'Comenzar a ver E1'
                                               : 'Reproducir ahora'),
                                       style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w900,
-                                        fontSize: 16.5,
-                                        letterSpacing: 0.3,
+                                        color:
+                                            AppColors.playbackPrimaryForeground,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 14,
                                       ),
                                     ),
                                   ],
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 16),
+                            const SizedBox(width: 14),
 
                             // Botón Secundario: Mi Lista
                             TvFocusable(
@@ -1517,23 +1517,24 @@ class _VodDetailModalState extends State<VodDetailModal>
                                   );
                                 }
                               },
-                              borderRadius: BorderRadius.circular(28),
+                              borderRadius: BorderRadius.circular(24),
                               focusScale: 1.05,
+                              focusColor: accent,
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 22,
-                                  vertical: 15,
+                                  horizontal: 18,
+                                  vertical: 12,
                                 ),
                                 decoration: BoxDecoration(
                                   color: inMyList
-                                      ? brandAccent.withValues(alpha: 0.25)
+                                      ? Colors.white.withValues(alpha: 0.22)
                                       : Colors.white.withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(28),
+                                  borderRadius: BorderRadius.circular(24),
                                   border: Border.all(
                                     color: inMyList
-                                        ? brandAccent
-                                        : Colors.white24,
-                                    width: 1.5,
+                                        ? Colors.white.withValues(alpha: 0.35)
+                                        : Colors.white.withValues(alpha: 0.2),
+                                    width: 0.8,
                                   ),
                                 ),
                                 child: Row(
@@ -1543,20 +1544,16 @@ class _VodDetailModalState extends State<VodDetailModal>
                                       inMyList
                                           ? Icons.bookmark_added_rounded
                                           : Icons.bookmark_add_outlined,
-                                      color: inMyList
-                                          ? brandAccent
-                                          : Colors.white,
-                                      size: 22,
+                                      color: Colors.white,
+                                      size: 18,
                                     ),
-                                    const SizedBox(width: 8),
+                                    const SizedBox(width: 6),
                                     Text(
                                       inMyList ? 'En Mi Lista' : 'Mi Lista',
-                                      style: TextStyle(
-                                        color: inMyList
-                                            ? brandAccent
-                                            : Colors.white,
-                                        fontWeight: FontWeight.w800,
-                                        fontSize: 15,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 13,
                                       ),
                                     ),
                                   ],
@@ -1599,30 +1596,33 @@ class _VodDetailModalState extends State<VodDetailModal>
                               context,
                               seasonEpisodes,
                             ),
-                            borderRadius: BorderRadius.circular(16),
+                            borderRadius: BorderRadius.circular(24),
                             child: Container(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 6,
+                                horizontal: 16,
+                                vertical: 8,
                               ),
                               decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.08),
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: Colors.white12),
+                                color: Colors.white.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(24),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.2),
+                                  width: 0.8,
+                                ),
                               ),
                               child: const Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Icon(
                                     Icons.download_rounded,
-                                    color: Colors.white70,
+                                    color: Colors.white,
                                     size: 16,
                                   ),
                                   SizedBox(width: 6),
                                   Text(
                                     'Descargar Temporada',
                                     style: TextStyle(
-                                      color: Colors.white70,
+                                      color: Colors.white,
                                       fontWeight: FontWeight.w700,
                                       fontSize: 12,
                                     ),
@@ -2046,33 +2046,37 @@ class _VodDetailModalState extends State<VodDetailModal>
                 playOnTv
                     ? Icons.cast_connected_rounded
                     : Icons.play_arrow_rounded,
-                color: playOnTv ? Colors.white : onBrandAccent,
-                size: 24,
+                color: playOnTv
+                    ? Colors.white
+                    : AppColors.playbackPrimaryForeground,
+                size: 22,
               ),
               label: Text(
                 mainLabel,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: playOnTv ? Colors.white : onBrandAccent,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 15,
+                  color: playOnTv
+                      ? Colors.white
+                      : AppColors.playbackPrimaryForeground,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14.5,
                   letterSpacing: 0.2,
                 ),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: playOnTv
                     ? const Color(0xFF18C75A)
-                    : brandAccent,
-                padding: const EdgeInsets.symmetric(vertical: 14),
+                    : AppColors.playbackPrimaryBackground,
+                foregroundColor: playOnTv
+                    ? Colors.white
+                    : AppColors.playbackPrimaryForeground,
+                padding: const EdgeInsets.symmetric(vertical: 13),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(28),
+                  borderRadius: BorderRadius.circular(24),
                 ),
-                elevation: 6,
-                shadowColor: (playOnTv
-                        ? const Color(0xFF18C75A)
-                        : brandAccent)
-                    .withValues(alpha: 0.4),
+                elevation: 4,
+                shadowColor: Colors.black.withValues(alpha: 0.35),
               ),
             ),
           ),
@@ -2082,13 +2086,13 @@ class _VodDetailModalState extends State<VodDetailModal>
               shape: BoxShape.circle,
               border: Border.all(
                 color: inMyList
-                    ? brandAccent
-                    : Colors.white.withValues(alpha: 0.25),
-                width: 1.5,
+                    ? Colors.white.withValues(alpha: 0.35)
+                    : Colors.white.withValues(alpha: 0.2),
+                width: 0.8,
               ),
               color: inMyList
-                  ? brandAccent.withValues(alpha: 0.2)
-                  : Colors.black.withValues(alpha: 0.45),
+                  ? Colors.white.withValues(alpha: 0.22)
+                  : Colors.white.withValues(alpha: 0.12),
             ),
             child: IconButton(
               onPressed: () async {
@@ -2110,7 +2114,7 @@ class _VodDetailModalState extends State<VodDetailModal>
                 inMyList
                     ? Icons.bookmark_added_rounded
                     : Icons.bookmark_add_outlined,
-                color: inMyList ? brandAccent : Colors.white,
+                color: Colors.white,
                 size: 22,
               ),
               tooltip: inMyList ? 'En Mi Lista' : 'Guardar en Mi Lista',
