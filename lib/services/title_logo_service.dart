@@ -19,8 +19,15 @@ class TitleLogoService {
   static final TitleLogoService instance = TitleLogoService._();
 
   static const String tmdbApiKey = '62a51d0e8a768b445ff8e3fda7c3721e';
+  static const String tmdbReadAccessToken =
+      'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiI2MmE1MWQwZThhNzY4YjQ0NWZmOGUzZmRhN2MzNzIxZSIsIm5iZiI6MTc5NTM2OTA4MS4yOTIsInN1YiI6IjZiMDMyODc5MGQwNDhiZWQ4ZDljMjNlYyIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.FKx8f4qYS795RC0RDffALs2Y0-AJlKMNkU2N5qnMkzs';
   static const String fanartApiKey = '06c9206b4acb54a9a33158bc7ff4db7c';
   static const String _prefPrefix = 'title_logo_v1_';
+
+  static const Map<String, String> _tmdbHeaders = {
+    'Authorization': 'Bearer $tmdbReadAccessToken',
+    'accept': 'application/json',
+  };
 
   final Map<String, String> _memoryCache = {};
   final Map<String, Future<String?>> _inFlight = {};
@@ -173,9 +180,11 @@ class TitleLogoService {
     try {
       // Intento 1: Endpoint específico según tipo
       final uri = Uri.parse(
-        'https://api.themoviedb.org/3/search/$defaultType?api_key=$tmdbApiKey&query=${Uri.encodeComponent(query)}',
+        'https://api.themoviedb.org/3/search/$defaultType?query=${Uri.encodeComponent(query)}',
       );
-      final resp = await _client.get(uri).timeout(const Duration(seconds: 4));
+      final resp = await _client
+          .get(uri, headers: _tmdbHeaders)
+          .timeout(const Duration(seconds: 4));
       if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body) as Map<String, dynamic>;
         final results = data['results'] as List?;
@@ -188,9 +197,11 @@ class TitleLogoService {
 
       // Intento 2: Multi-search
       final multiUri = Uri.parse(
-        'https://api.themoviedb.org/3/search/multi?api_key=$tmdbApiKey&query=${Uri.encodeComponent(query)}',
+        'https://api.themoviedb.org/3/search/multi?query=${Uri.encodeComponent(query)}',
       );
-      final multiResp = await _client.get(multiUri).timeout(const Duration(seconds: 4));
+      final multiResp = await _client
+          .get(multiUri, headers: _tmdbHeaders)
+          .timeout(const Duration(seconds: 4));
       if (multiResp.statusCode == 200) {
         final data = jsonDecode(multiResp.body) as Map<String, dynamic>;
         final results = data['results'] as List?;
@@ -215,9 +226,11 @@ class TitleLogoService {
   Future<String?> _fetchTmdbLogo(int tmdbId, String mediaType) async {
     try {
       final uri = Uri.parse(
-        'https://api.themoviedb.org/3/$mediaType/$tmdbId/images?api_key=$tmdbApiKey&include_image_language=es,en,ja,null',
+        'https://api.themoviedb.org/3/$mediaType/$tmdbId/images?include_image_language=es,en,ja,null',
       );
-      final resp = await _client.get(uri).timeout(const Duration(seconds: 4));
+      final resp = await _client
+          .get(uri, headers: _tmdbHeaders)
+          .timeout(const Duration(seconds: 4));
       if (resp.statusCode != 200) return null;
 
       final data = jsonDecode(resp.body) as Map<String, dynamic>;

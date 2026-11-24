@@ -175,7 +175,6 @@ class _VodDetailModalState extends State<VodDetailModal>
 
   late final ScrollController _scrollController;
   late final ScrollController _tvScrollController;
-  double _scrollK = 0.0;
 
   bool _loadingEpisodes = false;
   int _requestToken = 0;
@@ -184,7 +183,6 @@ class _VodDetailModalState extends State<VodDetailModal>
   void initState() {
     super.initState();
     _scrollController = widget.scrollController ?? ScrollController();
-    _scrollController.addListener(_updateScrollK);
     _tvScrollController = widget.scrollController ?? ScrollController();
     _item = widget.item;
     if (_item.titleLogo.isNotEmpty) {
@@ -202,22 +200,8 @@ class _VodDetailModalState extends State<VodDetailModal>
     }
   }
 
-  void _updateScrollK() {
-    if (!_scrollController.hasClients) return;
-    final heroH = _heroHeight(context);
-    final delta = heroH - kToolbarHeight;
-    if (delta <= 0) return;
-    final k = (_scrollController.position.pixels / delta).clamp(0.0, 1.0);
-    if ((k - _scrollK).abs() > 0.001) {
-      setState(() {
-        _scrollK = k;
-      });
-    }
-  }
-
   @override
   void dispose() {
-    _scrollController.removeListener(_updateScrollK);
     if (widget.scrollController == null) {
       _scrollController.dispose();
       _tvScrollController.dispose();
@@ -230,13 +214,11 @@ class _VodDetailModalState extends State<VodDetailModal>
   void didUpdateWidget(covariant VodDetailModal oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.scrollController != widget.scrollController) {
-      _scrollController.removeListener(_updateScrollK);
       if (oldWidget.scrollController == null) {
         _scrollController.dispose();
         _tvScrollController.dispose();
       }
       _scrollController = widget.scrollController ?? ScrollController();
-      _scrollController.addListener(_updateScrollK);
       _tvScrollController = widget.scrollController ?? ScrollController();
     }
     if (oldWidget.item.id != widget.item.id) {
@@ -677,83 +659,138 @@ class _VodDetailModalState extends State<VodDetailModal>
                       const SizedBox(width: 4),
                     ],
                 flexibleSpace: FlexibleSpaceBar(
-                  // Parallax nativo: el arte sube más despacio que el scroll y
-                  // se recorta al encogerse el contenedor.
-                  collapseMode: CollapseMode.parallax,
-                  background: Stack(
-                    children: [
-                      SizedBox(
-                        height: heroH,
-                        width: double.infinity,
-                        child: _revealed(
-                          context,
-                          image.isNotEmpty
-                              ? FastArtwork(
-                                  url: image,
-                                  tier: ArtworkTier.backdrop,
-                                  cacheWidth: 900,
-                                  fit: BoxFit.cover,
-                                  errorWidget: ColoredBox(color: surface),
-                                )
-                              : ColoredBox(color: surface),
-                        ),
-                      ),
-                      // 2. Viñeta superior oscura: legibilidad de iconos de cabecera
-                      Positioned(
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        height: 120,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [
-                                Colors.black.withValues(alpha: 0.72),
-                                Colors.black.withValues(alpha: 0.30),
-                                Colors.transparent,
-                              ],
-                              stops: const [0.0, 0.55, 1.0],
+                  // CollapseMode.pin ancla el borde inferior del lienzo al tope exacto
+                  // de la barra negra de contenido (desplazamiento 1:1 al hacer scroll).
+                  // El arte de portada aplica su propio parallax suave dentro del Stack,
+                  // mientras el logo PNG permanece sobre la portada y sube solidariamente
+                  // con la barra negra sin quedar cubierto por ella.
+                  collapseMode: CollapseMode.pin,
+                  background: Builder(
+                    builder: (context) {
+                      final settings = context.dependOnInheritedWidgetOfExactType<
+                          FlexibleSpaceBarSettings>();
+                      final k = _collapseFraction(context);
+                      final scrollDelta = settings != null
+                          ? (settings.maxExtent - settings.currentExtent)
+                              .clamp(0.0, double.infinity)
+                          : 0.0;
+                      final coverHeight =
+                          heroH + (isTv ? 0.0 : MediaQuery.paddingOf(context).top);
+                      return Stack(
+                        children: [
+                          // 1. Portada HD cubriendo todo el lienzo con parallax suave (0.55x neto)
+                          Transform.translate(
+                            offset: Offset(0, scrollDelta * 0.45),
+                            child: SizedBox(
+                              height: coverHeight,
+                              width: double.infinity,
+                              child: _revealed(
+                                context,
+                                image.isNotEmpty
+                                    ? FastArtwork(
+                                        url: image,
+                                        tier: ArtworkTier.backdrop,
+                                        cacheWidth: 900,
+                                        fit: BoxFit.cover,
+                                        errorWidget: ColoredBox(color: surface),
+                                      )
+                                    : ColoredBox(color: surface),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                      // 3. Viñeta inferior: fundido cinematográfico hacia el fondo
-                      Positioned(
-                        bottom: 0,
-                        left: 0,
-                        right: 0,
-                        height: 190,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [
-                                Colors.transparent,
-                                Colors.black.withValues(alpha: 0.45),
-                                sheetBg.withValues(alpha: 0.85),
-                                sheetBg,
-                              ],
-                              stops: const [0.0, 0.45, 0.8, 1.0],
+                          // 2. Viñeta superior oscura fija arriba: legibilidad de iconos de cabecera
+                          Positioned(
+                            top: scrollDelta,
+                            left: 0,
+                            right: 0,
+                            height: 120,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    Colors.black.withValues(alpha: 0.72),
+                                    Colors.black.withValues(alpha: 0.30),
+                                    Colors.transparent,
+                                  ],
+                                  stops: const [0.0, 0.55, 1.0],
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                      // 4. Velo dinámico al colapsar
-                      Positioned.fill(
-                        child: Builder(
-                          builder: (context) => ColoredBox(
-                            color: sheetBg.withValues(
-                              alpha: 0.95 *
-                                  Curves.easeIn
-                                      .transform(_collapseFraction(context)),
+                          // 3. Viñeta inferior compacta: deja la portada visible detrás del logo
+                          //    y funde suavemente justo en el borde con la barra negra
+                          Positioned(
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            height: 125,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    Colors.transparent,
+                                    Colors.black.withValues(alpha: 0.28),
+                                    sheetBg.withValues(alpha: 0.78),
+                                    sheetBg,
+                                  ],
+                                  stops: const [0.0, 0.50, 0.86, 1.0],
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                    ],
+                          // 4. Velo dinámico al colapsar
+                          Positioned.fill(
+                            child: ColoredBox(
+                              color: sheetBg.withValues(
+                                alpha: 0.95 * Curves.easeIn.transform(k),
+                              ),
+                            ),
+                          ),
+                          // 5. Logo PNG oficial sobre la portada (se desplaza 1:1 junto con la barra negra)
+                          Positioned(
+                            left: 24,
+                            right: 24,
+                            bottom: 24,
+                            child: Opacity(
+                              opacity: (1.0 - k * 2.5).clamp(0.0, 1.0),
+                              child: Transform.scale(
+                                scale: (1.0 - k * 0.12).clamp(0.88, 1.0),
+                                alignment: Alignment.bottomCenter,
+                                child: Center(
+                                  child: (_titleLogoUrl != null &&
+                                          _titleLogoUrl!.isNotEmpty)
+                                      ? ConstrainedBox(
+                                          constraints: const BoxConstraints(
+                                            maxHeight: 86,
+                                            maxWidth: 290,
+                                          ),
+                                          child: FastArtwork(
+                                            url: _titleLogoUrl!,
+                                            tier: ArtworkTier.poster,
+                                            fit: BoxFit.contain,
+                                            errorWidget: _buildHeroTitleText(
+                                              context,
+                                              item.title,
+                                              false,
+                                            ),
+                                          ),
+                                        )
+                                      : _buildHeroTitleText(
+                                          context,
+                                          item.title,
+                                          false,
+                                        ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
                   ),
                 ),
               ),
@@ -761,46 +798,10 @@ class _VodDetailModalState extends State<VodDetailModal>
               SliverList(
                 delegate: SliverChildListDelegate([
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        // 0. Logo PNG oficial Crunchyroll (anclado a la barra de contenido, se desplaza con ella)
-                        Opacity(
-                          opacity: (1.0 - _scrollK * 2.5).clamp(0.0, 1.0),
-                          child: Transform.scale(
-                            scale: (1.0 - _scrollK * 0.15).clamp(0.85, 1.0),
-                            alignment: Alignment.center,
-                            child: Transform.translate(
-                              offset: const Offset(0, -30),
-                              child: Center(
-                                child: (_titleLogoUrl != null &&
-                                        _titleLogoUrl!.isNotEmpty)
-                                    ? ConstrainedBox(
-                                        constraints: const BoxConstraints(
-                                          maxHeight: 82,
-                                          maxWidth: 290,
-                                        ),
-                                        child: FastArtwork(
-                                          url: _titleLogoUrl!,
-                                          tier: ArtworkTier.poster,
-                                          fit: BoxFit.contain,
-                                          errorWidget: _buildHeroTitleText(
-                                            context,
-                                            item.title,
-                                            false,
-                                          ),
-                                        ),
-                                      )
-                                    : _buildHeroTitleText(
-                                        context,
-                                        item.title,
-                                        false,
-                                      ),
-                              ),
-                            ),
-                          ),
-                        ),
                         // 1. Badge • Audio/Sub • Género (jerarquía Crunchyroll 2026)
                         Wrap(
                           alignment: WrapAlignment.center,

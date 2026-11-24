@@ -1,5 +1,15 @@
 # Changelog — InútilTV
 
+## 3.3.30 — 2026-11-24
+- **Seguridad y Aislamiento Estricto por Cuenta en Control Remoto LAN (InútilTV Connect):**
+  - **Autenticación Obligatoria por Cuenta en Puente LAN (HTTP 38443 y UDP 38444):** Se derivó un token criptográfico determinista por cuenta (`SHA-256` sobre el UID de Firebase Auth, header `X-Inutil-Account` y paquete UDP `INUTIL_TV_DISCOVER|<token>`). Las Smart TVs ahora rechazan con `403 Forbidden` cualquier petición de `/api/tv/ping`, `/api/tv/state` o `/api/tv/command` que provenga de un dispositivo con una cuenta distinta en la misma red Wi-Fi.
+  - **Eliminación de IP Hardcodeada y Caché Aislada por Cuenta:** Se eliminó la IP fija de laboratorio (`192.168.100.17`), se aisló el caché de IP LAN en `SharedPreferences` por `uid` (`inutil_tv_lan_host_<uid>`), se purga automáticamente cualquier clave heredada y se limpia la sesión LAN al cerrar sesión o cambiar de cuenta.
+- **Logo PNG sobre la Portada con Desplazamiento Solidario 1:1 (Móvil):**
+  - **Posición sobre la Imagen de Portada:** En `VodDetailModal` móvil, el logo oficial PNG ahora se posiciona directamente sobre la imagen de la portada (no sobre el bloque negro inferior), con una viñeta inferior compacta (`125 px`) que preserva la claridad del arte.
+  - **Desplazamiento Solidario 1:1 con la Barra Negra (`CollapseMode.pin`):** El logo sube en perfecta sincronía 1:1 anclado al borde superior de la barra negra de contenido al scrollear (sin quedar cubierto como cortina), mientras la portada conserva parallax cinematográfico suave (`0.55x`).
+- **TMDB Read Access Token (Bearer Auth):**
+  - Integrado el token oficial de lectura Bearer de TMDB en `TitleLogoService` para consultas autenticadas y más estables de logotipos PNG transparentes.
+
 ## 3.3.29 — 2026-11-23
 - **Fidelidad Total Crunchyroll Mobile & Smart TV (Anclaje de Logo y Layout Compacto):**
   - **Móvil — Logo PNG Anclado a la Hoja de Contenido:** El logotipo PNG transparente oficial ahora está anclado directamente en la cabecera de la hoja negra de contenido (`SliverList`). Al hacer scroll, se desplaza solidariamente hacia arriba junto con la sinopsis, tags y episodios (en lugar de ser tapado como cortina), escalándose suavemente y ejecutando el crossfade hacia el título compacto fijado en la barra superior.
