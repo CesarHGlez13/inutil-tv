@@ -87,24 +87,29 @@ class VodDetailModal extends StatefulWidget {
       );
       return;
     }
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: bg,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.88,
-        minChildSize: 0.5,
-        maxChildSize: 0.96,
-        expand: false,
-        builder: (_, scrollController) => VodDetailModal(
+    // Móvil: Pantalla completa estilo Crunchyroll con animación slide-up desde abajo
+    Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        fullscreenDialog: true,
+        opaque: false,
+        barrierDismissible: true,
+        barrierColor: Colors.black.withValues(alpha: 0.8),
+        pageBuilder: (context, animation, secondaryAnimation) => VodDetailModal(
           item: item,
           recommendations: recommendations,
           onSelectSimilar: onSelectSimilar,
-          scrollController: scrollController,
         ),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          const begin = Offset(0.0, 1.0);
+          const end = Offset.zero;
+          const curve = Curves.easeOutCubic;
+          final tween =
+              Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+          return SlideTransition(
+            position: animation.drive(tween),
+            child: child,
+          );
+        },
       ),
     );
   }
@@ -513,83 +518,81 @@ class _VodDetailModalState extends State<VodDetailModal>
             saved != null && saved.positionSec > 10 && !saved.finished;
         final movieDl = !item.isSeries ? _vault.findForMovie(item.id) : null;
 
-        return ClipRRect(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          child: CustomScrollView(
-            controller: widget.scrollController,
-            slivers: [
-              // ── Cabecera (v3.3.20): SliverAppBar pinned — Collapsing Toolbar.
-              // El lienzo sube y baja con parallax, y la barra de arriba queda
-              // anclada con el rótulo y los iconos fijos (X y remoto), igual que
-              // en las capturas de Black Clover.
-              SliverAppBar(
-                pinned: true,
-                // primary:false ⇒ topPadding 0 y maxExtent == heroH exacto; el
-                // modal vive dentro de un sheet, no bajo la barra de estado.
-                primary: false,
-                expandedHeight: heroH,
-                collapsedHeight: kToolbarHeight,
-                centerTitle: true,
-                backgroundColor: sheetBg,
-                // Rótulo anclado: nace invisible y gana opacidad al colapsar,
-                // mientras el rótulo grande del lienzo hace el crossfade inverso.
-                title: Builder(
-                  builder: (context) {
-                    final k = _collapseFraction(context);
-                    return Opacity(
-                      opacity: Curves.easeIn
-                          .transform(((k - 0.45) / 0.55).clamp(0.0, 1.0)),
-                      child: Text(
-                        item.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: appTabTitleStyle(context).copyWith(
-                          fontSize: TvModeService.of(context) ? 26.0 : 18.0,
-                          fontWeight: FontWeight.w900,
-                          color: headingColor,
-                        ),
+        final isTv = TvModeService.of(context);
+
+        return Scaffold(
+          backgroundColor: sheetBg,
+          body: Stack(
+            children: [
+              CustomScrollView(
+                controller: widget.scrollController,
+                slivers: [
+                  // ── Cabecera (SliverAppBar Collapsing Toolbar estilo Crunchyroll 2026):
+                  // El póster hace parallax y fade-out al subir; el título sube y se ancla
+                  // a la izquierda junto a la "X" mientras los iconos (Cast y Más opciones)
+                  // permanecen fijos a la derecha.
+                  SliverAppBar(
+                    pinned: true,
+                    primary: !isTv,
+                    expandedHeight: heroH,
+                    collapsedHeight: kToolbarHeight,
+                    centerTitle: false,
+                    titleSpacing: 0,
+                    backgroundColor: sheetBg,
+                    elevation: 0,
+                    leading: IconButton(
+                      tooltip: 'Cerrar',
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: Colors.white,
+                        size: 26,
                       ),
-                    );
-                  },
-                ),
-                // Iconos fijos de la barra anclada (v3.3.20): el remoto y la X
-                // vivían dentro del lienzo; ahora van en `actions`, que es lo
-                // que los mantiene en su sitio cuando la cabecera se encoge.
-                // La X sigue a la izquierda (como siempre en la app) y el remoto
-                // a la derecha: ambos van en la barra ANCLADA, que es lo que los
-                // deja en su sitio cuando la cabecera se encoge.
-                leading: CircleAvatar(
-                  backgroundColor: Colors.black.withValues(alpha: 0.62),
-                  radius: 18,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    tooltip: 'Cerrar',
-                    icon: const Icon(
-                      Icons.close_rounded,
-                      color: Colors.white,
-                      size: 20,
+                      onPressed: () => Navigator.of(context).pop(),
                     ),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                ),
-                actions: [
-                  if (!TvModeService.of(context) &&
-                      TvRemoteService.instance.isTvOnline)
-                    CircleAvatar(
-                      backgroundColor: Colors.black.withValues(alpha: 0.62),
-                      radius: 18,
-                      child: IconButton(
-                        padding: EdgeInsets.zero,
-                        tooltip: 'Control remoto Smart TV',
-                        icon: const Icon(
-                          Icons.settings_remote_rounded,
-                          color: Color(0xFF18C75A),
-                          size: 19,
+                    title: Builder(
+                      builder: (context) {
+                        final k = _collapseFraction(context);
+                        return Opacity(
+                          opacity: Curves.easeIn
+                              .transform(((k - 0.45) / 0.55).clamp(0.0, 1.0)),
+                          child: Text(
+                            item.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: appTabTitleStyle(context).copyWith(
+                              fontSize: isTv ? 26.0 : 18.0,
+                              fontWeight: FontWeight.w900,
+                              color: headingColor,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    actions: [
+                      IconButton(
+                        tooltip: 'Transmitir / Smart TV',
+                        icon: Icon(
+                          TvRemoteService.instance.isTvOnline
+                              ? Icons.cast_connected_rounded
+                              : Icons.cast_rounded,
+                          color: TvRemoteService.instance.isTvOnline
+                              ? const Color(0xFF18C75A)
+                              : Colors.white,
+                          size: 23,
                         ),
                         onPressed: () => TvRemoteSheet.show(context),
                       ),
-                    ),
-                ],
+                      IconButton(
+                        tooltip: 'Más opciones',
+                        icon: const Icon(
+                          Icons.more_vert_rounded,
+                          color: Colors.white,
+                          size: 23,
+                        ),
+                        onPressed: () => _showMoreOptions(context),
+                      ),
+                      const SizedBox(width: 4),
+                    ],
                 flexibleSpace: FlexibleSpaceBar(
                   // Parallax nativo: el arte sube más despacio que el scroll y
                   // se recorta al encogerse el contenedor.
@@ -612,68 +615,68 @@ class _VodDetailModalState extends State<VodDetailModal>
                               : ColoredBox(color: surface),
                         ),
                       ),
-                      Positioned.fill(
+                      // 2. Viñeta superior oscura: legibilidad de iconos de cabecera
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        height: 120,
                         child: DecoratedBox(
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
                               colors: [
-                                Colors.black.withValues(alpha: 0.10),
+                                Colors.black.withValues(alpha: 0.72),
+                                Colors.black.withValues(alpha: 0.30),
                                 Colors.transparent,
-                                Colors.black.withValues(alpha: 0.42),
-                                sheetBg,
                               ],
-                              stops: const [0.0, 0.42, 0.74, 1.0],
+                              stops: const [0.0, 0.55, 1.0],
                             ),
                           ),
                         ),
                       ),
+                      // 3. Viñeta inferior: fundido cinematográfico hacia el fondo
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        height: 190,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.transparent,
+                                Colors.black.withValues(alpha: 0.45),
+                                sheetBg.withValues(alpha: 0.85),
+                                sheetBg,
+                              ],
+                              stops: const [0.0, 0.45, 0.8, 1.0],
+                            ),
+                          ),
+                        ),
+                      ),
+                      // 4. Velo dinámico al colapsar
                       Positioned.fill(
                         child: Builder(
                           builder: (context) => ColoredBox(
-                            // Fade-out del lienzo al colapsar (v3.3.20): el arte
-                            // se desvanece hacia el color de la hoja mientras el
-                            // rótulo sube anclado, que es lo que piden las
-                            // capturas de referencia.
                             color: sheetBg.withValues(
-                              alpha: 0.92 *
+                              alpha: 0.95 *
                                   Curves.easeIn
                                       .transform(_collapseFraction(context)),
                             ),
                           ),
                         ),
                       ),
-                      Align(
-                        alignment: Alignment.topCenter,
-                        child: Builder(
-                          builder: (context) {
-                            // La píldora del sheet se apaga al anclarse: ese
-                            // hueco de arriba pasa a ser del rótulo anclado
-                            // (así en la referencia).
-                            return Opacity(
-                              opacity: (1.0 - _collapseFraction(context) * 3.2)
-                                  .clamp(0.0, 1.0),
-                              child: Container(
-                                margin: const EdgeInsets.only(top: 10),
-                                width: 40,
-                                height: 4,
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.4),
-                                  borderRadius: BorderRadius.circular(2),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
                       // Rótulo dentro del lienzo (v3.3.19): tipografía display
                       // sobre el arte. Se desvanece al colapsar (crossfade con
                       // el título anclado en la barra pinned).
                       Positioned(
-                        left: 24,
-                        right: 24,
-                        bottom: 78,
+                        left: 20,
+                        right: 20,
+                        bottom: 24,
                         child: Builder(
                           builder: (context) {
                             final k = _collapseFraction(context);
@@ -712,335 +715,7 @@ class _VodDetailModalState extends State<VodDetailModal>
                           },
                         ),
                       ),
-                      // Botones primarios sobrios (Blanco puro + vidrio + Descarga offline)
-                      // Se desvanecen al colapsar la cabecera.
-                      Positioned(
-                        bottom: 12,
-                        left: 16,
-                        right: 16,
-                        child: Builder(
-                          builder: (context) {
-                            final k = _collapseFraction(context);
-                            return Opacity(
-                              opacity: (1.0 - k * 2.5).clamp(0.0, 1.0),
-                              child: IgnorePointer(
-                                ignoring: k > 0.4,
-                                child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: ListenableBuilder(
-                            listenable: TvRemoteService.instance,
-                            builder: (context, _) {
-                              final tvOnline = !TvModeService.of(context) &&
-                                  TvRemoteService.instance.isTvOnline;
-                              final playOnTv = !TvModeService.of(context) &&
-                                  TvRemoteService.instance.playOnTv;
 
-                              String mainLabel;
-                              if (playOnTv) {
-                                mainLabel = canResume
-                                    ? (item.isSeries
-                                        ? 'Ver T${saved.seasonNumber}·E${saved.episodeNumber} en TV'
-                                        : 'Continuar en TV')
-                                    : 'Reproducir en TV';
-                              } else {
-                                mainLabel = canResume
-                                    ? (item.isSeries
-                                        ? 'Continuar T${saved.seasonNumber}·E${saved.episodeNumber}'
-                                        : 'Continuar')
-                                    : (movieDl?.isCompleted == true
-                                        ? 'Ver sin conexión'
-                                        : 'Reproducir');
-                              }
-
-                              return Row(
-                                children: [
-                                  TvFocusable(
-                                    autofocus: TvModeService.of(context),
-                                    onTap: _playMainAction,
-                                    borderRadius: BorderRadius.circular(24),
-                                    focusColor: const Color(0xFF38BDF8),
-                                    focusScale: 1.05,
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        color: playOnTv
-                                            ? const Color(0xFF18C75A)
-                                            : AppColors
-                                                .playbackPrimaryBackground,
-                                        borderRadius: BorderRadius.circular(24),
-                                        boxShadow: playOnTv
-                                            ? [
-                                                BoxShadow(
-                                                  color: const Color(0xFF18C75A)
-                                                      .withValues(alpha: 0.35),
-                                                  blurRadius: 10,
-                                                  offset: const Offset(0, 3),
-                                                ),
-                                              ]
-                                            : null,
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 18,
-                                        vertical: 11,
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            playOnTv
-                                                ? Icons.cast_connected_rounded
-                                                : Icons.play_arrow_rounded,
-                                            color: playOnTv
-                                                ? Colors.black
-                                                : AppColors
-                                                    .playbackPrimaryForeground,
-                                            size: 21,
-                                          ),
-                                          const SizedBox(width: 6),
-                                          Text(
-                                            mainLabel,
-                                            style: TextStyle(
-                                              color: playOnTv
-                                                  ? Colors.black
-                                                  : AppColors
-                                                      .playbackPrimaryForeground,
-                                              fontWeight: FontWeight.w800,
-                                              fontSize: 13.5,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                  if (tvOnline) ...[
-                                    const SizedBox(width: 10),
-                                    // Selector táctil persistente de destino: Móvil vs TV
-                                    Container(
-                                      decoration: BoxDecoration(
-                                        color: AppColors.elevatedSurfaceFor(
-                                            context),
-                                        borderRadius: BorderRadius.circular(24),
-                                        border: Border.all(
-                                          color: playOnTv
-                                              ? const Color(0xFF18C75A)
-                                                  .withValues(alpha: 0.6)
-                                              : AppColors.cardBorderFor(
-                                                  context),
-                                          width: 1.2,
-                                        ),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          InkWell(
-                                            borderRadius:
-                                                const BorderRadius.horizontal(
-                                                    left: Radius.circular(24)),
-                                            onTap: () async {
-                                              await TvRemoteService.instance
-                                                  .setPlayOnTv(false);
-                                              unawaited(TvRemoteService.instance
-                                                  .sendPause());
-                                              if (context.mounted) {
-                                                ScaffoldMessenger.of(context)
-                                                    .showSnackBar(
-                                                  const SnackBar(
-                                                    content: Text(
-                                                      '📱 Cambiado a ver en Móvil (Smart TV pausada)',
-                                                    ),
-                                                    duration:
-                                                        Duration(seconds: 2),
-                                                  ),
-                                                );
-                                              }
-                                            },
-                                            child: Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      horizontal: 11,
-                                                      vertical: 7),
-                                              decoration: BoxDecoration(
-                                                color: !playOnTv
-                                                    ? AppColors.accentFor(
-                                                            context)
-                                                        .withValues(alpha: 0.2)
-                                                    : Colors.transparent,
-                                                borderRadius: const BorderRadius
-                                                    .horizontal(
-                                                    left: Radius.circular(24)),
-                                              ),
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Icon(
-                                                    Icons.smartphone_rounded,
-                                                    size: 15,
-                                                    color: !playOnTv
-                                                        ? AppColors.accentFor(
-                                                            context)
-                                                        : AppColors
-                                                            .contentSubtitleFor(
-                                                                context),
-                                                  ),
-                                                  const SizedBox(width: 4),
-                                                  Text(
-                                                    'Móvil',
-                                                    style: TextStyle(
-                                                      fontSize: 11.5,
-                                                      fontWeight:
-                                                          FontWeight.w700,
-                                                      color: !playOnTv
-                                                          ? AppColors.accentFor(
-                                                              context)
-                                                          : AppColors
-                                                              .contentSubtitleFor(
-                                                                  context),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                          InkWell(
-                                            borderRadius:
-                                                const BorderRadius.horizontal(
-                                                    right: Radius.circular(24)),
-                                            onTap: () async {
-                                              await TvRemoteService.instance
-                                                  .setPlayOnTv(true);
-                                              if (context.mounted) {
-                                                ScaffoldMessenger.of(context)
-                                                    .showSnackBar(
-                                                  const SnackBar(
-                                                    content: Text(
-                                                      '📺 Conexión persistente: Ahora se reproducirá en Smart TV',
-                                                    ),
-                                                    duration:
-                                                        Duration(seconds: 2),
-                                                  ),
-                                                );
-                                              }
-                                            },
-                                            child: Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      horizontal: 11,
-                                                      vertical: 7),
-                                              decoration: BoxDecoration(
-                                                color: playOnTv
-                                                    ? const Color(0xFF18C75A)
-                                                        .withValues(alpha: 0.25)
-                                                    : Colors.transparent,
-                                                borderRadius: const BorderRadius
-                                                    .horizontal(
-                                                    right: Radius.circular(24)),
-                                              ),
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Icon(
-                                                    Icons.tv_rounded,
-                                                    size: 15,
-                                                    color: playOnTv
-                                                        ? const Color(
-                                                            0xFF18C75A)
-                                                        : AppColors
-                                                            .contentSubtitleFor(
-                                                                context),
-                                                  ),
-                                                  const SizedBox(width: 4),
-                                                  Text(
-                                                    'TV',
-                                                    style: TextStyle(
-                                                      fontSize: 11.5,
-                                                      fontWeight:
-                                                          FontWeight.w800,
-                                                      color: playOnTv
-                                                          ? const Color(
-                                                              0xFF18C75A)
-                                                          : AppColors
-                                                              .contentSubtitleFor(
-                                                                  context),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                  const SizedBox(width: 10),
-                                  OutlinedButton.icon(
-                                    onPressed: () async {
-                                      final added = await _myList.toggle(item);
-                                      if (context.mounted) {
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
-                                          SnackBar(
-                                            content: Text(
-                                              added
-                                                  ? 'Agregado a Mi Lista'
-                                                  : 'Quitado de Mi Lista',
-                                            ),
-                                            duration:
-                                                const Duration(seconds: 1),
-                                          ),
-                                        );
-                                      }
-                                    },
-                                    icon: Icon(
-                                      inMyList
-                                          ? Icons.bookmark_added_rounded
-                                          : Icons.bookmark_add_outlined,
-                                      color: inMyList ? accent : Colors.white,
-                                      size: 18,
-                                    ),
-                                    label: Text(
-                                      inMyList ? 'En Mi Lista' : 'Mi Lista',
-                                      style: TextStyle(
-                                        color: inMyList ? accent : Colors.white,
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 12.5,
-                                      ),
-                                    ),
-                                    style: OutlinedButton.styleFrom(
-                                      backgroundColor:
-                                          Colors.black.withValues(alpha: 0.56),
-                                      side: BorderSide(
-                                        color: inMyList
-                                            ? accent.withValues(alpha: 0.7)
-                                            : Colors.white
-                                                .withValues(alpha: 0.25),
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 15,
-                                        vertical: 11,
-                                      ),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(24),
-                                      ),
-                                    ),
-                                  ),
-                                  if (!item.isSeries) ...[
-                                    const SizedBox(width: 10),
-                                    _buildMovieDownloadButton(
-                                      context,
-                                      item,
-                                      movieDl,
-                                      accent,
-                                    ),
-                                  ],
-                                ],
-                              );
-                            },
-                          ),
-                        ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
                     ],
                   ),
                 ),
@@ -1055,6 +730,47 @@ class _VodDetailModalState extends State<VodDetailModal>
                       children: [
                         // Fila de estrellas de la referencia (v3.3.19), centrada.
                         if (hasRealRating) _starsRow(context, item.rating),
+                        const SizedBox(height: 16),
+                        _buildCrunchyrollActionRow(
+                          context,
+                          item,
+                          movieDl,
+                          accent,
+                        ),
+                        const SizedBox(height: 16),
+                        if (isTv) ...[
+                          TvFocusable(
+                            autofocus: true,
+                            onTap: _playMainAction,
+                            borderRadius: BorderRadius.circular(24),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 24, vertical: 12),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFF640A),
+                                borderRadius: BorderRadius.circular(24),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.play_arrow_rounded,
+                                      color: Colors.white, size: 24),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    canResume
+                                        ? 'Continuar reproducción'
+                                        : 'Reproducir ahora',
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 16),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                        ],
                         const SizedBox(height: 12),
                         Wrap(
                           spacing: 8,
@@ -1367,6 +1083,7 @@ class _VodDetailModalState extends State<VodDetailModal>
                             ),
                           ),
                         ],
+                        SizedBox(height: isTv ? 24 : 110),
                       ],
                     ),
                   ),
@@ -1374,8 +1091,387 @@ class _VodDetailModalState extends State<VodDetailModal>
               ),
             ],
           ),
-        );
+          if (!isTv)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: _buildCrunchyrollFloatingBar(
+                context,
+                item,
+                canResume,
+                saved,
+                movieDl,
+                sheetBg,
+                inMyList,
+              ),
+            ),
+        ],
+      ),
+    );
       },
+    );
+  }
+
+
+  Widget _buildCrunchyrollFloatingBar(
+    BuildContext context,
+    VodItem item,
+    bool canResume,
+    WatchProgress? saved,
+    OfflineDownloadItem? movieDl,
+    Color bg,
+    bool inMyList,
+  ) {
+    final playOnTv = TvRemoteService.instance.playOnTv;
+
+    String mainLabel;
+    if (playOnTv) {
+      mainLabel = canResume
+          ? (item.isSeries
+              ? 'Ver T${saved!.seasonNumber}·E${saved.episodeNumber} en TV'
+              : 'Continuar en TV')
+          : 'Reproducir en TV';
+    } else {
+      mainLabel = canResume
+          ? (item.isSeries
+              ? 'Continuar T${saved!.seasonNumber}·E${saved.episodeNumber}'
+              : 'Continuar')
+          : (movieDl?.isCompleted == true
+              ? 'Ver sin conexión'
+              : (item.isSeries ? 'Comenzar a ver E1' : 'Reproducir'));
+    }
+
+    const orangeCta = Color(0xFFFF640A);
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(16, 12, 16, 12 + bottomInset),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.bottomCenter,
+          end: Alignment.topCenter,
+          colors: [
+            bg,
+            bg.withValues(alpha: 0.96),
+            bg.withValues(alpha: 0.85),
+            bg.withValues(alpha: 0.0),
+          ],
+          stops: const [0.0, 0.45, 0.75, 1.0],
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: ElevatedButton.icon(
+              onPressed: _playMainAction,
+              icon: Icon(
+                playOnTv
+                    ? Icons.cast_connected_rounded
+                    : Icons.play_arrow_rounded,
+                color: Colors.white,
+                size: 24,
+              ),
+              label: Text(
+                mainLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 15,
+                  letterSpacing: 0.2,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: playOnTv
+                    ? const Color(0xFF18C75A)
+                    : orangeCta,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(28),
+                ),
+                elevation: 6,
+                shadowColor: (playOnTv
+                        ? const Color(0xFF18C75A)
+                        : orangeCta)
+                    .withValues(alpha: 0.4),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: inMyList
+                    ? orangeCta
+                    : Colors.white.withValues(alpha: 0.25),
+                width: 1.5,
+              ),
+              color: inMyList
+                  ? orangeCta.withValues(alpha: 0.2)
+                  : Colors.black.withValues(alpha: 0.45),
+            ),
+            child: IconButton(
+              onPressed: () async {
+                final added = await _myList.toggle(item);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        added
+                            ? 'Agregado a Mi Lista'
+                            : 'Quitado de Mi Lista',
+                      ),
+                      duration: const Duration(seconds: 1),
+                    ),
+                  );
+                }
+              },
+              icon: Icon(
+                inMyList
+                    ? Icons.bookmark_added_rounded
+                    : Icons.bookmark_add_outlined,
+                color: inMyList ? orangeCta : Colors.white,
+                size: 22,
+              ),
+              tooltip: inMyList ? 'En Mi Lista' : 'Guardar en Mi Lista',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCrunchyrollActionRow(
+    BuildContext context,
+    VodItem item,
+    OfflineDownloadItem? movieDl,
+    Color accent,
+  ) {
+    const orangeCta = Color(0xFFFF640A);
+    final inMyList = _myList.contains(item.id);
+    final isSeries = item.isSeries;
+    final seasonEpisodes = _episodesForCurrentSeason;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _crunchyrollActionItem(
+            icon: inMyList
+                ? Icons.bookmark_added_rounded
+                : Icons.add_rounded,
+            label: inMyList ? 'En Mi Lista' : 'Mi Lista',
+            color: inMyList ? orangeCta : Colors.white,
+            onTap: () async {
+              final added = await _myList.toggle(item);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      added
+                          ? 'Agregado a Mi Lista'
+                          : 'Quitado de Mi Lista',
+                    ),
+                    duration: const Duration(seconds: 1),
+                  ),
+                );
+              }
+            },
+          ),
+          _crunchyrollActionItem(
+            icon: TvRemoteService.instance.playOnTv
+                ? Icons.cast_connected_rounded
+                : Icons.cast_rounded,
+            label: TvRemoteService.instance.playOnTv
+                ? 'En TV'
+                : 'Transmitir',
+            color: TvRemoteService.instance.playOnTv
+                ? const Color(0xFF18C75A)
+                : Colors.white,
+            onTap: () => TvRemoteSheet.show(context),
+          ),
+          if (isSeries)
+            _crunchyrollActionItem(
+              icon: Icons.download_rounded,
+              label: 'Descargar',
+              color: Colors.white,
+              onTap: seasonEpisodes.isNotEmpty
+                  ? () => _showBatchDownloadSheet(context, seasonEpisodes)
+                  : () {},
+            )
+          else
+            _crunchyrollActionItem(
+              icon: movieDl?.isCompleted == true
+                  ? Icons.offline_pin_rounded
+                  : (movieDl?.isActive == true
+                      ? Icons.downloading_rounded
+                      : Icons.download_rounded),
+              label: movieDl?.isCompleted == true
+                  ? 'Descargada'
+                  : (movieDl?.isActive == true ? 'Descargando' : 'Descargar'),
+              color: movieDl?.isCompleted == true
+                  ? const Color(0xFF18C75A)
+                  : Colors.white,
+              onTap: () async {
+                if (movieDl == null) {
+                  await _vault.enqueueMovie(item);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Descargando película para ver sin conexión...',
+                        ),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  }
+                } else if (movieDl.isCompleted) {
+                  await _showCompletedDownloadActions(
+                    context,
+                    movieDl,
+                    () => _playMainAction(),
+                  );
+                } else if (movieDl.isActive) {
+                  await _vault.pauseDownload(movieDl.id);
+                } else {
+                  await _vault.resumeDownload(movieDl.id);
+                }
+              },
+            ),
+          _crunchyrollActionItem(
+            icon: Icons.share_rounded,
+            label: 'Compartir',
+            color: Colors.white,
+            onTap: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Compartir "${item.title}"'),
+                  duration: const Duration(seconds: 1),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _crunchyrollActionItem({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: color, size: 24),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: color.withValues(alpha: 0.9),
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showMoreOptions(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final surface = isDark ? const Color(0xFF141922) : Colors.white;
+    final heading = isDark ? Colors.white : Colors.black87;
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.symmetric(vertical: 8),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.share_rounded, color: Colors.white),
+                title: Text('Compartir título',
+                    style: TextStyle(color: heading, fontWeight: FontWeight.w600)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Compartiendo "${_item.title}"'),
+                      duration: const Duration(seconds: 1),
+                    ),
+                  );
+                },
+              ),
+              ListTile(
+                leading: Icon(
+                  _myList.contains(_item.id)
+                      ? Icons.bookmark_remove_rounded
+                      : Icons.bookmark_add_rounded,
+                  color: _myList.contains(_item.id)
+                      ? const Color(0xFFFF640A)
+                      : Colors.white,
+                ),
+                title: Text(
+                  _myList.contains(_item.id)
+                      ? 'Quitar de Mi Lista'
+                      : 'Agregar a Mi Lista',
+                  style: TextStyle(color: heading, fontWeight: FontWeight.w600),
+                ),
+                onTap: () async {
+                  Navigator.of(ctx).pop();
+                  await _myList.toggle(_item);
+                },
+              ),
+              if (!TvModeService.of(context) &&
+                  TvRemoteService.instance.isTvOnline)
+                ListTile(
+                  leading: const Icon(Icons.settings_remote_rounded,
+                      color: Color(0xFF18C75A)),
+                  title: Text('Control remoto Smart TV',
+                      style: TextStyle(color: heading, fontWeight: FontWeight.w600)),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    TvRemoteSheet.show(context);
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -1566,101 +1662,6 @@ class _VodDetailModalState extends State<VodDetailModal>
                 context, ep, globalIndex, epDl, accent, subColor),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildMovieDownloadButton(
-    BuildContext context,
-    VodItem item,
-    OfflineDownloadItem? dl,
-    Color accent,
-  ) {
-    final isDone = dl?.isCompleted == true;
-    final isActive = dl?.isActive == true;
-    final isPaused = dl?.status == DownloadStatus.paused;
-    final isFailed = dl?.status == DownloadStatus.failed;
-    final pct = ((dl?.progress ?? 0.0) * 100).clamp(0, 100).round();
-
-    String label = 'Descargar';
-    Color fg = Colors.white;
-    Color borderColor = Colors.white.withValues(alpha: 0.25);
-
-    if (isDone) {
-      label = 'Descargada';
-      fg = const Color(0xFF18C75A);
-      borderColor = const Color(0xFF18C75A).withValues(alpha: 0.65);
-    } else if (isActive) {
-      label =
-          dl!.status == DownloadStatus.resolving ? 'Preparando...' : '$pct%';
-      fg = accent;
-      borderColor = accent.withValues(alpha: 0.7);
-    } else if (isPaused) {
-      label = 'Pausada · $pct%';
-      fg = Colors.amberAccent;
-      borderColor = Colors.amberAccent.withValues(alpha: 0.6);
-    } else if (isFailed) {
-      label = 'Reintentar';
-      fg = Colors.redAccent;
-      borderColor = Colors.redAccent.withValues(alpha: 0.6);
-    }
-
-    return OutlinedButton.icon(
-      key: const ValueKey('vod-movie-download-btn'),
-      onPressed: () async {
-        if (dl == null) {
-          await _vault.enqueueMovie(item);
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'Descargando película para ver sin conexión...',
-                ),
-                duration: Duration(seconds: 2),
-              ),
-            );
-          }
-        } else if (isDone) {
-          await _showCompletedDownloadActions(
-              context, dl, () => _playMainAction());
-        } else if (isActive) {
-          await _vault.pauseDownload(dl.id);
-        } else {
-          await _vault.resumeDownload(dl.id);
-        }
-      },
-      icon: isActive
-          ? SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                value: dl!.status == DownloadStatus.resolving
-                    ? null
-                    : dl.progress.clamp(0.05, 1.0),
-                strokeWidth: 2,
-                color: fg,
-              ),
-            )
-          : isDone
-              ? Icon(Icons.offline_pin_rounded, color: fg, size: 18)
-              : isPaused
-                  ? Icon(Icons.play_arrow_rounded, color: fg, size: 18)
-                  : isFailed
-                      ? Icon(Icons.refresh_rounded, color: fg, size: 18)
-                      : InutilIcon(InutilGlyph.download, size: 17, color: fg),
-      label: Text(
-        label,
-        style: TextStyle(
-          color: fg,
-          fontWeight: FontWeight.w700,
-          fontSize: 12.5,
-        ),
-      ),
-      style: OutlinedButton.styleFrom(
-        backgroundColor: Colors.black.withValues(alpha: 0.56),
-        side: BorderSide(color: borderColor),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       ),
     );
   }

@@ -193,11 +193,11 @@ void main() {
       expect(src, contains('_reveal?.dispose()'));
     });
 
-    test('el rótulo va dentro del lienzo y la viñeta superior está en 0.10', () {
+    test('el rótulo va dentro del lienzo con viñeta de contraste', () {
       final src = File('lib/widgets/vod_detail_modal.dart').readAsStringSync();
-      expect(src, contains('Colors.black.withValues(alpha: 0.10)'));
-      expect(src, contains('stops: const [0.0, 0.42, 0.74, 1.0]'));
-      expect(src, contains('bottom: 78'));
+      expect(src, contains('Colors.black.withValues(alpha: 0.72)'));
+      expect(src, contains('stops: const [0.0, 0.55, 1.0]'));
+      expect(src, contains('bottom: 24'));
     });
   });
 

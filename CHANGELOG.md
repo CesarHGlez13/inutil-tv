@@ -1,5 +1,14 @@
 # Changelog — InútilTV
 
+## 3.3.22 — 2026-11-23
+- **Experiencia Completa Ficha Detalle estilo Crunchyroll 2026 (diseño exacto pedido por Cesar):**
+  - **Apertura Full Screen sin marcos:** reemplazado el `DraggableScrollableSheet` de 88% por `PageRouteBuilder` de pantalla completa con animación slide-up desde abajo. La imagen de portada entra hasta la parte superior bajo la barra de estado con cero recortes ni tirador gris.
+  - **Collapsing Toolbar con título anclado a la izquierda:** al hacer scroll, el póster hace parallax y se funde hacia negro; el título ("Black Clover") sube y se ancla automáticamente a la izquierda junto a la "X" (left-aligned, `titleSpacing: 0`), idéntico al comportamiento de Crunchyroll en Android.
+  - **Iconos fijos en cabecera:** botón de cierre ("X") a la izquierda y botones de Transmisión (Cast / Smart TV) y menú de 3 puntos (`more_vert`) fijos en la barra superior anclada.
+  - **Barra de acción flotante persistente al pie (CTA):** botón principal grande en tono naranja característico Crunchyroll (`#FF640A`) o acento activo (`Comenzar a ver E1` / `Continuar` / `Reproducir`) junto al botón de Mi Lista, anclados al fondo de pantalla con degradado protector, accesibles en todo momento mientras se explora el listado de episodios.
+  - **Fila de acciones secundarias bajo la cabecera:** selector horizontal estilizado con iconos sobre etiquetas (`+ Mi Lista`, `Transmitir`, `Descargar`, `Compartir`).
+  - **Soporte TV intacto:** en Android TV se conserva el cuadro de diálogo optimizado para navegación D-pad con botón de reproducción inline.
+
 ## 3.3.21 — 2026-11-23
 - **Canvas dinámico eliminado del modal de detalle:** se quita `LiveCanvasPreview` por completo de la cabecera; ahora siempre se usa `FastArtwork` (tier backdrop, `cacheWidth: 900`) para garantizar portada de alta calidad fija con el efecto de fade-in/deriva.
 - **Crossfade completo del Collapsing Toolbar:** el título grande sobre el arte ahora se desvanece al hacer scroll (`Opacity` ligada a `_collapseFraction`), creando un crossfade limpio con el título pinned de la barra anclada.
