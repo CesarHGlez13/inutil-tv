@@ -1,5 +1,14 @@
 # Changelog — InútilTV
 
+## 3.3.25 — 2026-11-23
+- **Resolución Definitiva de Foco D-Pad en Destacados de Smart TV:**
+  - **Botones CTA Anclados Permanentes:** Se eliminó el desmontaje y la pérdida de foco causada por las transiciones de `PageView`. En Smart TV los botones de acción ("Reproducir" y "Detalles") y las flechas de navegación permanecen montados en el overlay con claves estáticas (`hero-tv-play-btn`, `hero-tv-details-btn`).
+  - **Cross-fade Cinemático con `AnimatedSwitcher`:** Al pulsar Flecha Derecha en "Detalles", Flecha Izquierda en "Reproducir", o seleccionar las flechas laterales, el arte y los metadatos cambian suavemente mediante `AnimatedSwitcher` sin que el cursor de foco salte jamás a "Seguir viendo".
+  - **Descenso Intencional con Flecha Abajo:** El foco desciende a "Seguir viendo" única y exclusivamente cuando el usuario pulsa deliberadamente la flecha abajo del control remoto.
+- **Perfeccionamiento de Diseño de Títulos estilo Crunchyroll 2026:**
+  - **Ficha de Detalle Cinemática:** Jerarquía visual adaptada fielmente a la inspección en vivo de la aplicación oficial de Crunchyroll (Black Clover): línea de metadatos centrada (`14+ • Dob Español | Sub Español • Shonen, Acción`), estrellas con calificación media (`Media: 4.8/10`), fila de acciones secundarias centradas, y título anclado con fade-in y fondo translúcido dinámico que se vuelve sólido al colapsar.
+
+
 ## 3.3.24 — 2026-11-23
 - **Navegación D-Pad fluida y selección de Destacados en Smart TV (Inicio):**
   - **Focusable Top-Level en Carrusel:** Se resolvió la imposibilidad de navegar y seleccionar en el carrusel de destacados (`HeroCarousel`) en Android TV. El slide activo ahora es un elemento `TvFocusable` con auto-foco y atajo directo a la ficha de detalles.

@@ -65,21 +65,22 @@ void main() {
     ),
   ];
 
-  group('v3.3.24 — pins de versión y documentación', () {
-    test('pubspec.yaml en 3.3.24+73', () {
-      expect(_pubspecVersion(), '3.3.24+73');
+  group('v3.3.24/v3.3.25 — pins de versión y documentación', () {
+    test('pubspec.yaml en 3.3.25+74', () {
+      expect(_pubspecVersion(), '3.3.25+74');
     });
 
-    test('lib/constants/app_info.dart en 3.3.24', () {
+    test('lib/constants/app_info.dart en 3.3.25', () {
       expect(File('lib/constants/app_info.dart').readAsStringSync(),
-          contains("static const String appVersion = '3.3.24'"));
-      expect(AppInfo.appVersion, '3.3.24');
+          contains("static const String appVersion = '3.3.25'"));
+      expect(AppInfo.appVersion, '3.3.25');
     });
 
-    test('CHANGELOG.md documenta 3.3.24 con mejoras de portadas, navegación TV y colores de marca', () {
+    test('CHANGELOG.md documenta 3.3.24 y 3.3.25 con mejoras de portadas, navegación TV y colores de marca', () {
       final changelog = File('CHANGELOG.md').readAsStringSync();
       expect(changelog, contains('## 3.3.24'));
-      expect(changelog, contains('Navegación D-Pad fluida y selección de Destacados en Smart TV'));
+      expect(changelog, contains('## 3.3.25'));
+      expect(changelog, contains('Resolución Definitiva de Foco D-Pad en Destacados de Smart TV'));
       expect(changelog, contains('Calidad HD / 4K Ultra en Portadas y Fondos'));
       expect(changelog, contains('Restauración de Identidad y Paleta Oficial InútilTV'));
     });
@@ -167,8 +168,8 @@ void main() {
 
       // Altura del carrusel en TV es 370 px
       final sizedBox = tester.widget<SizedBox>(
-        find.ancestor(
-          of: find.byType(PageView),
+        find.descendant(
+          of: find.byType(HeroCarousel),
           matching: find.byType(SizedBox),
         ).first,
       );
@@ -194,6 +195,44 @@ void main() {
       await tester.pump(const Duration(milliseconds: 400));
       await tester.pump(const Duration(milliseconds: 100));
       expect(find.text('Frieren: Más allá del final del viaje'), findsOneWidget);
+    });
+
+    testWidgets('En Smart TV cambiar de slide conserva foco en los botones y no salta a otros rieles', (tester) async {
+      TvModeService.instance.setForTest(detectedTv: true);
+
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(wrapTheme(
+        HeroCarousel(
+          featured: testItems,
+          active: false,
+          onPlay: (_) {},
+          onDetails: (_) {},
+        ),
+      ));
+      await tester.pump(const Duration(milliseconds: 200));
+
+      final detailsFinder = find.byKey(const ValueKey('hero-tv-details-btn'));
+      final playFinder = find.byKey(const ValueKey('hero-tv-play-btn'));
+      expect(detailsFinder, findsOneWidget);
+      expect(playFinder, findsOneWidget);
+
+      // Simular evento D-pad derecha en Detalles
+      final focusWidget = tester.widget<Focus>(find.ancestor(of: detailsFinder, matching: find.byType(Focus)).first);
+      focusWidget.onKeyEvent!(FocusNode(), const KeyDownEvent(
+        physicalKey: PhysicalKeyboardKey.arrowRight,
+        logicalKey: LogicalKeyboardKey.arrowRight,
+        timeStamp: Duration.zero,
+      ));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      // Verificamos que avanza al siguiente slide y ambos botones siguen montados con su key intacta
+      expect(find.text('Frieren: Más allá del final del viaje'), findsOneWidget);
+      expect(find.byKey(const ValueKey('hero-tv-details-btn')), findsOneWidget);
+      expect(find.byKey(const ValueKey('hero-tv-play-btn')), findsOneWidget);
     });
 
     testWidgets('En Móvil altura es 310 px y NO muestra flechas laterales', (tester) async {

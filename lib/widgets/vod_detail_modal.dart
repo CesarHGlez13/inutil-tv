@@ -551,7 +551,11 @@ class _VodDetailModalState extends State<VodDetailModal>
                     collapsedHeight: kToolbarHeight,
                     centerTitle: false,
                     titleSpacing: 0,
-                    backgroundColor: sheetBg,
+                    backgroundColor: sheetBg.withValues(
+                      alpha: Curves.easeIn.transform(
+                        _collapseFraction(context).clamp(0.0, 1.0),
+                      ),
+                    ),
                     elevation: 0,
                     leading: IconButton(
                       tooltip: 'Cerrar',
@@ -741,9 +745,74 @@ class _VodDetailModalState extends State<VodDetailModal>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        // Fila de estrellas de la referencia (v3.3.19), centrada.
+                        // 1. Badge • Audio/Sub • Género (jerarquía Crunchyroll 2026)
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 8,
+                          runSpacing: 4,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 2.5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.25),
+                                  width: 0.6,
+                                ),
+                              ),
+                              child: Text(
+                                item.isAnime
+                                    ? '14+'
+                                    : (item.isSeries ? 'SERIE' : 'PELÍCULA'),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.6,
+                                ),
+                              ),
+                            ),
+                            const Text('•', style: TextStyle(color: Colors.white38)),
+                            Text(
+                              item.isAnime
+                                  ? 'Dob Español | Sub Español'
+                                  : (item.year.isNotEmpty
+                                      ? item.year
+                                      : 'HD 1080p'),
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            if (item.genre.isNotEmpty) ...[
+                              const Text('•', style: TextStyle(color: Colors.white38)),
+                              Text(
+                                item.genre.replaceAll(
+                                    RegExp(r'^[🎬📺⚡🔥🎞️✨🧸]+\s*'), ''),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+
+                        // 2. Fila de estrellas con Media: X.X
                         if (hasRealRating) _starsRow(context, item.rating),
                         const SizedBox(height: 16),
+
+                        // 3. Fila de acciones secundarias (+ Mi Lista, Transmitir, Compartir)
                         _buildCrunchyrollActionRow(
                           context,
                           item,
@@ -751,6 +820,8 @@ class _VodDetailModalState extends State<VodDetailModal>
                           accent,
                         ),
                         const SizedBox(height: 16),
+
+                        // 4. Metadatos complementarios si existen
                         Wrap(
                           spacing: 8,
                           runSpacing: 6,
@@ -760,29 +831,12 @@ class _VodDetailModalState extends State<VodDetailModal>
                               _metaChip(context, item.year),
                             if (item.duration.isNotEmpty)
                               _metaChip(context, item.duration),
-                            if (item.isSeries)
-                              _metaChip(
-                                context,
-                                item.isAnime ? 'Anime' : 'Serie',
-                              ),
                             if (item.isSeries && _episodes.isNotEmpty)
                               _metaChip(
                                   context, '${_episodes.length} episodios'),
                           ],
                         ),
-                        if (item.genre.isNotEmpty) ...[
-                          const SizedBox(height: 10),
-                          Text(
-                            item.genre.replaceAll(
-                                RegExp(r'^[🎬📺⚡🔥🎞️✨🧸]+\s*'), ''),
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: subColor,
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
+
                         const SizedBox(height: 16),
                         Text(
                           'Sinopsis',
