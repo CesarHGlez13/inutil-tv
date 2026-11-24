@@ -867,15 +867,26 @@ class _MainScaffoldState extends State<MainScaffold> {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(7),
+                      child: Image.asset(
+                        'assets/logo.png',
+                        width: 28,
+                        height: 28,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     Text(
-                      'Inútil',
+                      'Inutix',
                       style: appTabTitleStyle(context).copyWith(
                         fontSize: 24,
                         fontWeight: FontWeight.w900,
                         letterSpacing: -0.9,
                       ),
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 5),
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 6.5,

@@ -4,7 +4,7 @@ class AppInfo {
   const AppInfo._();
 
   static const String appName = 'Inutix TV';
-  static const String appVersion = '3.3.34';
+  static const String appVersion = '3.3.35';
   static const String creatorName = 'César';
   static const String supportEmail = 'cesarmaster133@gmail.com';
 
@@ -20,7 +20,7 @@ class AppInfo {
 
   static const String githubProfileUrl = 'https://github.com/CesarHGlez13';
   static const String familyEcosystemLabel =
-      'Ecosistema inutix.com · Inutix TV & Inútil Music';
+      'Ecosistema inutix.com · Inutix TV & Inutix Music';
 
   static const List<String> whatsNewHighlights = [
     'Nueva identidad profesional: Inutix TV con nuevo ícono IX, banner Android TV y logo oficial',

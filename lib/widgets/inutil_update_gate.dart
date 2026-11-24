@@ -842,7 +842,7 @@ Future<void> showInutilAdminPublishUpdateDialog(BuildContext context) async {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Se guarda en Firebase (app_config/tv_release) sin afectar a Inútil Music.',
+                    'Se guarda en Firebase (app_config/tv_release) sin afectar a Inutix Music.',
                     style: TextStyle(color: sub, fontSize: 11.5),
                   ),
                   const SizedBox(height: 12),

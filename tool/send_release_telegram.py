@@ -38,7 +38,7 @@ def get_current_version(repo_dir: Path):
 def get_notes_for_version(repo_dir: Path, version: str):
     changelog = repo_dir / "CHANGELOG.md"
     if not changelog.exists():
-        return "Actualización de InútilTV"
+        return "Actualización de Inutix TV"
     lines = changelog.read_text(encoding="utf-8", errors="replace").splitlines()
     chosen = None
     for i, line in enumerate(lines):
@@ -77,17 +77,17 @@ def main():
     targets = [
         (
             "app-arm64-v8a-release.apk",
-            f"InutilTV_v{version}_arm64-v8a.apk",
-            f"📺 InútilTV v{version} (arm64-v8a · Móvil / Fire TV / Onn 4K Pro)\n{notes}"
+            f"InutixTV_v{version}_arm64-v8a.apk",
+            f"📺 Inutix TV v{version} (arm64-v8a · Móvil / Fire TV / Onn 4K Pro)\n{notes}"
         ),
         (
             "app-armeabi-v7a-release.apk",
-            f"InutilTV_v{version}_armeabi-v7a.apk",
-            f"📺 InútilTV v{version} (armeabi-v7a · Onn 4K / TV Box 32-bit)\n{notes}"
+            f"InutixTV_v{version}_armeabi-v7a.apk",
+            f"📺 Inutix TV v{version} (armeabi-v7a · Onn 4K / TV Box 32-bit)\n{notes}"
         ),
     ]
 
-    print(f"=== Enviando APKs de InútilTV v{version} a Telegram (chat {args.chat_id}) ===")
+    print(f"=== Enviando APKs de Inutix TV v{version} a Telegram (chat {args.chat_id}) ===")
     success_count = 0
     for src_name, upload_name, caption in targets:
         src = apk_dir / src_name

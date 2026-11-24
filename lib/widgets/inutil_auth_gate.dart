@@ -316,7 +316,7 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Ingresa tu correo registrado de la familia Inútil para recibir un enlace de restablecimiento:',
+                'Ingresa tu correo registrado de la familia Inutix para recibir un enlace de restablecimiento:',
                 style: TextStyle(color: sub, fontSize: 13, height: 1.4),
               ),
               const SizedBox(height: 14),
@@ -961,7 +961,7 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
                                       )
                                     : Text(
                                         _isRegister
-                                            ? 'Crear Cuenta en Familia Inútil'
+                                            ? 'Crear Cuenta en Familia Inutix'
                                             : 'Acceder a Inutix TV',
                                         style: const TextStyle(
                                           fontSize: 14.5,
@@ -1080,7 +1080,7 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          'Usa la misma cuenta de Inútil Music. Se requiere licencia activa otorgada por el Administrador (César).',
+                          'Usa la misma cuenta de Inutix Music. Se requiere licencia activa otorgada por el Administrador (César).',
                           style: TextStyle(
                             color: sub,
                             fontSize: 11.5,
@@ -1215,7 +1215,7 @@ class _InutilLicenseBlockedScreenState
     } else if (isPending) {
       title = 'CUENTA PENDIENTE';
       message =
-          'Tu cuenta ya está registrada en Firebase, pero el Administrador aún no te ha concedido vigencia. En cuanto César la active podrás entrar a Inutix TV e Inútil Music.';
+          'Tu cuenta ya está registrada en Firebase, pero el Administrador aún no te ha concedido vigencia. En cuanto César la active podrás entrar a Inutix TV e Inutix Music.';
       statusAccent = userAccent;
       icon = Icons.hourglass_top_rounded;
     } else if (isSuspended) {
@@ -1228,7 +1228,7 @@ class _InutilLicenseBlockedScreenState
     } else {
       title = 'LICENCIA VENCIDA';
       message =
-          'Tu periodo de vigencia en la familia Inútil ha caducado. Solicita al Administrador una renovación para seguir disfrutando de Inutix TV.';
+          'Tu periodo de vigencia en la familia Inutix ha caducado. Solicita al Administrador una renovación para seguir disfrutando de Inutix TV.';
       statusAccent = Colors.redAccent;
       icon = Icons.lock_clock_rounded;
     }

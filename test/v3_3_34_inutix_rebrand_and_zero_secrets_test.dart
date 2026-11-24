@@ -91,5 +91,25 @@ void main() {
       expect(adminSrc, isNot(contains('/home/cesar/')));
       expect(adminSrc, isNot(contains('192.168.100.23')));
     });
+
+    test('cero menciones visibles restantes de "Inútil" en código de UI bajo lib/', () {
+      final leaks = <String>[];
+      for (final entity in Directory('lib').listSync(recursive: true)) {
+        if (entity is! File || !entity.path.endsWith('.dart')) continue;
+        final lines = entity.readAsLinesSync();
+        for (var i = 0; i < lines.length; i++) {
+          final trimmed = lines[i].trimLeft();
+          if (trimmed.startsWith('//') ||
+              trimmed.startsWith('/*') ||
+              trimmed.startsWith('*')) {
+            continue;
+          }
+          if (RegExp(r'inútil', caseSensitive: false).hasMatch(trimmed)) {
+            leaks.add('${entity.path}:${i + 1}: $trimmed');
+          }
+        }
+      }
+      expect(leaks, isEmpty, reason: 'Encontradas menciones visibles antiguas:\n${leaks.join('\n')}');
+    });
   });
 }

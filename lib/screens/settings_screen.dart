@@ -505,7 +505,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 user?.displayName.isNotEmpty == true
                                     ? user!.displayName
                                     : (user?.email.split('@').first ??
-                                        'Usuario Inútil'),
+                                        'Usuario Inutix'),
                                 style: TextStyle(
                                   color: headingColor,
                                   fontSize: 16.5,
@@ -554,7 +554,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _metaRow(
                       context,
                       'Ecosistema',
-                      'Familia Inútil (TV + Music)',
+                      'Familia Inutix (TV + Music)',
                     ),
                     const SizedBox(height: 6),
                     _metaRow(
@@ -901,7 +901,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       context,
                       glyph: InutilGlyph.lock,
                       title: 'Cambiar contraseña',
-                      subtitle: 'Aplica a Inutix TV e Inútil Music',
+                      subtitle: 'Aplica a Inutix TV e Inutix Music',
                       onTap: _changePasswordDialog,
                     ),
                     if (!TvModeService.of(context)) ...[

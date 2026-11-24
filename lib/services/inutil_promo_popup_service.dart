@@ -74,7 +74,7 @@ class InutilPromoPopupService {
       body:
           'Mientras disfrutas TV en vivo, cine, series y anime sin comerciales eternos, '
           'César afina cada servidor a medianoche. ¿Le invitas unos tacos para seguir '
-          'mejorando la Familia Inútil?',
+          'mejorando la Familia Inutix?',
       primaryCta: 'Invitar unos tacos 🌮',
       secondaryCta: 'Hoy no, que aguante 😅',
       actionUrl: AppInfo.supportDevelopmentUrl,
@@ -99,7 +99,7 @@ class InutilPromoPopupService {
       emoji: '🍜',
       headline: 'Patrocina una Maruchan de lujo para el dev',
       body:
-          'Con lo que cuesta un refresco ayudas a que Inutix TV e Inútil Music sigan '
+          'Con lo que cuesta un refresco ayudas a que Inutix TV e Inutix Music sigan '
           'creciendo con precarga instantánea, más canales y diseño impecable.',
       primaryCta: 'Aportar mi granito ✨',
       secondaryCta: 'Tal vez después',
@@ -237,7 +237,7 @@ class InutilPromoPopupService {
             ? readStr('badge')
             : kind == InutilPopupKind.ad
                 ? 'PATROCINADO'
-                : 'AVISO DE INÚTILTV',
+                : 'AVISO DE INUTIX TV',
         emoji: readStr('emoji').isNotEmpty ? readStr('emoji') : '✨',
         headline: headline,
         body: body,
@@ -254,7 +254,7 @@ class InutilPromoPopupService {
             ? readStr('footnote')
             : kind == InutilPopupKind.ad
                 ? 'Anuncio · Ayuda a mantener Inutix TV gratis'
-                : 'Familia Inútil · Gracias por ser parte',
+                : 'Familia Inutix · Gracias por ser parte',
       );
     } catch (_) {
       return null;

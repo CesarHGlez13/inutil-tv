@@ -329,7 +329,7 @@ class _InutilAdminPanelState extends State<InutilAdminPanel> {
                 ),
                 const SizedBox(height: 16),
                 const Text(
-                  'Vigencia Inicial (válida en Inutix TV e Inútil Music):',
+                  'Vigencia Inicial (válida en Inutix TV e Inutix Music):',
                   style: TextStyle(
                     color: Colors.white70,
                     fontSize: 12.5,
@@ -523,7 +523,7 @@ class _InutilAdminPanelState extends State<InutilAdminPanel> {
                             ),
                           ),
                           Text(
-                            'Firebase Live · Familia Inútil (TV + Music)',
+                            'Firebase Live · Familia Inutix (TV + Music)',
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontSize: 11.5,

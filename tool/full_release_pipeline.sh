@@ -42,7 +42,7 @@ while [ $# -gt 0 ]; do
 done
 
 echo "=================================================================="
-echo "🚀 INICIANDO PIPELINE DE ACTUALIZACIÓN COMPLETO: InútilTV v$VERSION"
+echo "🚀 INICIANDO PIPELINE DE ACTUALIZACIÓN COMPLETO: Inutix TV v$VERSION"
 echo "=================================================================="
 
 # --- 1. Verificación de Sincronización de Versión ---

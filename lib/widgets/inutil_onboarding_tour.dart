@@ -87,7 +87,7 @@ class _InutilOnboardingTourState extends State<InutilOnboardingTour> {
       title: 'Hola, esto es\nInutix TV',
       body:
           'TV en vivo, cine, series y anime en un solo lugar con la misma '
-          'estética minimalista de Inútil Music. Explora las demos interactivas.',
+          'estética minimalista de Inutix Music. Explora las demos interactivas.',
       demo: (_) => const _WelcomeTvDemo(),
     ),
     _TourStep(
@@ -123,7 +123,7 @@ class _InutilOnboardingTourState extends State<InutilOnboardingTour> {
       title: 'Tu Lista e historial\nsiempre contigo',
       body:
           'Guarda películas, series y canales favoritos. Todo se respalda en tu '
-          'cuenta Firebase de la Familia Inútil para que nunca lo pierdas.',
+          'cuenta Firebase de la Familia Inutix para que nunca lo pierdas.',
       demo: (_) => const _BookmarkDemo(accent: Color(0xFFF472B6)),
     ),
     _TourStep(

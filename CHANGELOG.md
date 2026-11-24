@@ -1,5 +1,11 @@
 # Changelog — Inutix TV
 
+## 3.3.35 — 2026-11-24
+- **Identidad Unificada Monolith `iX TV` + Limpieza Total de Marca:**
+  - **Logo Oficial Monolith `iX TV`:** Adaptado 1:1 del nuevo logo oficial Monolith `iX MUSIC` (mismo fondo grafito diagonal, mismo monograma geométrico `iX` en blanco puro y punto con halo ambiental en cian eléctrico `#00D4FF` con tipografía geométrica `T V`) aplicado en `assets/logo.png`, íconos de launcher (`mipmap-mdpi` a `mipmap-xxxhdpi`), banners Android TV (`tv_banner.png`) y cabecera de Inicio móvil y TV.
+  - **Reemplazo Completo de Referencias Antiguas en Toda la App:** Eliminadas al 100% las menciones visibles restantes de `Inútil`, `InútilTV`, `Inútil Music` y `Familia Inútil` en toda la interfaz (barra superior de Inicio, Acerca de, Ajustes, Acceso, Onboarding, Wrapped, Panel Admin, OTA y avisos), unificando todo bajo **Inutix TV**, **Inutix Music** y **Familia Inutix**.
+  - **Títulos de Release y Telegram Unificados:** Actualizados los títulos de GitHub Releases y entregas de APKs en Telegram a **Inutix TV**.
+
 ## 3.3.34 — 2026-11-24
 - **Nueva Identidad Oficial — Inutix TV y Cero Secretos de Terceros en la App:**
   - **Rebrand Completo a Inutix TV:** Nuevo nombre oficial `Inutix TV` en launcher Android, Android TV, barra lateral TV, pantalla de acceso, Acerca de, OTA y textos de interfaz, conservando compatibilidad total de actualización sobre instalaciones previas (`dev.cesar.tubotv`, sesión, Mi Lista, historial y descargas intactos).

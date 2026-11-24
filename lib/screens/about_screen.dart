@@ -143,7 +143,7 @@ class AboutScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Inutix TV e Inútil Music son proyectos independientes desarrollados y mantenidos por César. Si deseas apoyar con una donación voluntaria para servidores y nuevas funciones, escríbenos directamente:',
+              'Inutix TV e Inutix Music son proyectos independientes desarrollados y mantenidos por César. Si deseas apoyar con una donación voluntaria para servidores y nuevas funciones, escríbenos directamente:',
               style: TextStyle(fontSize: 13, height: 1.45),
             ),
             const SizedBox(height: 14),
@@ -399,7 +399,7 @@ class AboutScreen extends StatelessWidget {
             iconColorOverride: Colors.pinkAccent,
             title: 'Apoyar el desarrollo / Donaciones',
             subtitle:
-                'Ayuda a mantener Inutix TV e Inútil Music y seguir agregando funciones',
+                'Ayuda a mantener Inutix TV e Inutix Music y seguir agregando funciones',
             onTap: () => _showSupportDialog(context),
           ),
           const SizedBox(height: 10),
@@ -428,7 +428,7 @@ class AboutScreen extends StatelessWidget {
             context,
             key: const ValueKey('about-github'),
             glyph: InutilGlyph.code,
-            title: 'Proyectos en GitHub (Familia Inútil)',
+            title: 'Proyectos en GitHub (Familia Inutix)',
             subtitle: AppInfo.githubProfileUrl,
             onTap: () => _openExternalUrl(
               context,

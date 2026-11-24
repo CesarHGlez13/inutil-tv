@@ -172,7 +172,7 @@ NOTES_MD="$MANIFEST_DIR/notas.md"
 python3 - "$MANIFEST" "$NOTES_MD" <<'PY'
 import json, sys
 m = json.load(open(sys.argv[1], encoding="utf-8"))
-lines = [f"# InútilTV {m['latestVersion']}", ""]
+lines = [f"# Inutix TV {m['latestVersion']}", ""]
 lines += [f"- {n}" for n in m.get("releaseNotes", [])]
 if m.get("mandatory"):
     lines += ["", f"Actualización obligatoria: las versiones anteriores a `{m.get('minSupportedVersion', m['latestVersion'])}` requieren actualizar."]
@@ -191,7 +191,7 @@ FILES_ARGS+=("$MANIFEST")
 # también el commit si todavía no estaba en el remoto.
 COMMIT_REF="$(git -C "$PROY" rev-parse HEAD)"
 echo "Commit de origen del build: $COMMIT_REF"
-git -C "$PROY" tag -f -a "$TAG" "$COMMIT_REF" -m "InútilTV $TAG" >/dev/null
+git -C "$PROY" tag -f -a "$TAG" "$COMMIT_REF" -m "Inutix TV $TAG" >/dev/null
 if git -C "$PROY" push -f origin "$COMMIT_REF:refs/tags/$TAG" >/dev/null 2>&1; then
   echo "Tag $TAG -> $COMMIT_REF"
 else
@@ -202,7 +202,7 @@ if gh release view "$TAG" --repo "$RELEASE_REPO" >/dev/null 2>&1; then
   gh release upload "$TAG" "${FILES_ARGS[@]}" --clobber --repo "$RELEASE_REPO"
 else
   gh release create "$TAG" "${FILES_ARGS[@]}" --repo "$RELEASE_REPO" \
-    --target "$COMMIT_REF" --title "InútilTV $TAG" --notes-file "$NOTES_MD"
+    --target "$COMMIT_REF" --title "Inutix TV $TAG" --notes-file "$NOTES_MD"
 fi
 echo "OK GitHub Release: https://github.com/$RELEASE_REPO/releases/tag/$TAG"
 
@@ -298,4 +298,4 @@ else
   echo "AVISO: sin RELAY_ADMIN_SECRET ($INUTIX_SECRET_FILE); omitida sincronización con api.inutix.com y backup.inutix.com." >&2
 fi
 
-echo "Publicado InútilTV $TAG"
+echo "Publicado Inutix TV $TAG"

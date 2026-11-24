@@ -507,7 +507,7 @@ class _HomeTabState extends State<HomeTab> {
 
               Center(
                 child: Text(
-                  '${AppInfo.appName} v${AppInfo.appVersion} · Familia Inútil',
+                  '${AppInfo.appName} v${AppInfo.appVersion} · Familia Inutix',
                   style: TextStyle(
                     color: AppColors.contentSubtitleFor(context)
                         .withValues(alpha: 0.55),

@@ -226,7 +226,7 @@ class _InutilTvWrappedDialogState extends State<InutilTvWrappedDialog>
                                 borderRadius: BorderRadius.circular(999),
                               ),
                               child: Text(
-                                'INÚTILTV WRAPPED ${widget.summary.year}',
+                                'INUTIX TV WRAPPED ${widget.summary.year}',
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 10.5,
@@ -328,7 +328,7 @@ class _InutilTvWrappedDialogState extends State<InutilTvWrappedDialog>
             ),
             const SizedBox(height: 12),
             const Text(
-              'Gracias por ser parte\nde la Familia Inútil',
+              'Gracias por ser parte\nde la Familia Inutix',
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 28,
@@ -372,7 +372,7 @@ class _InutilTvWrappedDialogState extends State<InutilTvWrappedDialog>
                 filled: true,
               ),
               label: const Text(
-                'Apoyar a la Familia Inútil',
+                'Apoyar a la Familia Inutix',
                 style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5),
               ),
             ),
