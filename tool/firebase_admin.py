@@ -80,8 +80,9 @@ if not RELAY_INVALIDATE_BASES:
     # Las dos capas tal como estan desplegadas hoy: tier 1 = relay del S7 (LAN),
     # tier 2 = Worker cloud. Que una de las dos no responda es NORMAL (el PC
     # puede estar fuera de la LAN) y no es un error: se loguea y listo.
-    RELAY_INVALIDATE_BASES = ["http://192.168.100.27:8080",
-                              "https://inutil-cloud-relay.scada-xiaomi-server.workers.dev"]
+    RELAY_INVALIDATE_BASES = ["https://api.inutix.com",
+                              "http://192.168.100.27:8080",
+                              "https://backup.inutix.com"]
 ADMIN_SECRET_FILE_DEFAULT = "/home/cesar/.config/inutil_relay/admin_secret.txt"
 RELAY_ADMIN_SECRET = os.environ.get("RELAY_ADMIN_SECRET", "").strip()
 if not RELAY_ADMIN_SECRET:

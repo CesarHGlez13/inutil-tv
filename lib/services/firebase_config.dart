@@ -69,6 +69,31 @@ class FirebaseConfig {
       String.fromEnvironment('FB_RELAY_HOST', defaultValue: '');
   static const String relayPort =
       String.fromEnvironment('FB_RELAY_PORT', defaultValue: '8080');
+  static const String cloudRelayHost =
+      String.fromEnvironment('FB_CLOUD_RELAY_HOST', defaultValue: '');
+  static const String backupRelayHost =
+      String.fromEnvironment('FB_BACKUP_RELAY_HOST', defaultValue: '');
+
+  static DateTime? _cloudRelayFailedAt;
+  static const Duration _cloudRelayCooldown = Duration(seconds: 90);
+
+  static bool get cloudRelayUsable {
+    if (useEmulator || cloudRelayHost.trim().isEmpty) return false;
+    final failedAt = _cloudRelayFailedAt;
+    if (failedAt != null &&
+        DateTime.now().difference(failedAt) < _cloudRelayCooldown) {
+      return false;
+    }
+    _cloudRelayFailedAt = null;
+    return true;
+  }
+
+  static bool get backupRelayUsable =>
+      !useEmulator && backupRelayHost.trim().isNotEmpty;
+
+  static void markCloudRelayUnreachable() {
+    _cloudRelayFailedAt = DateTime.now();
+  }
 
   // ---------------------------------------------------------------------------
   // Fallback de alcance del relay (compatible con Inútil Music)
@@ -201,6 +226,12 @@ class FirebaseConfig {
   static String get firestoreBaseUrl {
     if (relayUsable) {
       return 'http://$relayHost:$relayPort/v1/projects/$projectId/databases/(default)/documents';
+    }
+    if (cloudRelayUsable) {
+      return 'https://${cloudRelayHost.trim()}/v1/projects/$projectId/databases/(default)/documents';
+    }
+    if (backupRelayUsable) {
+      return 'https://${backupRelayHost.trim()}/v1/projects/$projectId/databases/(default)/documents';
     }
     return useEmulator
         ? 'http://$emulatorHost:$emulatorFirestorePort/v1/projects/$projectId/databases/(default)/documents'

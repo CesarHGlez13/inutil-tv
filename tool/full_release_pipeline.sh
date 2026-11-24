@@ -77,7 +77,7 @@ flutter analyze --no-fatal-infos --no-fatal-warnings
 APK_DIR="$PROY/build/app/outputs/flutter-apk"
 if [ "$SKIP_BUILD" = "0" ]; then
   echo "▶ [3/6] Compilando APKs split-per-abi release v$VERSION (con relay horneado S7)..."
-  flutter build apk --release --split-per-abi --dart-define=FB_RELAY_HOST=192.168.100.27
+  flutter build apk --release --split-per-abi --dart-define=FB_RELAY_HOST=192.168.100.27 --dart-define=FB_CLOUD_RELAY_HOST=api.inutix.com --dart-define=FB_BACKUP_RELAY_HOST=backup.inutix.com
 else
   echo "▶ [3/6] Omitiendo compilación (--skip-build)."
 fi
