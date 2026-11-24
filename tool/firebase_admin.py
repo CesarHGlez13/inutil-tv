@@ -46,7 +46,7 @@ FB_API_BASE = os.environ.get("FB_API_BASE", "https://api.inutix.com").strip().rs
 FIRESTORE_URL = (f"{FB_API_BASE}"
                  f"/v1/projects/{PROJECT_ID}/databases/(default)/documents")
 AUTH_URL = "https://identitytoolkit.googleapis.com/v1"
-CONFIGSTORE_PATH = Path("/home/cesar/.config/configstore/firebase-tools.json")
+CONFIGSTORE_PATH = Path.home() / ".config" / "configstore" / "firebase-tools.json"
 TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 # Cliente OAuth público del propio firebase-tools (fuente: firebase-tools/lib/api.js).
 # Es el mismo par cliente_id/secret con el que el CLI refresca su token.
@@ -85,7 +85,7 @@ if not RELAY_INVALIDATE_BASES:
     RELAY_INVALIDATE_BASES = ["https://api.inutix.com",
                               "http://192.168.100.27:8080",
                               "https://backup.inutix.com"]
-ADMIN_SECRET_FILE_DEFAULT = "/home/cesar/.config/inutil_relay/admin_secret.txt"
+ADMIN_SECRET_FILE_DEFAULT = os.path.expanduser("~/.config/inutil_relay/admin_secret.txt")
 RELAY_ADMIN_SECRET = os.environ.get("RELAY_ADMIN_SECRET", "").strip()
 if not RELAY_ADMIN_SECRET:
     _secret_path = os.environ.get("RELAY_ADMIN_SECRET_FILE",
@@ -1043,7 +1043,7 @@ def cmd_web(args):
     server = http.server.HTTPServer(("0.0.0.0", port), AdminHttpHandler)
     print(f"\n🚀 Panel Web de Administración Firebase activo en:")
     print(f"   👉 http://localhost:{port}  (login con Google de una cuenta admin)")
-    print(f"   👉 http://192.168.100.23:{port} (desde tu red local)")
+    print(f"   👉 http://<tu-ip-lan>:{port} (desde tu red local)")
     print(f"   👉 Cuentas permitidas: {', '.join(sorted(ADMIN_EMAILS))}")
     print(f"Presiona Ctrl+C para detener el servidor.\n")
     try:

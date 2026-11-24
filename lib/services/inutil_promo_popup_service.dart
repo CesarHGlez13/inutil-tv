@@ -86,7 +86,7 @@ class InutilPromoPopupService {
       emoji: '🍿',
       headline: 'Sacrificamos las palomitas para quitarte los anuncios',
       body:
-          'InútilTV no corta tu capítulo favorito con pop-ups invasivos ni suscripciones '
+          'Inutix TV no corta tu capítulo favorito con pop-ups invasivos ni suscripciones '
           'escondidas. Un apoyo voluntario ayuda a mantener los servidores al 100 %.',
       primaryCta: 'Apoyar al creador 💛',
       secondaryCta: 'Luego le invito',
@@ -99,7 +99,7 @@ class InutilPromoPopupService {
       emoji: '🍜',
       headline: 'Patrocina una Maruchan de lujo para el dev',
       body:
-          'Con lo que cuesta un refresco ayudas a que InútilTV e Inútil Music sigan '
+          'Con lo que cuesta un refresco ayudas a que Inutix TV e Inútil Music sigan '
           'creciendo con precarga instantánea, más canales y diseño impecable.',
       primaryCta: 'Aportar mi granito ✨',
       secondaryCta: 'Tal vez después',
@@ -113,7 +113,7 @@ class InutilPromoPopupService {
       headline: 'Plot twist: tu app de TV la mantiene un humano real',
       body:
           'Sin corporaciones gigantes detrás: solo desvelos probando canales y '
-          'servidores para ti. Si InútilTV ya te salvó el partido o el maratón, '
+          'servidores para ti. Si Inutix TV ya te salvó el partido o el maratón, '
           'considera apoyar el proyecto.',
       primaryCta: 'Quiero apoyar 💛',
       secondaryCta: 'Seguir viendo',
@@ -140,7 +140,7 @@ class InutilPromoPopupService {
       headline: 'Nivel de energía del creador: 4 %',
       body:
           'Conecta un apoyo voluntario para recargar a César y desbloquear todavía '
-          'más mejoras en las próximas versiones de InútilTV.',
+          'más mejoras en las próximas versiones de Inutix TV.',
       primaryCta: 'Recargar al creador 🔋',
       secondaryCta: 'En la quincena 😉',
       actionUrl: AppInfo.supportDevelopmentUrl,
@@ -253,7 +253,7 @@ class InutilPromoPopupService {
         footnote: readStr('footnote').isNotEmpty
             ? readStr('footnote')
             : kind == InutilPopupKind.ad
-                ? 'Anuncio · Ayuda a mantener InútilTV gratis'
+                ? 'Anuncio · Ayuda a mantener Inutix TV gratis'
                 : 'Familia Inútil · Gracias por ser parte',
       );
     } catch (_) {

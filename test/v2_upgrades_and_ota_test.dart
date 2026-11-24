@@ -98,7 +98,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('ACTUALIZACIÓN OBLIGATORIA'), findsOneWidget);
-      expect(find.text('InútilTV v2.5.0'), findsOneWidget);
+      expect(find.text('Inutix TV v2.5.0'), findsOneWidget);
       expect(find.text('Actualizar ahora'), findsOneWidget);
       expect(find.text('APP_NORMAL'), findsNothing);
     });

@@ -297,7 +297,7 @@ class TvQrPairingService {
   Future<String?> approveFromMobile(String rawQr) async {
     final parsed = parseQrUri(rawQr);
     if (parsed == null) {
-      return 'Este código QR no corresponde a InútilTV.';
+      return 'Este código QR no corresponde a Inutix TV.';
     }
 
     final auth = InutilAuthService.instance;

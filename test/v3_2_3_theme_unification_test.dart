@@ -96,7 +96,7 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.text('InútilTV v3.2.3'), findsOneWidget);
+        expect(find.text('Inutix TV v3.2.3'), findsOneWidget);
         expect(find.text('NOVEDADES'), findsOneWidget);
         expect(find.text('Actualizar ahora'), findsOneWidget);
         expect(find.text('Más tarde'), findsOneWidget);
@@ -179,7 +179,7 @@ void main() {
           tester.widget<Scaffold>(find.byType(Scaffold).first).backgroundColor,
           AppColors.lightScaffold,
         );
-        expect(find.text('INÚTIL TV'), findsOneWidget);
+        expect(find.text('INUTIX TV'), findsOneWidget);
         expect(tester.takeException(), isNull);
 
         // 2. Cuenta Pendiente en tema oscuro

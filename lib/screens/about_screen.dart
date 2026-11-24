@@ -143,7 +143,7 @@ class AboutScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'InútilTV e Inútil Music son proyectos independientes desarrollados y mantenidos por César. Si deseas apoyar con una donación voluntaria para servidores y nuevas funciones, escríbenos directamente:',
+              'Inutix TV e Inútil Music son proyectos independientes desarrollados y mantenidos por César. Si deseas apoyar con una donación voluntaria para servidores y nuevas funciones, escríbenos directamente:',
               style: TextStyle(fontSize: 13, height: 1.45),
             ),
             const SizedBox(height: 14),
@@ -237,11 +237,22 @@ class AboutScreen extends StatelessWidget {
             ),
             child: Column(
               children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Image.asset(
+                    'assets/logo.png',
+                    width: 68,
+                    height: 68,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
-                      'Inútil',
+                      'Inutix',
                       style: appTabTitleStyle(context).copyWith(
                         fontSize: 28,
                         fontWeight: FontWeight.w900,
@@ -319,7 +330,7 @@ class AboutScreen extends StatelessWidget {
             key: const ValueKey('about-ota'),
             glyph: InutilGlyph.update,
             title: 'Buscar actualizaciones (OTA)',
-            subtitle: 'Descarga e instala nuevas versiones sin salir de InútilTV',
+            subtitle: 'Descarga e instala nuevas versiones sin salir de Inutix TV',
             onTap: () async {
               final release =
                   await InutilUpdateService.instance.checkForUpdate();
@@ -346,7 +357,7 @@ class AboutScreen extends StatelessWidget {
             key: const ValueKey('about-wrapped'),
             glyph: InutilGlyph.sparkles,
             iconColorOverride: const Color(0xFF34D399),
-            title: 'Tu Resumen del Año (InútilTV Wrapped)',
+            title: 'Tu Resumen del Año (Inutix TV Wrapped)',
             subtitle:
                 'Revive tus horas vistas, tu título #1 y tu personalidad de pantalla',
             onTap: () async {
@@ -373,7 +384,7 @@ class AboutScreen extends StatelessWidget {
             glyph: InutilGlyph.guide,
             title: 'Recorrido guiado interactivo',
             subtitle:
-                'Vuelve a explorar las funciones clave y gestos de InútilTV',
+                'Vuelve a explorar las funciones clave y gestos de Inutix TV',
             onTap: () => InutilOnboardingTour.show(
               context,
               inactivityDays: InutilAuthService.instance.inactivityPolicyDays,
@@ -388,7 +399,7 @@ class AboutScreen extends StatelessWidget {
             iconColorOverride: Colors.pinkAccent,
             title: 'Apoyar el desarrollo / Donaciones',
             subtitle:
-                'Ayuda a mantener InútilTV e Inútil Music y seguir agregando funciones',
+                'Ayuda a mantener Inutix TV e Inútil Music y seguir agregando funciones',
             onTap: () => _showSupportDialog(context),
           ),
           const SizedBox(height: 10),

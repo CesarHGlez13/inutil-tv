@@ -521,7 +521,7 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
                     ),
                     SizedBox(height: isTv ? 8 : 14),
                     Text(
-                      'INÚTIL TV',
+                      'INUTIX TV',
                       style: TextStyle(
                         fontSize: isTv ? 22 : 25,
                         fontWeight: FontWeight.w900,
@@ -532,7 +532,7 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
                     const SizedBox(height: 4),
                     if (!isTv) ...[
                       Text(
-                        'Cuenta Unificada · Familia Inútil',
+                        'Cuenta Unificada · Ecosistema inutix.com',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 12.5,
@@ -656,7 +656,7 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
                             const SizedBox(height: 10),
                             Text(
                               _qrStatusMessage ??
-                                  'Escanea desde InútilTV en tu celular',
+                                  'Escanea desde Inutix TV en tu celular',
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 color: _qrStatusMessage != null
@@ -962,7 +962,7 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
                                     : Text(
                                         _isRegister
                                             ? 'Crear Cuenta en Familia Inútil'
-                                            : 'Acceder a InútilTV',
+                                            : 'Acceder a Inutix TV',
                                         style: const TextStyle(
                                           fontSize: 14.5,
                                           fontWeight: FontWeight.w800,
@@ -1215,7 +1215,7 @@ class _InutilLicenseBlockedScreenState
     } else if (isPending) {
       title = 'CUENTA PENDIENTE';
       message =
-          'Tu cuenta ya está registrada en Firebase, pero el Administrador aún no te ha concedido vigencia. En cuanto César la active podrás entrar a InútilTV e Inútil Music.';
+          'Tu cuenta ya está registrada en Firebase, pero el Administrador aún no te ha concedido vigencia. En cuanto César la active podrás entrar a Inutix TV e Inútil Music.';
       statusAccent = userAccent;
       icon = Icons.hourglass_top_rounded;
     } else if (isSuspended) {
@@ -1228,7 +1228,7 @@ class _InutilLicenseBlockedScreenState
     } else {
       title = 'LICENCIA VENCIDA';
       message =
-          'Tu periodo de vigencia en la familia Inútil ha caducado. Solicita al Administrador una renovación para seguir disfrutando de InútilTV.';
+          'Tu periodo de vigencia en la familia Inútil ha caducado. Solicita al Administrador una renovación para seguir disfrutando de Inutix TV.';
       statusAccent = Colors.redAccent;
       icon = Icons.lock_clock_rounded;
     }

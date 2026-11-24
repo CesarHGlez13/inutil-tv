@@ -148,34 +148,19 @@ void main() {
     });
   });
 
-  group('v3.3.30 — TMDB Read Access Token (Bearer Auth) en TitleLogoService', () {
-    test('envía header Authorization Bearer en peticiones TMDB y resuelve logo PNG', () async {
-      final capturedTmdbHeaders = <Map<String, String>>[];
+  group('v3.3.30–v3.3.34 — Resolución segura de logos en TitleLogoService vía meta.inutix.com', () {
+    test('resuelve logo PNG vía meta.inutix.com/logo sin exponer llaves TMDB/Fanart en el cliente', () async {
+      final capturedUrls = <Uri>[];
       TitleLogoService.instance.testClient = MockClient((req) async {
-        if (req.url.host == 'meta.inutix.com') {
-          return http.Response('edge_unavailable', 503);
-        }
-        capturedTmdbHeaders.add(Map<String, String>.from(req.headers));
-        if (req.url.path.endsWith('/images')) {
-          return http.Response(
-            jsonEncode({
-              'logos': [
-                {
-                  'file_path': '/black_clover_logo.png',
-                  'iso_639_1': 'en',
-                  'aspect_ratio': 2.5,
-                  'vote_count': 12,
-                }
-              ]
-            }),
-            200,
-          );
-        }
+        capturedUrls.add(req.url);
+        expect(req.url.host, 'meta.inutix.com');
+        expect(req.url.path, '/logo');
+        expect(req.headers.containsKey('Authorization'), isFalse);
         return http.Response(
           jsonEncode({
-            'results': [
-              {'id': 73223}
-            ]
+            'ok': true,
+            'logo': 'https://image.tmdb.org/t/p/w500/black_clover_logo.png',
+            'source': 'tmdb',
           }),
           200,
         );
@@ -190,11 +175,9 @@ void main() {
 
       final url = await TitleLogoService.instance.getLogoUrl(item);
       expect(url, 'https://image.tmdb.org/t/p/w500/black_clover_logo.png');
-      expect(capturedTmdbHeaders, isNotEmpty);
-      expect(
-        capturedTmdbHeaders.first['Authorization'],
-        'Bearer ${TitleLogoService.tmdbReadAccessToken}',
-      );
+      expect(capturedUrls, hasLength(1));
+      expect(capturedUrls.first.queryParameters['id'], '73223');
+      expect(capturedUrls.first.queryParameters['type'], 'tv');
     });
   });
 

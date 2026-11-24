@@ -273,7 +273,7 @@ class _InutilTvWrappedDialogState extends State<InutilTvWrappedDialog>
           accent: accent,
           eyebrow: 'TU AÑO EN PANTALLA',
           headline: s.hasViewingData
-              ? '$name, pasaste\n$timeLabel viendo InútilTV'
+              ? '$name, pasaste\n$timeLabel viendo Inutix TV'
               : 'Hola $name,\ntu historia apenas comienza',
           body: s.hasViewingData
               ? 'Equivale a unas ${s.equivalentMovies} películas completas en '
@@ -291,7 +291,7 @@ class _InutilTvWrappedDialogState extends State<InutilTvWrappedDialog>
           body: top != null
               ? 'Tu obsesión en ${top.category}. Nadie te quitó el control cuando '
                   'tocaba reproducirlo.'
-              : 'El título que más horas veas en InútilTV aparecerá aquí como tu favorito.',
+              : 'El título que más horas veas en Inutix TV aparecerá aquí como tu favorito.',
           highlight: top != null ? '#1' : '🎬',
         );
       case 2:

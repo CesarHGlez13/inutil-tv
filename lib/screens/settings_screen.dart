@@ -144,7 +144,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         backgroundColor: AppColors.elevatedSurfaceFor(dialogContext),
         title: Text(
           report.allOk
-              ? 'Tu red deja ver InútilTV'
+              ? 'Tu red deja ver Inutix TV'
               : (report.checks.any(
                     (c) => !c.ok && c.detail.startsWith('HTTP 5'),
                   )
@@ -901,7 +901,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       context,
                       glyph: InutilGlyph.lock,
                       title: 'Cambiar contraseña',
-                      subtitle: 'Aplica a InútilTV e Inútil Music',
+                      subtitle: 'Aplica a Inutix TV e Inútil Music',
                       onTap: _changePasswordDialog,
                     ),
                     if (!TvModeService.of(context)) ...[
@@ -1069,7 +1069,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         style: appListCardTitleStyle(context),
                       ),
                       subtitle: Text(
-                        'Si tu red bloquea el video, InútilTV busca los '
+                        'Si tu red bloquea el video, Inutix TV busca los '
                         'servidores por un camino cifrado',
                         style: appListCardSubtitleStyle(context),
                       ),
@@ -1170,7 +1170,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _actionRow(
                       context,
                       glyph: InutilGlyph.info,
-                      title: 'Acerca de InútilTV',
+                      title: 'Acerca de Inutix TV',
                       subtitle: 'Creador, novedades, donaciones y contacto',
                       onTap: () {
                         Navigator.of(context).push(

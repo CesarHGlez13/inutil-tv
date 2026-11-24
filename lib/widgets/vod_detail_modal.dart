@@ -904,7 +904,7 @@ class _VodDetailModalState extends State<VodDetailModal>
                         Text(
                           item.overview.isNotEmpty
                               ? item.overview
-                              : 'Título disponible en alta definición con cambio automático de servidor en InútilTV.',
+                              : 'Título disponible en alta definición con cambio automático de servidor en Inutix TV.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: headingColor.withValues(alpha: 0.8),
@@ -1525,7 +1525,7 @@ class _VodDetailModalState extends State<VodDetailModal>
                         Text(
                           item.overview.isNotEmpty
                               ? item.overview
-                              : 'Título disponible en alta definición con cambio automático de servidor en InútilTV.',
+                              : 'Título disponible en alta definición con cambio automático de servidor en Inutix TV.',
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(

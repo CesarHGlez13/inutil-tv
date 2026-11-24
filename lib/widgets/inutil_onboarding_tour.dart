@@ -84,7 +84,7 @@ class _InutilOnboardingTourState extends State<InutilOnboardingTour> {
     _TourStep(
       accent: const Color(0xFFF5F7F5),
       eyebrow: 'BIENVENIDO',
-      title: 'Hola, esto es\nInútilTV',
+      title: 'Hola, esto es\nInutix TV',
       body:
           'TV en vivo, cine, series y anime en un solo lugar con la misma '
           'estética minimalista de Inútil Music. Explora las demos interactivas.',
@@ -104,7 +104,7 @@ class _InutilOnboardingTourState extends State<InutilOnboardingTour> {
       eyebrow: 'PRECARGA INSTANTÁNEA',
       title: 'Salta de capítulo\nsin esperar nada',
       body:
-          'Mientras ves una serie o anime, InútilTV precarga en fondo los '
+          'Mientras ves una serie o anime, Inutix TV precarga en fondo los '
           'primeros minutos del siguiente capítulo para que el salto sea instantáneo.',
       demo: (_) => const _InstantPreloadDemo(accent: Color(0xFF38BDF8)),
     ),
@@ -888,7 +888,7 @@ class _InactivityInfoDemo extends StatelessWidget {
           const SizedBox(width: 14),
           Expanded(
             child: Text(
-              'Usa InútilTV al menos una vez cada $days días para mantener '
+              'Usa Inutix TV al menos una vez cada $days días para mantener '
               'tu cupo gratuito activo de forma automática.',
               style: const TextStyle(
                 color: Colors.white,

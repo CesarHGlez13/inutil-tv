@@ -10,25 +10,17 @@ import 'remote_providers_config.dart';
 /// Servicio de resolución y caché de logos tipográficos transparentes (PNG)
 /// para carátulas y cabeceras de títulos estilo Crunchyroll 2026.
 ///
-/// Utiliza:
-/// 1. TMDB API (gratuita, CDN global ilimitada y sin cuotas por usuario) como proveedor primario.
-/// 2. Fanart.tv API como respaldo enriquecido para animes y películas de culto.
-/// 3. Caché multinivel: L1 RAM instantánea (0 ms) + L2 disco persistente (SharedPreferences)
-///    + Deduplicación de peticiones en vuelo (in-flight) para cero sobrecarga de red.
+/// Resuelve 100% a través del Edge Gateway propio (`https://meta.inutix.com/logo`),
+/// donde las credenciales de TMDB y Fanart.tv residen exclusivamente como secretos
+/// cifrados en Cloudflare Workers (cero llaves de terceros en la app o el repo):
+/// 1. Caché Edge global de 7 días en Cloudflare (`meta.inutix.com/logo`).
+/// 2. Caché local multinivel: L1 RAM instantánea (0 ms) + L2 disco persistente
+///    (`SharedPreferences`) + deduplicación de peticiones en vuelo (`in-flight`).
 class TitleLogoService {
   TitleLogoService._();
   static final TitleLogoService instance = TitleLogoService._();
 
-  static const String tmdbApiKey = '62a51d0e8a768b445ff8e3fda7c3721e';
-  static const String tmdbReadAccessToken =
-      'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiI2MmE1MWQwZThhNzY4YjQ0NWZmOGUzZmRhN2MzNzIxZSIsIm5iZiI6MTc5NTM2OTA4MS4yOTIsInN1YiI6IjZiMDMyODc5MGQwNDhiZWQ4ZDljMjNlYyIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.FKx8f4qYS795RC0RDffALs2Y0-AJlKMNkU2N5qnMkzs';
-  static const String fanartApiKey = '06c9206b4acb54a9a33158bc7ff4db7c';
   static const String _prefPrefix = 'title_logo_v1_';
-
-  static const Map<String, String> _tmdbHeaders = {
-    'Authorization': 'Bearer $tmdbReadAccessToken',
-    'accept': 'application/json',
-  };
 
   final Map<String, String> _memoryCache = {};
   final Map<String, Future<String?>> _inFlight = {};
@@ -46,7 +38,7 @@ class TitleLogoService {
   }
 
   /// Limpia títulos removiendo información accesoria (idiomas, calidad, temporadas)
-  /// para mejorar la precisión de búsqueda en TMDB / Fanart.tv.
+  /// para mejorar la precisión de búsqueda en el Edge Gateway (`meta.inutix.com`).
   static String cleanTitle(String raw) {
     var s = raw.trim();
     // 1. Quitar contenido entre paréntesis o corchetes: (Latino), [1080p], etc.
@@ -71,7 +63,9 @@ class TitleLogoService {
     if (item.id.isNotEmpty) {
       return item.id.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
     }
-    return cleanTitle(item.title).toLowerCase().replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+    return cleanTitle(item.title)
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
   }
 
   /// Obtiene de forma síncrona el logo si ya reside en la memoria RAM (0 ms).
@@ -123,8 +117,7 @@ class TitleLogoService {
       }
     } catch (_) {}
 
-    // 4. Intentar primero el Edge Gateway propio (`meta.inutix.com/logo`, caché
-    //    global de 7 días en Cloudflare Edge sin depender de acceso directo a TMDB).
+    // 4. Consultar Edge Gateway propio (`meta.inutix.com/logo`, caché global 7 d)
     final (localId, localType) = _extractLocalTmdbIdentity(item);
     final edgeResult = await _fetchEdgeLogo(
       item: item,
@@ -132,25 +125,13 @@ class TitleLogoService {
       mediaType: localType,
     );
 
-    String? logoUrl;
-    if (edgeResult.handled) {
-      logoUrl = edgeResult.logoUrl;
-    } else {
-      // 5. Fallback directo a TMDB Bearer Auth + Fanart.tv si el Edge no respondió
-      final (tmdbId, mediaType) = localId != null && localId > 0
-          ? (localId, localType)
-          : await _findTmdbIdentity(item);
-
-      if (tmdbId != null && tmdbId > 0) {
-        logoUrl = await _fetchTmdbLogo(tmdbId, mediaType);
-        if (logoUrl == null || logoUrl.isEmpty) {
-          logoUrl = await _fetchFanartLogo(tmdbId, mediaType);
-        }
-      }
+    // Solo persistir caché negativa si el Edge respondió explícitamente (ok: true);
+    // si hubo fallo transitorio de red, no envenenar el disco para reintentar luego.
+    if (!edgeResult.handled) {
+      return null;
     }
 
-    // 6. Guardar en memoria y disco (incluso cadena vacía para caché negativa)
-    final resolved = logoUrl ?? '';
+    final resolved = edgeResult.logoUrl ?? '';
     _memoryCache[key] = resolved;
     try {
       final sp = await SharedPreferences.getInstance();
@@ -202,7 +183,7 @@ class TitleLogoService {
       params['id'] = '$tmdbId';
     } else {
       final query = cleanTitle(item.title);
-      if (query.isEmpty) return (handled: false, logoUrl: null);
+      if (query.isEmpty) return (handled: true, logoUrl: null);
       params['q'] = query;
     }
 
@@ -210,7 +191,7 @@ class TitleLogoService {
       final uri = Uri.parse('$base/logo').replace(queryParameters: params);
       final resp = await _client
           .get(uri, headers: const {'Accept': 'application/json'})
-          .timeout(const Duration(seconds: 4));
+          .timeout(const Duration(seconds: 5));
       if (resp.statusCode != 200) return (handled: false, logoUrl: null);
 
       final decoded = jsonDecode(resp.body);
@@ -228,185 +209,5 @@ class TitleLogoService {
     } catch (_) {
       return (handled: false, logoUrl: null);
     }
-  }
-
-  /// Determina el id numérico de TMDB y el tipo de medio ('tv' o 'movie').
-  Future<(int?, String)> _findTmdbIdentity(VodItem item) async {
-    final isSeries = item.isSeries || item.isAnime;
-    final defaultType = isSeries ? 'tv' : 'movie';
-
-    // A. Extraer de id si es de Poseidon: cp_m_12345 o cp_s_12345
-    final idMatch = RegExp(r'^cp_[sm]_(\d+)$').firstMatch(item.id);
-    if (idMatch != null) {
-      final id = int.tryParse(idMatch.group(1)!);
-      if (id != null) {
-        final type = item.id.startsWith('cp_s_') ? 'tv' : 'movie';
-        return (id, type);
-      }
-    }
-
-    // B. Extraer de slug si tiene formato series/12345/... o movies/12345/...
-    final slugMatch = RegExp(r'(?:series|serie|movies|movie)/(\d+)').firstMatch(item.slug);
-    if (slugMatch != null) {
-      final id = int.tryParse(slugMatch.group(1)!);
-      if (id != null) {
-        final type = item.slug.startsWith('movie') ? 'movie' : 'tv';
-        return (id, type);
-      }
-    }
-
-    // C. Búsqueda por título en TMDB
-    final query = cleanTitle(item.title);
-    if (query.isEmpty) return (null, defaultType);
-
-    try {
-      // Intento 1: Endpoint específico según tipo
-      final uri = Uri.parse(
-        'https://api.themoviedb.org/3/search/$defaultType?query=${Uri.encodeComponent(query)}',
-      );
-      final resp = await _client
-          .get(uri, headers: _tmdbHeaders)
-          .timeout(const Duration(seconds: 4));
-      if (resp.statusCode == 200) {
-        final data = jsonDecode(resp.body) as Map<String, dynamic>;
-        final results = data['results'] as List?;
-        if (results != null && results.isNotEmpty) {
-          final first = results.first as Map<String, dynamic>;
-          final id = (first['id'] as num?)?.toInt();
-          if (id != null) return (id, defaultType);
-        }
-      }
-
-      // Intento 2: Multi-search
-      final multiUri = Uri.parse(
-        'https://api.themoviedb.org/3/search/multi?query=${Uri.encodeComponent(query)}',
-      );
-      final multiResp = await _client
-          .get(multiUri, headers: _tmdbHeaders)
-          .timeout(const Duration(seconds: 4));
-      if (multiResp.statusCode == 200) {
-        final data = jsonDecode(multiResp.body) as Map<String, dynamic>;
-        final results = data['results'] as List?;
-        if (results != null && results.isNotEmpty) {
-          for (final res in results) {
-            if (res is Map<String, dynamic>) {
-              final type = res['media_type']?.toString();
-              if (type == 'tv' || type == 'movie') {
-                final id = (res['id'] as num?)?.toInt();
-                if (id != null) return (id, type!);
-              }
-            }
-          }
-        }
-      }
-    } catch (_) {}
-
-    return (null, defaultType);
-  }
-
-  /// Consulta logos PNG transparentes en TMDB.
-  Future<String?> _fetchTmdbLogo(int tmdbId, String mediaType) async {
-    try {
-      final uri = Uri.parse(
-        'https://api.themoviedb.org/3/$mediaType/$tmdbId/images?include_image_language=es,en,ja,null',
-      );
-      final resp = await _client
-          .get(uri, headers: _tmdbHeaders)
-          .timeout(const Duration(seconds: 4));
-      if (resp.statusCode != 200) return null;
-
-      final data = jsonDecode(resp.body) as Map<String, dynamic>;
-      final rawLogos = (data['logos'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-      if (rawLogos.isEmpty) return null;
-
-      // Filtrar sólo archivos PNG (descartar SVG que requieren plugins extra)
-      final pngLogos = rawLogos.where((l) {
-        final path = (l['file_path'] ?? '').toString().toLowerCase();
-        return path.endsWith('.png');
-      }).toList();
-
-      if (pngLogos.isEmpty) return null;
-
-      // Puntuar logos para elegir el más nítido, horizontal y en idioma preferido
-      pngLogos.sort((a, b) => _scoreTmdbLogo(b).compareTo(_scoreTmdbLogo(a)));
-
-      final best = pngLogos.first;
-      final filePath = best['file_path']?.toString();
-      if (filePath == null || filePath.isEmpty) return null;
-
-      return 'https://image.tmdb.org/t/p/w500$filePath';
-    } catch (_) {
-      return null;
-    }
-  }
-
-  int _scoreTmdbLogo(Map<String, dynamic> logo) {
-    var score = 0;
-    final lang = (logo['iso_639_1'] ?? '').toString();
-
-    // Preferencia de idioma: español o inglés son los más estilizados y limpios
-    if (lang == 'es') {
-      score += 40;
-    } else if (lang == 'en') {
-      score += 35;
-    } else if (lang == 'ja') {
-      score += 20;
-    } else {
-      score += 10;
-    }
-
-    // Aspect ratio: logotipos horizontales (banner de título) se integran mejor
-    final aspect = (logo['aspect_ratio'] as num?)?.toDouble() ?? 1.0;
-    if (aspect >= 2.0) {
-      score += 25;
-    } else if (aspect >= 1.3) {
-      score += 15;
-    }
-
-    // Votos de la comunidad TMDB
-    final votes = (logo['vote_count'] as num?)?.toInt() ?? 0;
-    score += votes.clamp(0, 15);
-
-    return score;
-  }
-
-  /// Consulta logos PNG transparentes en Fanart.tv como respaldo.
-  Future<String?> _fetchFanartLogo(int tmdbId, String mediaType) async {
-    try {
-      final isSeries = mediaType == 'tv';
-      final uri = Uri.parse(
-        isSeries
-            ? 'http://webservice.fanart.tv/v3/tv/$tmdbId?api_key=$fanartApiKey'
-            : 'http://webservice.fanart.tv/v3/movies/$tmdbId?api_key=$fanartApiKey',
-      );
-      final resp = await _client.get(uri).timeout(const Duration(seconds: 4));
-      if (resp.statusCode != 200) return null;
-
-      final data = jsonDecode(resp.body) as Map<String, dynamic>;
-      final logoList = (data[isSeries ? 'hdtvlogo' : 'hdmovielogo'] as List?) ??
-          (data[isSeries ? 'clearlogo' : 'movielogo'] as List?);
-
-      if (logoList == null || logoList.isEmpty) return null;
-
-      // Buscar versión 'es' o 'en'
-      for (final item in logoList) {
-        if (item is Map) {
-          final lang = item['lang']?.toString();
-          if (lang == 'es' || lang == 'en') {
-            final u = item['url']?.toString();
-            if (u != null && u.isNotEmpty) return u;
-          }
-        }
-      }
-
-      // Fallback al primer logo disponible
-      final first = logoList.first;
-      if (first is Map) {
-        final u = first['url']?.toString();
-        if (u != null && u.isNotEmpty) return u;
-      }
-    } catch (_) {}
-
-    return null;
   }
 }

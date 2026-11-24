@@ -85,7 +85,7 @@ class _InutilTvAppState extends State<InutilTvApp> {
         final accent = _settings.accent;
         final surface = _settings.surfaceMode;
         return MaterialApp(
-          title: 'InútilTV',
+          title: 'Inutix TV',
           debugShowCheckedModeBanner: false,
           // Mapeo global del botón OK (`select`) y botón A de controles Android TV
           // para que cualquier botón/diálogo Material responda al control remoto.
@@ -141,7 +141,7 @@ class _MainScaffoldState extends State<MainScaffold> {
   );
 
   static const _tabs = [
-    (label: 'Inicio', title: 'InútilTV', glyph: InutilGlyph.home),
+    (label: 'Inicio', title: 'Inutix TV', glyph: InutilGlyph.home),
     (label: 'En Vivo', title: 'TV en Vivo', glyph: InutilGlyph.liveTv),
     (label: 'Cine', title: 'Películas', glyph: InutilGlyph.movies),
     (label: 'Series', title: 'Series', glyph: InutilGlyph.series),
@@ -628,7 +628,7 @@ class _MainScaffoldState extends State<MainScaffold> {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Marca InútilTV
+                // Marca Inutix TV
                 Padding(
                   padding: const EdgeInsets.fromLTRB(4, 2, 4, 18),
                   child: Row(
@@ -636,10 +636,21 @@ class _MainScaffoldState extends State<MainScaffold> {
                         ? MainAxisAlignment.start
                         : MainAxisAlignment.center,
                     children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.asset(
+                          'assets/logo.png',
+                          width: showLabels ? 30 : 34,
+                          height: showLabels ? 30 : 34,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                        ),
+                      ),
                       if (showLabels) ...[
+                        const SizedBox(width: 8),
                         Flexible(
                           child: Text(
-                            'Inútil',
+                            'Inutix',
                             maxLines: 1,
                             overflow: TextOverflow.fade,
                             softWrap: false,
@@ -651,26 +662,26 @@ class _MainScaffoldState extends State<MainScaffold> {
                           ),
                         ),
                         const SizedBox(width: 5),
-                      ],
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 7,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: accent,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          'TV',
-                          style: TextStyle(
-                            color: AppColors.onAccentFor(context),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 0.4,
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: accent,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            'TV',
+                            style: TextStyle(
+                              color: AppColors.onAccentFor(context),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.4,
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ),

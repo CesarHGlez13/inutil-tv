@@ -305,7 +305,7 @@ class _InutilUpdateDialogContentState extends State<InutilUpdateDialogContent> {
           setState(() {
             _needsInstallPermission = true;
             _error =
-                'Activa "Instalar aplicaciones desconocidas" para InútilTV y vuelve a pulsar Actualizar.';
+                'Activa "Instalar aplicaciones desconocidas" para Inutix TV y vuelve a pulsar Actualizar.';
           });
         }
         await service.openInstallUnknownAppsSettings();
@@ -450,8 +450,8 @@ class _InutilUpdateDialogContentState extends State<InutilUpdateDialogContent> {
                           children: [
                             Text(
                               hasUpdate
-                                  ? 'InútilTV v${r.latestVersion}'
-                                  : '¡InútilTV está al día!',
+                                  ? 'Inutix TV v${r.latestVersion}'
+                                  : '¡Inutix TV está al día!',
                               style: TextStyle(
                                 color: headingColor,
                                 fontSize: 17.5,
@@ -499,7 +499,7 @@ class _InutilUpdateDialogContentState extends State<InutilUpdateDialogContent> {
                       ),
                       child: Text(
                         'Esta versión quedó obsoleta por decisión del administrador. '
-                        'Actualiza desde aquí para continuar usando InútilTV.',
+                        'Actualiza desde aquí para continuar usando Inutix TV.',
                         style: TextStyle(
                           color: headingColor,
                           fontSize: 12.2,
@@ -824,7 +824,7 @@ Future<void> showInutilAdminPublishUpdateDialog(BuildContext context) async {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Publicar / Forzar OTA (InútilTV)',
+                  'Publicar / Forzar OTA (Inutix TV)',
                   style: TextStyle(
                     color: heading,
                     fontSize: 15.5,

@@ -171,7 +171,7 @@ class InutilTvCloudBackupService extends ChangeNotifier {
       _initialPullCompleted = true;
 
       if (doc == null || doc.isEmpty) {
-        return 'Aún no hay respaldo de InútilTV en la nube para esta cuenta.';
+        return 'Aún no hay respaldo de Inutix TV en la nube para esta cuenta.';
       }
 
       var restoredCount = 0;

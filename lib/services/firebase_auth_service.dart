@@ -298,7 +298,7 @@ class InutilAuthService extends ChangeNotifier {
   int get inactivityPolicyDays => _inactivityPolicyDays;
 
   String get deviceId => _deviceId ?? 'unknown_device';
-  String get deviceName => _deviceName ?? 'InútilTV Client';
+  String get deviceName => _deviceName ?? 'Inutix TV Client';
   String get devicePlatform => _devicePlatform ?? 'generic';
 
   /// Control estricto de acceso (Gatekeeper):
@@ -315,7 +315,7 @@ class InutilAuthService extends ChangeNotifier {
   /// Explicación legible del estado de bloqueo.
   String get blockedReason {
     final user = _currentUser;
-    if (user == null) return 'Inicia sesión para ver InútilTV.';
+    if (user == null) return 'Inicia sesión para ver Inutix TV.';
     if (_kickedOutReason.isNotEmpty) return _kickedOutReason;
     if (!user.isAdmin && user.status == 'pending') {
       return 'Tu cuenta está registrada pero pendiente de aprobación. '
@@ -329,9 +329,9 @@ class InutilAuthService extends ChangeNotifier {
     }
     if (!_tvSessionOk(user)) {
       return _isSmartTvSlot
-          ? 'Otro dispositivo (Smart TV) tomó el control de esta cuenta en InútilTV. '
+          ? 'Otro dispositivo (Smart TV) tomó el control de esta cuenta en Inutix TV. '
               'Tu cuenta incluye 1 celular y 1 Smart TV a la vez.'
-          : 'Otro dispositivo (celular) tomó el control de esta cuenta en InútilTV. '
+          : 'Otro dispositivo (celular) tomó el control de esta cuenta en Inutix TV. '
               'Tu cuenta incluye 1 celular y 1 Smart TV a la vez.';
     }
     if (!_licenseFresh()) {
@@ -1133,7 +1133,7 @@ class InutilAuthService extends ChangeNotifier {
       final updated = _currentUser!;
       if (!updated.isAdmin && !_tvSessionOk(updated)) {
         _kickedOutReason =
-            'Otro dispositivo inició sesión con esta cuenta en InútilTV. '
+            'Otro dispositivo inició sesión con esta cuenta en Inutix TV. '
             'Esta sesión quedó bloqueada.';
         notifyListeners();
         return;

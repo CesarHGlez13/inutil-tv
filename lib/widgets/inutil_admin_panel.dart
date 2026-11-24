@@ -329,7 +329,7 @@ class _InutilAdminPanelState extends State<InutilAdminPanel> {
                 ),
                 const SizedBox(height: 16),
                 const Text(
-                  'Vigencia Inicial (válida en InútilTV e Inútil Music):',
+                  'Vigencia Inicial (válida en Inutix TV e Inútil Music):',
                   style: TextStyle(
                     color: Colors.white70,
                     fontSize: 12.5,
@@ -1032,7 +1032,7 @@ class _InutilAdminPanelState extends State<InutilAdminPanel> {
               if (!user.isAdmin && user.hasAnyBoundDevice)
                 IconButton(
                   visualDensity: VisualDensity.compact,
-                  tooltip: 'Liberar dispositivos (InútilTV y Music)',
+                  tooltip: 'Liberar dispositivos (Inutix TV y Music)',
                   icon: const Icon(
                     Icons.devices_other_rounded,
                     color: _brandCyan,

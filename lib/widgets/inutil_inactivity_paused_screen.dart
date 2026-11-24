@@ -200,7 +200,7 @@ class _InutilInactivityPausedScreenState
                       Text(
                         'No detectamos actividad durante ${widget.inactiveDays} '
                         'días (el límite es ${widget.policyDays}). Para mantener '
-                        'los cupos gratuitos disponibles para quienes ven InútilTV '
+                        'los cupos gratuitos disponibles para quienes ven Inutix TV '
                         'a diario, tu acceso se pausó automáticamente.',
                         textAlign: TextAlign.center,
                         style: TextStyle(

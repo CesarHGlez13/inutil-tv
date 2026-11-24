@@ -1,4 +1,11 @@
-# Changelog — InútilTV
+# Changelog — Inutix TV
+
+## 3.3.34 — 2026-11-24
+- **Nueva Identidad Oficial — Inutix TV y Cero Secretos de Terceros en la App:**
+  - **Rebrand Completo a Inutix TV:** Nuevo nombre oficial `Inutix TV` en launcher Android, Android TV, barra lateral TV, pantalla de acceso, Acerca de, OTA y textos de interfaz, conservando compatibilidad total de actualización sobre instalaciones previas (`dev.cesar.tubotv`, sesión, Mi Lista, historial y descargas intactos).
+  - **Nuevo Logo e Iconografía Profesional IX:** Nuevo emblema minimalista `IX` con marco de TV en vidrio cian-cobalto y triángulo de reproducción ámbar en `assets/logo.png`, todos los íconos de launcher (`mipmap-mdpi` a `mipmap-xxxhdpi`) y nuevos banners panorámicos para Android TV (`drawable/tv_banner.png` y `drawable-xhdpi/tv_banner.png`).
+  - **Cero Llaves de API de Terceros en el Código ni en el APK (`TitleLogoService`):** Eliminadas definitivamente `tmdbApiKey`, `tmdbReadAccessToken` y `fanartApiKey` del código fuente Dart y de los binarios; el 100% de la resolución de logos opera vía `https://meta.inutix.com/logo` con secretos cifrados exclusivamente en Cloudflare Workers.
+  - **Hardening de `/healthz` y Scripts Públicos:** `meta.inutix.com`, `ota.inutix.com` y `backup.inutix.com` devuelven únicamente `{"ok": true}` sin autenticación (telemetría completa restringida a `X-Admin-Secret`), y se eliminaron rutas locales y direcciones LAN hardcodeadas en `tool/firebase_admin.py`.
 
 ## 3.3.33 — 2026-11-24
 - **Blindaje Total sobre Cloudflare Edge (`inutix.com`) y Configuración Remota Dinámica de Proveedores:**

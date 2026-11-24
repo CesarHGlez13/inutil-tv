@@ -229,7 +229,7 @@ class _TvRemoteSheetState extends State<TvRemoteSheet>
       } else if (attempts >= 15) {
         t.cancel();
         setState(() => _connecting = false);
-        _showFeedback('Abre InútilTV en tu TV para comenzar');
+        _showFeedback('Abre Inutix TV en tu TV para comenzar');
       }
     });
   }
@@ -500,7 +500,7 @@ class _TvRemoteSheetState extends State<TvRemoteSheet>
                         ? (TvRemoteService.instance.targetTvLanHost != null
                             ? 'Conectada · Red Local Ultra-Rápida (<5ms)'
                             : 'Conectada · Lista para recibir contenido')
-                        : 'Desconectada · Abre InútilTV en tu TV'),
+                        : 'Desconectada · Abre Inutix TV en tu TV'),
                 style: TextStyle(
                   color: online ? const Color(0xFF18C75A) : sub,
                   fontSize: 12,
@@ -1215,7 +1215,7 @@ class _TvRemoteSheetState extends State<TvRemoteSheet>
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'Asegúrate de que tu Smart TV esté encendida con InútilTV abierta en la misma red WiFi.\n\nTu cuenta gratuita incluye 1 celular + 1 Smart TV al mismo tiempo.',
+                  'Asegúrate de que tu Smart TV esté encendida con Inutix TV abierta en la misma red WiFi.\n\nTu cuenta gratuita incluye 1 celular + 1 Smart TV al mismo tiempo.',
                   style: TextStyle(color: sub, fontSize: 12.5, height: 1.4),
                 ),
                 const SizedBox(height: 12),
