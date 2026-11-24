@@ -1,5 +1,15 @@
 # Changelog — InútilTV
 
+## 3.3.23 — 2026-11-23
+- **Experiencia Smart TV / Android TV estilo Crunchyroll 2026 (10-foot UI cinemática):**
+  - **Apertura Full Screen Inmersiva en TV:** Eliminado el cuadro de diálogo flotante acotado a 880 px con bordes negros. En Android TV la ficha de detalle se abre en pantalla completa panorámica (16:9 / 1080p y 4K) mediante `PageRouteBuilder` con transición cinematográfica de fade suave.
+  - **Lienzo Panorámico con Degradados de Alto Contraste:** Arte de fondo de alta resolución a pantalla completa a la derecha (`cacheWidth: 1280`) fundido mediante doble viñeta: un gradiente horizontal de izquierda a derecha (negro sólido en el primer 35% para máxima legibilidad de texto, fundiéndose al 80% hacia la ilustración) y un gradiente inferior que enlaza con los carruseles.
+  - **Tipografía y Metadatos 10-foot:** Título a 42 px en negrita con sombra doble, badge naranja característico Crunchyroll (`SUB | DUB` / `SERIE`), calificación con estrellas, año, duración/episodios y sinopsis legible desde el sofá a 3 metros.
+  - **Botones de Acción con Foco D-Pad Prioritario:** Botón principal de reproducción en color naranja Crunchyroll (`#FF640A`) con `autofocus: true`, micro-escala de foco (1.05) y brillo exterior, conmutando automáticamente entre `Reproducir ahora`, `Continuar T1 · E...` y `Comenzar a ver E1`. Botón secundario para `Mi Lista` con detección de estado.
+  - **Carrusel Horizontal de Episodios 16:9 en TV:** En lugar de listas verticales interminables, los episodios en TV se presentan en un carrusel horizontal fluido con tarjetas 16:9 (`AspectRatio: 16/9`), carátula del episodio, badge de duración, indicador de "Visto" o barra de progreso inferior y foco D-pad con halo naranja.
+  - **Carrusel de Títulos Similares en TV:** Fila horizontal de pósters recomendados navegable por control remoto con selección directa.
+  - **100% de Compatibilidad Móvil Preservada:** El comportamiento móvil mantiene intacto el Collapsing Toolbar con SliverAppBar pinned, parallax, docking title a la izquierda y barra inferior flotante persistente.
+
 ## 3.3.22 — 2026-11-23
 - **Experiencia Completa Ficha Detalle estilo Crunchyroll 2026 (diseño exacto pedido por Cesar):**
   - **Apertura Full Screen sin marcos:** reemplazado el `DraggableScrollableSheet` de 88% por `PageRouteBuilder` de pantalla completa con animación slide-up desde abajo. La imagen de portada entra hasta la parte superior bajo la barra de estado con cero recortes ni tirador gris.

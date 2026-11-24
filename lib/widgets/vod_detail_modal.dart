@@ -52,38 +52,27 @@ class VodDetailModal extends StatefulWidget {
     List<VodItem> recommendations = const [],
     void Function(VodItem)? onSelectSimilar,
   }) {
-    final bg = Theme.of(context).brightness == Brightness.dark
-        ? AppColors.carbonSurface
-        : Colors.white;
     if (TvModeService.of(context)) {
-      showDialog<void>(
-        context: context,
-        builder: (ctx) {
-          final size = MediaQuery.sizeOf(ctx);
-          return Dialog(
-            backgroundColor: bg,
-            insetPadding: const EdgeInsets.symmetric(
-              horizontal: 40,
-              vertical: 24,
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(22),
-              side: BorderSide(color: AppColors.cardBorderFor(ctx)),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: 880,
-                maxHeight: size.height * 0.88,
+      // Smart TV / Android TV: Pantalla completa inmersiva estilo Crunchyroll TV (10-foot UI)
+      Navigator.of(context).push(
+        PageRouteBuilder<void>(
+          fullscreenDialog: true,
+          opaque: true,
+          pageBuilder: (context, animation, secondaryAnimation) => VodDetailModal(
+            item: item,
+            recommendations: recommendations,
+            onSelectSimilar: onSelectSimilar,
+          ),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return FadeTransition(
+              opacity: CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeOutCubic,
               ),
-              child: VodDetailModal(
-                item: item,
-                recommendations: recommendations,
-                onSelectSimilar: onSelectSimilar,
-              ),
-            ),
-          );
-        },
+              child: child,
+            );
+          },
+        ),
       );
       return;
     }
@@ -519,6 +508,30 @@ class _VodDetailModalState extends State<VodDetailModal>
         final movieDl = !item.isSeries ? _vault.findForMovie(item.id) : null;
 
         final isTv = TvModeService.of(context);
+        if (isTv) {
+          return _buildTvLayout(
+            context,
+            item: item,
+            image: image,
+            sheetBg: sheetBg,
+            surface: surface,
+            border: border,
+            headingColor: headingColor,
+            subColor: subColor,
+            accent: accent,
+            onAccent: onAccent,
+            hasRealRating: hasRealRating,
+            inMyList: inMyList,
+            saved: saved,
+            canResume: canResume,
+            movieDl: movieDl,
+            seasons: seasons,
+            seasonEpisodes: seasonEpisodes,
+            totalChunks: totalChunks,
+            safeChunk: safeChunk,
+            visibleEpisodes: visibleEpisodes,
+          );
+        }
 
         return Scaffold(
           backgroundColor: sheetBg,
@@ -738,40 +751,6 @@ class _VodDetailModalState extends State<VodDetailModal>
                           accent,
                         ),
                         const SizedBox(height: 16),
-                        if (isTv) ...[
-                          TvFocusable(
-                            autofocus: true,
-                            onTap: _playMainAction,
-                            borderRadius: BorderRadius.circular(24),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 24, vertical: 12),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFFF640A),
-                                borderRadius: BorderRadius.circular(24),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.play_arrow_rounded,
-                                      color: Colors.white, size: 24),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    canResume
-                                        ? 'Continuar reproducción'
-                                        : 'Reproducir ahora',
-                                    style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w800,
-                                        fontSize: 16),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                        ],
-                        const SizedBox(height: 12),
                         Wrap(
                           spacing: 8,
                           runSpacing: 6,
@@ -1113,6 +1092,850 @@ class _VodDetailModalState extends State<VodDetailModal>
     );
   }
 
+
+  /// Layout cinematográfico inmersivo 10-foot para Smart TV / Android TV
+  /// estilo Crunchyroll 2026: Pantalla completa panorámica, fondo con degradado
+  /// de alto contraste a la izquierda, carrusel horizontal de episodios 16:9 y
+  /// navegación 100% optimizada para control remoto D-pad.
+  Widget _buildTvLayout(
+    BuildContext context, {
+    required VodItem item,
+    required String image,
+    required Color sheetBg,
+    required Color surface,
+    required Color border,
+    required Color headingColor,
+    required Color subColor,
+    required Color accent,
+    required Color onAccent,
+    required bool hasRealRating,
+    required bool inMyList,
+    required WatchProgress? saved,
+    required bool canResume,
+    required OfflineDownloadItem? movieDl,
+    required List<int> seasons,
+    required List<VodEpisode> seasonEpisodes,
+    required int totalChunks,
+    required int safeChunk,
+    required List<VodEpisode> visibleEpisodes,
+  }) {
+    final size = MediaQuery.sizeOf(context);
+    const orangeCta = Color(0xFFFF640A);
+
+    return Scaffold(
+      backgroundColor: sheetBg,
+      body: Stack(
+        children: [
+          // 1. Imagen Backdrop en pantalla completa hacia la derecha
+          Positioned(
+            top: 0,
+            right: 0,
+            bottom: 0,
+            width: size.width * 0.72,
+            child: _revealed(
+              context,
+              image.isNotEmpty
+                  ? FastArtwork(
+                      url: image,
+                      tier: ArtworkTier.backdrop,
+                      cacheWidth: 1280,
+                      fit: BoxFit.cover,
+                      errorWidget: ColoredBox(color: sheetBg),
+                    )
+                  : ColoredBox(color: sheetBg),
+            ),
+          ),
+
+          // 2. Viñeta degradada horizontal (Izquierda a Derecha)
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: [
+                    sheetBg,
+                    sheetBg,
+                    sheetBg.withValues(alpha: 0.96),
+                    sheetBg.withValues(alpha: 0.75),
+                    sheetBg.withValues(alpha: 0.25),
+                    Colors.transparent,
+                  ],
+                  stops: const [0.0, 0.30, 0.45, 0.62, 0.80, 1.0],
+                ),
+              ),
+            ),
+          ),
+
+          // 3. Viñeta degradada inferior (Abajo a Arriba)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 380,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.transparent,
+                    sheetBg.withValues(alpha: 0.65),
+                    sheetBg.withValues(alpha: 0.95),
+                    sheetBg,
+                  ],
+                  stops: const [0.0, 0.40, 0.75, 1.0],
+                ),
+              ),
+            ),
+          ),
+
+          // 4. Viñeta superior para la barra de navegación
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 90,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.65),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // 5. Contenido interactivo desplazable (10-foot UI para Smart TV)
+          Positioned.fill(
+            child: SingleChildScrollView(
+              controller: widget.scrollController,
+              padding: const EdgeInsets.symmetric(horizontal: 52, vertical: 32),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Barra de navegación superior TV
+                  Row(
+                    children: [
+                      TvFocusable(
+                        onTap: () => Navigator.of(context).pop(),
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: Colors.white24),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.arrow_back_rounded,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                'Volver',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Text(
+                        item.isAnime
+                            ? 'ANIME'
+                            : (item.isSeries ? 'SERIE' : 'PELÍCULA'),
+                        style: const TextStyle(
+                          color: orangeCta,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 13,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 28),
+
+                  // Columna izquierda de Hero Info (máximo 60% del ancho)
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: (size.width * 0.60).clamp(480.0, 850.0),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Título principal en estilo display
+                        Text(
+                          item.title,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 42,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.8,
+                            height: 1.15,
+                            shadows: [
+                              Shadow(
+                                blurRadius: 24,
+                                color: Colors.black87,
+                                offset: Offset(0, 3),
+                              ),
+                              Shadow(
+                                blurRadius: 10,
+                                color: Colors.black54,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+
+                        // Badges y metadatos TV
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 8,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: orangeCta,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                item.isAnime
+                                    ? 'SUB | DUB'
+                                    : (item.isSeries ? 'SERIE' : 'HD'),
+                                style: const TextStyle(
+                                  color: Colors.black,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                            if (hasRealRating) ...[
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.star_rounded,
+                                    color: Color(0xFFFFB800),
+                                    size: 22,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '${item.rating} / 10',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                            if (item.year.isNotEmpty)
+                              _tvMetaBadge(item.year),
+                            if (item.duration.isNotEmpty)
+                              _tvMetaBadge(item.duration),
+                            if (item.isSeries && _episodes.isNotEmpty)
+                              _tvMetaBadge('${_episodes.length} episodios'),
+                            if (item.genre.isNotEmpty)
+                              Text(
+                                item.genre.replaceAll(
+                                    RegExp(r'^[🎬📺⚡🔥🎞️✨🧸]+\s*'), ''),
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.72),
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13.5,
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Sinopsis legible para TV
+                        Text(
+                          item.overview.isNotEmpty
+                              ? item.overview
+                              : 'Título disponible en alta definición con cambio automático de servidor en InútilTV.',
+                          maxLines: 4,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.86),
+                            fontSize: 16,
+                            height: 1.5,
+                            shadows: const [
+                              Shadow(
+                                blurRadius: 10,
+                                color: Colors.black87,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+
+                        // Fila de botones de acción TV (Enfocables con control remoto D-pad)
+                        Row(
+                          children: [
+                            // Botón Primario: REPRODUCIR (Autofocus: true)
+                            TvFocusable(
+                              autofocus: true,
+                              onTap: _playMainAction,
+                              borderRadius: BorderRadius.circular(28),
+                              focusScale: 1.05,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 28,
+                                  vertical: 15,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: orangeCta,
+                                  borderRadius: BorderRadius.circular(28),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: orangeCta.withValues(alpha: 0.45),
+                                      blurRadius: 18,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.play_arrow_rounded,
+                                      color: Colors.white,
+                                      size: 28,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      canResume
+                                          ? (item.isSeries
+                                              ? 'Continuar T${saved!.seasonNumber} · E${saved.episodeNumber}'
+                                              : 'Continuar viendo')
+                                          : (item.isSeries
+                                              ? 'Comenzar a ver E1'
+                                              : 'Reproducir ahora'),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w900,
+                                        fontSize: 16.5,
+                                        letterSpacing: 0.3,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+
+                            // Botón Secundario: Mi Lista
+                            TvFocusable(
+                              onTap: () async {
+                                final added = await _myList.toggle(item);
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        added
+                                            ? 'Agregado a Mi Lista'
+                                            : 'Quitado de Mi Lista',
+                                      ),
+                                      duration: const Duration(seconds: 1),
+                                    ),
+                                  );
+                                }
+                              },
+                              borderRadius: BorderRadius.circular(28),
+                              focusScale: 1.05,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 22,
+                                  vertical: 15,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: inMyList
+                                      ? orangeCta.withValues(alpha: 0.25)
+                                      : Colors.white.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(28),
+                                  border: Border.all(
+                                    color: inMyList
+                                        ? orangeCta
+                                        : Colors.white24,
+                                    width: 1.5,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      inMyList
+                                          ? Icons.bookmark_added_rounded
+                                          : Icons.bookmark_add_outlined,
+                                      color: inMyList
+                                          ? orangeCta
+                                          : Colors.white,
+                                      size: 22,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      inMyList ? 'En Mi Lista' : 'Mi Lista',
+                                      style: TextStyle(
+                                        color: inMyList
+                                            ? orangeCta
+                                            : Colors.white,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 15,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Sección de Episodios para TV (Carrusel horizontal 16:9)
+                  if (item.isSeries) ...[
+                    const SizedBox(height: 40),
+                    Row(
+                      children: [
+                        const Text(
+                          'Episodios',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        if (_loadingEpisodes)
+                          const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              color: orangeCta,
+                              strokeWidth: 2,
+                            ),
+                          ),
+                        const Spacer(),
+                        if (seasonEpisodes.isNotEmpty)
+                          TvFocusable(
+                            onTap: () => _showBatchDownloadSheet(
+                              context,
+                              seasonEpisodes,
+                            ),
+                            borderRadius: BorderRadius.circular(16),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: Colors.white12),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.download_rounded,
+                                    color: Colors.white70,
+                                    size: 16,
+                                  ),
+                                  SizedBox(width: 6),
+                                  Text(
+                                    'Descargar Temporada',
+                                    style: TextStyle(
+                                      color: Colors.white70,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+
+                    // Selector de Temporadas horizontal con D-pad
+                    if (seasons.length > 1) ...[
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        height: 42,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: seasons.length,
+                          itemBuilder: (_, idx) {
+                            final s = seasons[idx];
+                            final active = s == _selectedSeason;
+                            final label = _item.seasonLabelFor(s) ?? 'Temporada $s';
+                            return TvFocusable(
+                              onTap: () => setState(() {
+                                _selectedSeason = s;
+                                _episodeChunkIndex = 0;
+                              }),
+                              borderRadius: BorderRadius.circular(20),
+                              margin: const EdgeInsets.only(right: 10),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 180),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 18,
+                                ),
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: active
+                                      ? orangeCta
+                                      : Colors.white.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: active
+                                        ? orangeCta
+                                        : Colors.white24,
+                                    width: 1.2,
+                                  ),
+                                ),
+                                child: Text(
+                                  label,
+                                  style: TextStyle(
+                                    color: active ? Colors.black : Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+
+                    // Paginación si hay más de 50 episodios
+                    if (totalChunks > 1) ...[
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        height: 36,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: totalChunks,
+                          itemBuilder: (_, idx) {
+                            final start = idx * _pageChunk + 1;
+                            final end = ((idx + 1) * _pageChunk)
+                                .clamp(1, seasonEpisodes.length);
+                            final active = idx == safeChunk;
+                            return TvFocusable(
+                              onTap: () =>
+                                  setState(() => _episodeChunkIndex = idx),
+                              borderRadius: BorderRadius.circular(18),
+                              margin: const EdgeInsets.only(right: 8),
+                              child: Container(
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 14),
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: active
+                                      ? orangeCta
+                                      : Colors.white.withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(18),
+                                  border: Border.all(
+                                    color: active
+                                        ? orangeCta
+                                        : Colors.white12,
+                                  ),
+                                ),
+                                child: Text(
+                                  'Ep. $start–$end',
+                                  style: TextStyle(
+                                    color: active
+                                        ? Colors.black
+                                        : Colors.white70,
+                                    fontSize: 12,
+                                    fontWeight: active
+                                        ? FontWeight.w800
+                                        : FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+
+                    // Carrusel de Episodios horizontal 16:9
+                    if (visibleEpisodes.isEmpty && !_loadingEpisodes)
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.06),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: Colors.white12),
+                        ),
+                        child: const Text(
+                          'Pulsa "Reproducir ahora" arriba para iniciar desde el Episodio 1.',
+                          style: TextStyle(color: Colors.white70, fontSize: 14),
+                        ),
+                      )
+                    else
+                      SizedBox(
+                        height: 205,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: visibleEpisodes.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(width: 16),
+                          itemBuilder: (context, idx) {
+                            final ep = visibleEpisodes[idx];
+                            return _buildTvEpisodeCard(
+                              context,
+                              ep,
+                              _episodes.indexOf(ep),
+                              saved,
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+
+                  // Sección de Títulos Similares para TV
+                  if (widget.recommendations.isNotEmpty) ...[
+                    const SizedBox(height: 40),
+                    const Text(
+                      'Títulos Similares',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      height: 240,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: widget.recommendations.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 16),
+                        itemBuilder: (_, idx) {
+                          final sim = widget.recommendations[idx];
+                          return PosterCard(
+                            item: sim,
+                            width: 130,
+                            height: 195,
+                            onTap: () {
+                              Navigator.of(context).pop();
+                              widget.onSelectSimilar?.call(sim);
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 56),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tvMetaBadge(String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.white24, width: 0.8),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTvEpisodeCard(
+    BuildContext context,
+    VodEpisode ep,
+    int globalIndex,
+    WatchProgress? saved,
+  ) {
+    final watched = _history.isEpisodeWatched(
+      _item.id,
+      ep.seasonNumber,
+      ep.episodeNumber,
+    );
+    final isCurrentEpisode = saved != null &&
+        saved.seasonNumber == ep.seasonNumber &&
+        saved.episodeNumber == ep.episodeNumber;
+    final progress = (isCurrentEpisode && saved.durationSec > 0)
+        ? (saved.positionSec / saved.durationSec).clamp(0.0, 1.0)
+        : (watched ? 1.0 : 0.0);
+
+    const orangeCta = Color(0xFFFF640A);
+
+    return SizedBox(
+      width: 250,
+      child: TvFocusable(
+        borderRadius: BorderRadius.circular(14),
+        focusScale: 1.06,
+        showFocusBorder: true,
+        focusColor: orangeCta,
+        onTap: () => _openPlayer(
+          episode: ep,
+          episodeList: _episodes,
+          initialEpisodeIndex: globalIndex >= 0 ? globalIndex : 0,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Miniatura 16:9
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Stack(
+                children: [
+                  AspectRatio(
+                    aspectRatio: 16 / 9,
+                    child: (ep.thumbnail.isNotEmpty)
+                        ? FastArtwork(
+                            url: ep.thumbnail,
+                            tier: ArtworkTier.thumbnail,
+                            cacheWidth: 400,
+                            fit: BoxFit.cover,
+                            errorWidget: ColoredBox(
+                              color: Colors.white.withValues(alpha: 0.08),
+                            ),
+                          )
+                        : (_item.backdrop.isNotEmpty || _item.poster.isNotEmpty)
+                            ? FastArtwork(
+                                url: _item.backdrop.isNotEmpty
+                                    ? _item.backdrop
+                                    : _item.poster,
+                                tier: ArtworkTier.thumbnail,
+                                cacheWidth: 400,
+                                fit: BoxFit.cover,
+                                errorWidget: ColoredBox(
+                                  color: Colors.white.withValues(alpha: 0.08),
+                                ),
+                              )
+                            : ColoredBox(
+                                color: Colors.white.withValues(alpha: 0.08),
+                              ),
+                  ),
+                  Positioned.fill(
+                    child: Container(
+                      color: Colors.black.withValues(alpha: 0.35),
+                    ),
+                  ),
+                  Center(
+                    child: Icon(
+                      watched
+                          ? Icons.check_circle_rounded
+                          : Icons.play_circle_fill_rounded,
+                      color: watched
+                          ? const Color(0xFF18C75A)
+                          : Colors.white,
+                      size: 32,
+                    ),
+                  ),
+                  if (progress > 0.05)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      height: 4,
+                      child: Container(
+                        color: Colors.black54,
+                        child: FractionallySizedBox(
+                          alignment: Alignment.centerLeft,
+                          widthFactor: progress,
+                          child: Container(
+                            color: watched
+                                ? const Color(0xFF18C75A)
+                                : orangeCta,
+                          ),
+                        ),
+                      ),
+                    ),
+                  Positioned(
+                    right: 6,
+                    bottom: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black87,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        ep.duration.isNotEmpty ? ep.duration : 'HD',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Título de capítulo
+            Text(
+              'E${ep.episodeNumber} · ${ep.title}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: 13.5,
+              ),
+            ),
+            if (watched)
+              const Text(
+                'Visto',
+                style: TextStyle(
+                  color: Color(0xFF18C75A),
+                  fontWeight: FontWeight.w700,
+                  fontSize: 11,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _buildCrunchyrollFloatingBar(
     BuildContext context,
