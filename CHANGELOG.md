@@ -1,5 +1,9 @@
 # Changelog — Inutix TV
 
+## 3.3.43 — 2026-11-25
+- **Anime completo en redes de empresa, hoteles y aeropuertos:** La app ya no se detiene antes de tiempo al reproducir un episodio: usa primero la dirección que sí le responde y deja para después la que no, así el video arranca sin que configures nada.
+- **La lista y la ficha siguen funcionando igual:** Lo que ya venía bien no cambia, y en tu red de casa todo va por el camino de siempre.
+
 ## 3.3.42 — 2026-11-25
 - **Anime también funciona en redes de empresa:** Si tu red no deja entrar a la lista de anime, la app lo reconoce y cambia sola al camino alterno para cargar la lista, la ficha, los episodios y el video. No tienes que configurar nada.
 - **Deja de insistir en lo que no responde:** Cuando una dirección no contesta, la app ya no la vuelve a consultar en cada pantalla durante la sesión, así la interfaz responde rápido.

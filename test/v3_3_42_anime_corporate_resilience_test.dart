@@ -1,15 +1,20 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:tubotv/constants/app_info.dart';
+import 'package:tubotv/models/models.dart';
 import 'package:tubotv/services/anime_edge_route.dart';
+import 'package:tubotv/services/cuevana_poseidon_service.dart';
 import 'package:tubotv/services/jkanime_service.dart';
 import 'package:tubotv/services/network_config_service.dart';
 import 'package:tubotv/services/remote_providers_config.dart';
+import 'package:tubotv/services/serieskao_service.dart';
 import 'package:tubotv/services/tioanime_service.dart';
 import 'package:tubotv/services/vod_catalog_service.dart';
 
@@ -142,6 +147,65 @@ void main() {
           'https://meta.inutix.com/ak/yourupload/embed/xyz');
     });
 
+    test('el borde no sirve todo: lo que responde directo se deja directo', () {
+      final route = AnimeEdgeRoute.instance;
+
+      // Medido desde la red de la empresa el 2026-11-25, con las cabeceras de
+      // la app: la página de servidores de SeriesKao (/vidurl/...) responde
+      // directo 200, pero el borde la devuelve 444 (la verificación automática
+      // no deja pasar las IPs de datacenter en esa ruta). Si la app probara el
+      // borde primero, la cadena se rendría ahí sin probar la ruta que sí
+      // funciona — eso era exactamente el "ningún servidor respondió".
+      expect(route.routeUri(
+          Uri.parse('https://serieskao.top/vidurl/tt0388629-1x01/')).toString(),
+          'https://serieskao.top/vidurl/tt0388629-1x01/');
+
+      NetworkConfigService.instance.setSystemProxyForTest('proxy.empresa.local:8080');
+
+      // En la empresa se deja igual: la red propia lo alcanza, el borde no.
+      expect(route.routeUri(
+          Uri.parse('https://serieskao.top/vidurl/tt0388629-1x01/')).toString(),
+          'https://serieskao.top/vidurl/tt0388629-1x01/');
+
+      // Lo que el borde sí sirve medido (200 directo y 200 por el borde) sigue
+      // dando la vuelta en la empresa: la decisión es por tramo, no global.
+      expect(route.routeUri(
+          Uri.parse('https://serieskao.top/api/episodio/anime/one-piece/1/1')).toString(),
+          'https://meta.inutix.com/ak/kao/api/episodio/anime/one-piece/1/1');
+      expect(route.routeUri(
+          Uri.parse('https://www.yourupload.com/embed/D1OgmRtniGT7')).toString(),
+          'https://meta.inutix.com/ak/yourupload/embed/D1OgmRtniGT7');
+
+      // Los espejos de VidHide y StreamWish medidos desde la empresa: todos
+      // responden directo (200), y el borde no los sirve porque no están en su
+      // lista. La ruta directa es la correcta aquí; dar la vuelta solo costaría
+      // un viaje perdido.
+      expect(route.routeUri(
+          Uri.parse('https://swhoi.com/e/ap4xru4g830l')).toString(),
+          'https://swhoi.com/e/ap4xru4g830l');
+      expect(route.routeUri(
+          Uri.parse('https://morencius.com/v/oovp9w2deyvt')).toString(),
+          'https://morencius.com/v/oovp9w2deyvt');
+    });
+
+    test('el salto de archivo en puerto no estándar no da la vuelta', () {
+      final route = AnimeEdgeRoute.instance;
+
+      // Medido el 2026-11-25: `vidcache.net` solo escucha en 8161/8166 (el
+      // resto de puertos, incluidos los que Workers permite, no responden), y
+      // por dar ahí la vuelta el borde contesta 500. Así que el archivo se
+      // deja directo: en casa la red propia sí lo alcanza, y en la empresa no
+      // hay forma de servirlo por el borde, toca cambiar de servidor.
+      expect(
+          route.routeUri(Uri.parse('https://vidcache.net:8161/a202611252G88KYE1rlj/video.mp4')).toString(),
+          'https://vidcache.net:8161/a202611252G88KYE1rlj/video.mp4');
+
+      NetworkConfigService.instance.setSystemProxyForTest('proxy.empresa.local:8080');
+      expect(
+          route.routeUri(Uri.parse('https://vidcache.net:8161/a202611252G88KYE1rlj/video.mp4')).toString(),
+          'https://vidcache.net:8161/a202611252G88KYE1rlj/video.mp4');
+    });
+
     test('la memoria de red decide la ruta incluso sin proxy', () {
       final route = AnimeEdgeRoute.instance;
 
@@ -207,7 +271,121 @@ void main() {
     });
   });
 
-  group('v3.3.42 — Changelog y versión sincronizados', () {
+  group('cadena de video de anime desde la red de la empresa', () {
+    final live = Platform.environment.containsKey('INUTILTV_REAL_NET');
+
+    // En la empresa el mecanismo es doble y hay que ejercitar los dos: la
+    // memoria de ruta manda el frente de anime por el borde propio, y el motor
+    // de red enruta TODO por el proxy de la red. Un nombre inventado
+    // ('proxy.empresa.local') no basta: la primera conexión real se cayó en la
+    // resolución DNS, así que el proxy de juguete aquí es un CONNECT de verdad
+    // en el bucle interno (el mismo patrón del test vivo v3.2.5).
+
+    test('la ruta de espejos va directa a la fuente, no da la vuelta',
+        () async {
+      final proxy = await _ConnectProxy.start();
+      await _liveSetup(proxy);
+      final route = AnimeEdgeRoute.instance;
+
+      // Medido desde la oficina el 2026-11-25: los espejos de VidHide y
+      // StreamWish responden directo (200, todos detrás de la misma verificación
+      // automática), y el borde no los sirve porque no están en su lista. La
+      // ruta directa es la correcta aquí; dar la vuelta costaría solo un viaje
+      // perdido.
+      expect(route.routeUri(Uri.parse('https://swhoi.com/e/ap4xru4g830l')).toString(),
+          'https://swhoi.com/e/ap4xru4g830l');
+      expect(route.routeUri(Uri.parse('https://morencius.com/v/oovp9w2deyvt')).toString(),
+          'https://morencius.com/v/oovp9w2deyvt');
+
+      // Lo que sí está en la lista del borde toma el relevo en la empresa.
+      expect(route.routeUri(Uri.parse('https://www.yourupload.com/embed/xyz')).toString(),
+          'https://meta.inutix.com/ak/yourupload/embed/xyz');
+
+      // Y la prueba de que ambos caminos se usan de verdad, con sockets reales:
+      // la petición midió por dónde salió. Espejo = ruta directa a la fuente;
+      // lo whitelisted = borde asistido. Los dos viajan por el túnel del proxy.
+      final resEspejo = await http.get(Uri.parse('https://swhoi.com/e/ap4xru4g830l'));
+      expect(resEspejo.statusCode, 200);
+      final resBorde = await http.get(
+          Uri.parse('https://meta.inutix.com/ak/kao/api/episodio/anime/one-piece/1/1'));
+      expect(resBorde.statusCode, 200);
+      expect(jsonDecode(resBorde.body)['success'], isTrue);
+      expect(proxy.tunnels, contains('meta.inutix.com:443'),
+          reason: 'el borde sale por el túnel del proxy de la red');
+      expect(proxy.tunnels, contains('swhoi.com:443'),
+          reason: 'la fuente directa también viaja por el túnel cuando el proxy está puesto');
+      await _liveTeardown(proxy);
+    }, skip: live ? false : 'requiere INUTILTV_REAL_NET=1', timeout: const Timeout(Duration(seconds: 60)));
+
+    test('la cadena completa de TioAnime resuelve un episodio jugable',
+        () async {
+      final proxy = await _ConnectProxy.start();
+      await _liveSetup(proxy);
+      TioAnimeService.resetForTest();
+
+      final hits = await TioAnimeService().search('naruto');
+      expect(hits, isNotEmpty,
+          reason: 'la búsqueda tiene que responder desde la empresa');
+      final eps = await TioAnimeService().fetchEpisodes('naruto');
+      expect(eps, isNotEmpty);
+      final sources = await TioAnimeService()
+          .resolveEpisodeFallback('naruto', eps.first.episodeNumber);
+      // ignore: avoid_print
+      print('TioAnime naruto ep ${eps.first.episodeNumber}: '
+          '${sources.length} fuentes, primera=${sources.isNotEmpty ? sources.first.url : "-"}');
+      expect(sources, isNotEmpty,
+          reason: 'el episodio tiene que quedar jugable, no en '
+              '"ningún servidor respondió"');
+      expect(sources.first.url, startsWith('http'));
+      // Con el proxy de la red puesto, TODO sale por su túnel (ver
+      // `resolveProxyDirectiveForUri`): el archivo de vidcache, que no está en
+      // la lista del borde, viaja por él igual que lo whitelisted. La
+      // comprobación de que la cadena pasó por el borde está en el test de
+      // espejos, que abre su propia conexión (la conexión al borde se hereda
+      // de los tests anteriores por keep-alive y ahí no deja túnel nuevo).
+      expect(proxy.tunnels, contains('vidcache.net:8161'),
+          reason: 'el archivo del proveedor sale por el túnel del proxy');
+      await _liveTeardown(proxy);
+    }, skip: live ? false : 'requiere INUTILTV_REAL_NET=1', timeout: const Timeout(Duration(seconds: 60)));
+
+    test('la cadena completa de SeriesKao resuelve un episodio jugable',
+        () async {
+      final proxy = await _ConnectProxy.start();
+      await _liveSetup(proxy);
+      expect(AnimeEdgeRoute.instance.routeUri(Uri.parse('https://serieskao.top/anime/one-piece')).toString(),
+          startsWith('https://meta.inutix.com/ak/kao/'),
+          reason: 'en la empresa el catálogo sale por el borde');
+
+      final hits = await SeriesKaoService().searchAnimes('one piece');
+      expect(hits, isNotEmpty);
+      final item = hits.firstWhere((i) => i.slug == 'one-piece',
+          orElse: () => hits.first);
+      final detail = await SeriesKaoService().fetchDetail(item);
+      final target = detail ?? item;
+      final eps = await SeriesKaoService().fetchSeriesEpisodes(target);
+      expect(eps, isNotEmpty);
+      final sources = await SeriesKaoService()
+          .resolveEpisodeSources(target, eps.first);
+      // ignore: avoid_print
+      print('SeriesKao one-piece ep ${eps.first.episodeNumber}: '
+          '${sources.length} fuentes, primera=${sources.isNotEmpty ? sources.first.url : "-"} '
+          'servidor=${sources.isNotEmpty ? sources.first.server : "-"}');
+      expect(sources, isNotEmpty,
+          reason: 'mismo estándar que el test del catálogo bloqueado: el '
+              'episodio tiene que quedar jugable');
+      expect(sources.first.url, startsWith('https://'));
+      // El espejo por el que salió la fuente (medido: swhoi, StreamWish) viaja
+      // por el túnel del proxy de la red, que es el mecanismo corporativo; la
+      // página vidurl se dejó directa por decisión propia (ver el test del
+      // borde que no sirve todo) y la conexión al borde se heredó por
+      // keep-alive, así que el túnel del borde se comprueba en el test de espejos.
+      expect(proxy.tunnels, contains('swhoi.com:443'),
+          reason: 'la fuente por la que resolvió la cadena sale por el túnel del proxy');
+      await _liveTeardown(proxy);
+    }, skip: live ? false : 'requiere INUTILTV_REAL_NET=1', timeout: const Timeout(Duration(seconds: 60)));
+  });
+
+  group('v3.3.43 — Changelog y versión sincronizados', () {
     const forbiddenTerms = [
       'pelisflix',
       'jkanime',
@@ -240,17 +418,17 @@ void main() {
           RegExp(r'^version:\s*(\d+\.\d+\.\d+)\+(\d+)', multiLine: true)
               .firstMatch(pubspec);
       expect(match, isNotNull);
-      expect(match!.group(1), '3.3.42');
-      expect(match.group(2), '91');
-      expect(AppInfo.appVersion, '3.3.42');
-      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.42'));
+      expect(match!.group(1), '3.3.43');
+      expect(match.group(2), '92');
+      expect(AppInfo.appVersion, '3.3.43');
+      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.43'));
     });
 
-    test('la nota de 3.3.42 no expone proveedores ni detalles internos', () {
+    test('la nota de 3.3.43 no expone proveedores ni detalles internos', () {
       final full = File('CHANGELOG.md').readAsStringSync();
-      final start = full.indexOf('## 3.3.42');
+      final start = full.indexOf('## 3.3.43');
       expect(start, greaterThan(0));
-      final end = full.indexOf('## 3.3.41', start);
+      final end = full.indexOf('## 3.3.42', start);
       expect(end, greaterThan(start));
       final entry = full.substring(start, end).toLowerCase();
 
@@ -351,4 +529,117 @@ class _ToyServer {
   Future<void> stop() async {
     await _server.close(force: true);
   }
+}
+
+/// Arranque del stack de red real para los tests en vivo (el mismo que instala
+/// `load()` en la app: DNS cifrado, tolerancia al firewall, cabeceras completas)
+/// con el proxy de la red puesto de verdad. Solo se usa cuando se pidió
+/// explícitamente con `INUTILTV_REAL_NET=1`.
+Future<void> _liveSetup(_ConnectProxy proxy) async {
+  SharedPreferences.setMockInitialValues({});
+  RemoteProvidersConfig.instance.resetToDefaults();
+  await NetworkConfigService.instance.load(force: true);
+  AnimeEdgeRoute.instance.resetForTest();
+  await NetworkConfigService.instance.setProxy('127.0.0.1:${proxy.port}');
+  // El modo corporativo lo enciende el proxy detectado del sistema (el manual
+  // ya lo enruta todo; ver `resolveProxyDirectiveForUri`).
+  NetworkConfigService.instance.setSystemProxyForTest('127.0.0.1:${proxy.port}');
+}
+
+/// Lo deja como estaba: sin estado de red y con el HTTP hermético de `flutter
+/// test`, salvo los grupos que ya instalaron sus sockets reales.
+Future<void> _liveTeardown(_ConnectProxy proxy) async {
+  await NetworkConfigService.instance.setProxy('');
+  NetworkConfigService.instance.resetForTest();
+  AnimeEdgeRoute.instance.resetForTest();
+  RemoteProvidersConfig.instance.resetToDefaults();
+  HttpOverrides.global = null;
+  await proxy.close();
+}
+
+/// Proxy HTTP minimo: hace CONNECT (como los de una oficina) y anota a donde.
+/// Copia fiel del fixture del test vivo v3.2.5, que ya lo probó contra internet.
+class _ConnectProxy {
+  _ConnectProxy._(this._server, this.tunnels);
+
+  final ServerSocket _server;
+  final List<String> tunnels;
+
+  int get port => _server.port;
+
+  static Future<_ConnectProxy> start() async {
+    final tunnels = <String>[];
+    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((client) {
+      final head = <int>[];
+      var tunnelReady = false;
+      Socket? upstream;
+      late StreamSubscription<List<int>> sub;
+      sub = client.listen((chunk) {
+        if (tunnelReady) {
+          upstream?.add(chunk);
+          return;
+        }
+        sub.pause();
+        head.addAll(chunk);
+        final text = latin1.decode(head, allowInvalid: true);
+        final cut = text.indexOf('\r\n\r\n');
+        if (cut < 0) {
+          sub.resume();
+          return;
+        }
+        final match = RegExp(
+          r'^CONNECT\s+(\S+)\s+HTTP/1\.[01]',
+          caseSensitive: false,
+        ).firstMatch(text.substring(0, cut));
+        if (match == null) {
+          client.write('HTTP/1.1 405 Method Not Allowed\r\n\r\n');
+          client.close();
+          return;
+        }
+        final target = match.group(1)!;
+        tunnels.add(target);
+        final parts = target.split(':');
+        Socket.connect(
+          parts[0],
+          int.parse(parts[1]),
+          timeout: const Duration(seconds: 8),
+        ).then((up) {
+          upstream = up;
+          _forward(up, client);
+          client.write('HTTP/1.1 200 Connection established\r\n\r\n');
+          client.flush();
+          tunnelReady = true;
+          // Lo que ya hubiera del saludo TLS, se entrega ahora.
+          final resto = text.substring(cut + 4);
+          if (resto.isNotEmpty) up.add(latin1.encode(resto));
+          sub.resume();
+        }).catchError((_) {
+          client.write('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+          client.close();
+        });
+      }, onDone: () => upstream?.destroy(), onError: (_) => upstream?.destroy());
+    });
+    return _ConnectProxy._(server, tunnels);
+  }
+
+  Future<void> close() => _server.close();
+}
+
+/// Copia todos los bytes de from hacia to (tunel transparente).
+void _forward(Stream<List<int>> from, Socket to) {
+  from.listen(
+    (data) => to.add(data),
+    onDone: () {
+      try {
+        to.destroy();
+      } catch (_) {}
+    },
+    onError: (_) {
+      try {
+        to.destroy();
+      } catch (_) {}
+    },
+    cancelOnError: true,
+  );
 }

@@ -4,7 +4,7 @@ class AppInfo {
   const AppInfo._();
 
   static const String appName = 'Inutix TV';
-  static const String appVersion = '3.3.42';
+  static const String appVersion = '3.3.43';
   static const String creatorName = 'César';
   static const String supportEmail = 'cesarmaster133@gmail.com';
 
@@ -21,6 +21,7 @@ class AppInfo {
       'Ecosistema inutix.com · Inutix TV & Inutix Music';
 
   static const List<String> whatsNewHighlights = [
+    'Anime completo en redes de empresa, hoteles y aeropuertos: al reproducir un episodio la app usa primero la dirección que sí le responde, así el video arranca sin que configures nada',
     'Anime en redes de empresa, hoteles y aeropuertos: si tu red no deja entrar a la lista, la app cambia sola al camino alterno y carga la lista, la ficha, los episodios y el video sin que configures nada',
     'Tu actividad se registra al cerrar la sesión: un resumen diario en segundo plano confirma que tu cuenta sigue activa según la política de 15 días',
     'Sesión siempre estable para cuentas activas: corrige bloqueos inesperados de acceso ante cambios de red y recupera tu cuenta al instante al pulsar «Comprobar Estado»',

@@ -25,7 +25,7 @@ class AnimeRouteResult {
   bool get ok => response != null && !failedAll && response!.statusCode == 200;
 }
 
-/// v3.3.42 — Ruta asistida para el frente de anime.
+/// v3.3.43 — Ruta asistida para el frente de anime.
 ///
 /// Anime es el único frente de la app cuyo catálogo vive detrás de una
 /// verificación automática: cuando sales de una red que no es la tuya (empresa,
@@ -67,6 +67,17 @@ class AnimeEdgeRoute {
     'serieskao.top': 'seriesKao',
     'nika.playmudos.com': 'playmudos',
     'www.yourupload.com': 'yourUpload',
+  };
+
+  /// Rutas que NUNCA dan la vuelta por el borde, incluso en modo corporativo.
+  /// Son las que responden bien por la red propia y el borde no las sirve
+  /// (medido desde la red de la empresa el 2026-11-25, con cabeceras de la app):
+  /// dar ahí la vuelta costaba solo un viaje perdido, y en el vidurl de
+  /// SeriesKao ese viaje devolvía 444 y la cadena se rendía sin probar la ruta
+  /// directa. La decisión quedó escrita en el test
+  /// `el borde no sirve todo: lo que responde directo se deja directo`.
+  static final Map<String, Set<String>> _noDetourFirstPaths = <String, Set<String>>{
+    'seriesKao': {'vidurl'},
   };
 
   /// Cabeceras de navegador real. Los filtros de las redes de empresa puntúan
@@ -128,11 +139,25 @@ class AnimeEdgeRoute {
     if (canonical != null) _edgePreferred.add(canonical);
   }
 
-  /// true cuando la ruta asistida es la que toca usar ahora mismo.
-  bool shouldUseEdge(String routeKey) {
+  /// true cuando la ruta asistida es la que toca usar ahora mismo. [uriPath]
+  /// permite afinar por ruta: hay caminos que el borde no sirve y que la red
+  /// propia sí (ver `_noDetourFirstPaths`), y esos se dejan directos.
+  bool shouldUseEdge(String routeKey, {String? uriPath}) {
     if (!prefixByRouteKey.containsKey(routeKey)) return false;
+    if (_isNoDetourPath(routeKey, uriPath)) return false;
     if (_edgePreferred.contains(routeKey)) return true;
     return NetworkConfigService.instance.corporateModeActive;
+  }
+
+  /// true si la ruta pertenece a las que no dan la vuelta (primer segmento del
+  /// path, p. ej. `/vidurl/...`).
+  bool _isNoDetourPath(String? key, String? uriPath) {
+    if (key == null) return false;
+    final segs = _noDetourFirstPaths[key];
+    if (segs == null || segs.isEmpty) return false;
+    if (uriPath == null) return false;
+    final firstSegs = uriPath.split('/').where((s) => s.isNotEmpty).take(1).toList();
+    return firstSegs.isNotEmpty && segs.contains(firstSegs.first);
   }
 
   /// URL a usar para [uri]: la propia si toca directo, la del borde si la
@@ -148,7 +173,7 @@ class AnimeEdgeRoute {
     if (host == 'localhost' || host == '::1' || host == '127.0.0.1' || host == edgeHost) {
       return uri;
     }
-    if (!shouldUseEdge(key)) return uri;
+    if (!shouldUseEdge(key, uriPath: uri.path)) return uri;
     return _edgeUrl(uri, prefixByRouteKey[key]!);
   }
 
@@ -180,7 +205,7 @@ class AnimeEdgeRoute {
     final edge = key == null ? null : _edgeUrl(uri, prefixByRouteKey[key]!);
 
     final order = <Uri>[uri];
-    if (edge != null && shouldUseEdge(key!)) {
+    if (edge != null && shouldUseEdge(key!, uriPath: uri.path)) {
       order.insert(0, edge);
       order.removeLast();
     } else if (edge != null) {
