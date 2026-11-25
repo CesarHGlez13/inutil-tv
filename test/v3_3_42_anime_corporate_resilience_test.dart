@@ -263,7 +263,7 @@ void main() {
         'lib/services/hls_stream_proxy.dart',
       ]) {
         final src = File(f).readAsStringSync();
-        // v3.3.48 — Los servicios que parsean una lista consultan la memoria con
+        // v3.3.49 — Los servicios que parsean una lista consultan la memoria con
         // `getRouted` (que permite avisar «si esto llegó vacío, da la vuelta»);
         // los que sólo necesitan la URL usan `routeUri`. Los dos son la misma
         // memoria de red, así que el pin acepta cualquiera de las dos.
@@ -477,7 +477,7 @@ void main() {
     });
   });
 
-  group('v3.3.47 y v3.3.48 — el aviso del usuario pone el relevo al frente', () {
+  group('v3.3.47 a v3.3.49 — el aviso del usuario pone el relevo al frente', () {
     test('el ajuste «Redes que revisan el tráfico» enciende el sondeo y la '
         'alterna responde antes de la primera petición', () async {
       // Medido desde la empresa el 2026-11-25 con la app ya en 3.3.46: el
@@ -554,6 +554,49 @@ void main() {
           reason: 'una sola vuelta, no un bucle');
     });
 
+    test('el certificado rechazado pone el relevo al frente para el resto de la sesión',
+        () async {
+      // Medido el 2026-11-25 desde la oficina con la app en 3.3.48: el interrupto
+      // estaba ON, la app nunca mandó nada por el camino alterno y la búsqueda
+      // seguía en cero. La red de ese lugar no corta la base de la app (el sondeo
+      // de conexión sale verde), pero SÍ intercepta el TLS de los proveedores: en
+      // el Chrome del celular `tioanime.com` y `jkanime.net` contestan «La conexión
+      // no es privada». Ahí el viaje directo muere en el handshake, y eso es la
+      // prueba de que el aviso del usuario es cierto: a partir de ahí el relevo
+      // manda, y la segunda petición ya sale directa al borde sin volver a tropezar.
+      expect(NetworkConfigService.instance.corporateModeActive, isFalse);
+      expect(NetworkConfigService.instance.tlsFallbackEnabled, isTrue);
+
+      RemoteProvidersConfig.instance.applyMap({
+        'metaBaseUrl': 'http://127.0.0.1:9', // base normal: no contesta
+        'metaBaseAlt': srv.base, // el camino que sí deja pasar
+        // El proveedor por TLS a un servidor que es HTTP puro: el viaje muere en
+        // el handshake, que es exactamente lo que hace la red del celular.
+        'tioAnimeBaseUrl': srv.base.replaceFirst('http://', 'https://'),
+      });
+
+      final primera = await TioAnimeService().search('naruto');
+
+      expect(primera, isNotEmpty,
+          reason: 'la primera petición todavía paga el viaje directo perdido');
+      expect(srv.hits['/ak/tioanime/directorio'] ?? 0, 1);
+      expect(srv.hits['/directorio'] ?? 0, 0,
+          reason: 'el viaje directo ni siquiera llegó: se cayó en el TLS');
+
+      expect(
+          AnimeEdgeRoute.instance
+              .routeUri(Uri.parse('https://tioanime.com/directorio?q=naruto'))
+              .toString(),
+          '${srv.base}/ak/tioanime/directorio?q=naruto',
+          reason: 'el relevo ya está al frente para lo que queda de sesión');
+
+      final segunda = await TioAnimeService().search('naruto');
+
+      expect(segunda, isNotEmpty);
+      expect(srv.hits['/ak/tioanime/directorio'] ?? 0, 2,
+          reason: 'la segunda petición sale directo al borde, sin repasar el viaje perdido');
+    });
+
     test('en casa la petición es la de siempre: un solo viaje', () async {
       RemoteProvidersConfig.instance.applyMap({
         'metaBaseUrl': 'http://127.0.0.1:9',
@@ -571,7 +614,7 @@ void main() {
     });
   });
 
-  group('v3.3.48 — Changelog y versión sincronizados', () {
+  group('v3.3.49 — Changelog y versión sincronizados', () {
     const forbiddenTerms = [
       'pelisflix',
       'jkanime',
@@ -604,17 +647,17 @@ void main() {
           RegExp(r'^version:\s*(\d+\.\d+\.\d+)\+(\d+)', multiLine: true)
               .firstMatch(pubspec);
       expect(match, isNotNull);
-      expect(match!.group(1), '3.3.48');
-      expect(match.group(2), '97');
-      expect(AppInfo.appVersion, '3.3.48');
-      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.48'));
+      expect(match!.group(1), '3.3.49');
+      expect(match.group(2), '98');
+      expect(AppInfo.appVersion, '3.3.49');
+      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.49'));
     });
 
-    test('la nota de 3.3.48 no expone proveedores ni detalles internos', () {
+    test('la nota de 3.3.49 no expone proveedores ni detalles internos', () {
       final full = File('CHANGELOG.md').readAsStringSync();
-      final start = full.indexOf('## 3.3.48');
+      final start = full.indexOf('## 3.3.49');
       expect(start, greaterThan(0));
-      final end = full.indexOf('## 3.3.47', start);
+      final end = full.indexOf('## 3.3.48', start);
       expect(end, greaterThan(start));
       final entry = full.substring(start, end).toLowerCase();
 
@@ -646,7 +689,7 @@ class _ToyServer {
   /// v3.3.47 — Pone el juguete en la piel del filtro de la red de la empresa:
   /// `/healthz` contesta 200 con su página de aviso en vez del contrato de salud.
   bool serveFilterPageOnHealthz = false;
-  /// v3.3.48 — Por la ruta directa, el directorio de TioAnime contesta 200 con
+  /// v3.3.49 — Por la ruta directa, el directorio de TioAnime contesta 200 con
   /// aspecto de contenido pero cero tarjetas (la página de la red, sin los
   /// marcadores de verificación), que es lo que hace que la app dé la vuelta.
   bool directAnswerIsEmpty = false;
@@ -726,7 +769,7 @@ class _ToyServer {
       body = '<html><body>var videos = [["yourupload",'
           '"${base}/up/embed/xyz"]];</body></html>';
     } else if (path == '/tio/directorio' || path == '/directorio') {
-      // v3.3.48 — Por la ruta DIRECTA (la que no llega prefijada con `/ak/`) la
+      // v3.3.49 — Por la ruta DIRECTA (la que no llega prefijada con `/ak/`) la
       // bandera hace de página de la red: 200 con aspecto de contenido pero cero
       // tarjetas, y sin los marcadores de verificación. Por el borde se sirve la
       // lista completa, que es lo que tiene que salir despues.

@@ -4,7 +4,7 @@ class AppInfo {
   const AppInfo._();
 
   static const String appName = 'Inutix TV';
-  static const String appVersion = '3.3.48';
+  static const String appVersion = '3.3.49';
   static const String creatorName = 'César';
   static const String supportEmail = 'cesarmaster133@gmail.com';
 
@@ -21,6 +21,7 @@ class AppInfo {
       'Ecosistema inutix.com · Inutix TV & Inutix Music';
 
   static const List<String> whatsNewHighlights = [
+    'La búsqueda y las listas de anime ya no se quedan en cero: si tu red rechaza el certificado de un servidor, la app lo toma como la señal de que inspecciona y usa el camino alterno desde el primer intento, así la ficha, los episodios y el video no se cortan',
     'La búsqueda y las listas de anime ya no se quedan en cero: si tu red responde con su página de aviso, la app lo reconoce y prueba por el camino alterno antes de rendirse, así la ficha, los episodios y el video no se cortan',
     'El aviso «Redes que revisan el tráfico» ahora sí decide: si tu empresa u hotel cifra lo que navegas, la app elige desde el primer intento el camino del anime que sí le responde, así la lista, la ficha, los episodios y el video no quedan en cero',
     'Anime en la red de la empresa, sin trabas: si el filtro de tu empresa corta un camino, la app usa el alterno desde el primer intento, así la lista, la ficha, los episodios y el video no quedan en cero',

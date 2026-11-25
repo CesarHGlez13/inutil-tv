@@ -133,6 +133,12 @@ class AnimeEdgeRoute {
   /// true si el sondeo de `ensureEdgeBase()` ya se hizo en esta sesión (una sola
   /// vez, para no pagar un viaje extra en cada pantalla).
   bool _baseChecked = false;
+  /// v3.3.49 — true cuando la red rechazó el certificado de un proveedor: eso no
+  /// es el proveedor, es un interceptador (la empresa o el hotel), y es la prueba
+  /// de que el aviso del usuario («Redes que revisan el tráfico») es cierto. A
+  /// partir de ahí el relevo manda en el resto de la sesión. En casa nunca se
+  /// enciende, así ahí la petición sigue siendo un solo viaje como siempre.
+  bool _inspeccionConfirmada = false;
 
   /// Bases del borde en el orden en que conviene probarlas. La alterna sólo
   /// existe si la config remota la llenó (`metaBaseAlt`); sin ella el orden es
@@ -190,6 +196,10 @@ class AnimeEdgeRoute {
     // está cortada en esta red, así que el relevo manda en todos los proveedores
     // que el borde sirve, aunque la red no dé ninguna otra señal.
     if (_altPreferred) return true;
+    // v3.3.49 — La red ya rechazó un certificado de proveedor: es un
+    // interceptador, no el proveedor, y eso confirma el aviso del usuario. El
+    // relevo toma el frente para lo que queda de sesión.
+    if (_inspeccionConfirmada) return true;
     return NetworkConfigService.instance.corporateModeActive;
   }
 
@@ -322,8 +332,14 @@ class AnimeEdgeRoute {
           if (isEdge && key != null) markEdgePreferred(key);
           return AnimeRouteResult(response: res, viaEdge: isEdge);
         }
-      } catch (_) {
+      } catch (e) {
         // ni respondió: se prueba la otra ruta antes de rendirse
+        // v3.3.49 — Si el usuario avisa que su red cifra y el viaje murió en el
+        // TLS, ya está la prueba del interceptador: el relevo toma el frente para
+        // lo que queda de sesión.
+        if (_redAvisoQueInspecciona && _esFalloDeCertificado(e)) {
+          _inspeccionConfirmada = true;
+        }
       }
       if (isEdge && baseDeRuta[i] == primaryBase) {
         // La base normal del borde no sirvió en esta red: la alterna pasa al
@@ -369,6 +385,17 @@ class AnimeEdgeRoute {
   bool get _redAvisoQueInspecciona =>
       NetworkConfigService.instance.corporateModeActive ||
       NetworkConfigService.instance.tlsFallbackEnabled;
+
+  /// v3.3.49 — Señales de que el viaje murió en el TLS (certificado rechazado o
+  /// mano a mano cortado), que es lo que hace una red que inspecciona lo que se
+  /// navega. Una red normal no tira un certificado; lo tira el interceptador.
+  static bool _esFalloDeCertificado(Object e) {
+    final s = e.toString().toLowerCase();
+    return s.contains('handshake') ||
+        s.contains('certificate') ||
+        s.contains('ssl') ||
+        s.contains('tls');
+  }
 
   /// Señales de que la respuesta no es el contenido sino una verificación de la
   /// red: status de filtro o HTML de comprobación.
@@ -438,5 +465,6 @@ class AnimeEdgeRoute {
     _edgePreferred.clear();
     _altPreferred = false;
     _baseChecked = false;
+    _inspeccionConfirmada = false;
   }
 }
