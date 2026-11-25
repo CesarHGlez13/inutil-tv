@@ -1,5 +1,10 @@
 # Changelog — Inutix TV
 
+## 3.3.50 — 2026-11-25
+- **El anime de la oficina ya no necesita VPN:** Con el aviso «Redes que revisan el tráfico» prendido, la app usa el camino alterno desde el primer intento, así la búsqueda, la ficha, los episodios y el video no quedan en cero. Si tu red no revisa nada, apaga el aviso y se vuelve al camino de siempre.
+- **En casa:** el anime ahora da el salto por el relevo cuando el aviso está prendido; con el aviso apagado es un solo viaje, como antes.
+- **Lo que ya venía funcionando sigue igual:** Cine, Series y TV en vivo no cambian.
+
 ## 3.3.49 — 2026-11-25
 - **El aviso del interruptor ahora manda desde el primer intento:** Si tu red rechaza el certificado de un servidor, la app ya lo toma como la señal de que inspecciona lo que navegas y usa el camino alterno en lo que resta, así la búsqueda, la ficha, los episodios y el video no quedan en cero.
 - **En tu red de casa nada cambia:** se sigue usando el camino de siempre una sola vez, sin vueltas extra.

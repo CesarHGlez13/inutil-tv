@@ -132,12 +132,26 @@ void main() {
   });
 
   group('ruta asistida por el borde propio', () {
-    test('en red de empresa el anime sale por el borde, en casa no', () {
+    test('con el aviso puesto el anime sale por el relevo, con el aviso apagado sale directo',
+        () async {
       final route = AnimeEdgeRoute.instance;
 
-      // En casa: la ruta rápida de siempre, sin dar vuelta.
+      // v3.3.50 — El interrupto «Redes que revisan el tráfico» (ON por defecto y
+      // ON en la oficina) pone el relevo al frente desde el primer intento, en
+      // cualquier red. Medido el 2026-11-25 en la oficina: sin la VPN la app no ve
+      // anime porque esa red intercepta el TLS de los proveedores (en el Chrome del
+      // celular `tioanime.com` y `jkanime.net` contestan «La conexión no es
+      // privada»); con la VPN prendida el relevo responde y la lista llega llena.
+      // El relevo es ese mismo camino, sin VPN.
+      expect(route.routeUri(Uri.parse('https://tioanime.com/anime/naruto')).toString(),
+          'https://meta.inutix.com/ak/tioanime/anime/naruto');
+
+      // Con el aviso apagado queda la ruta rápida de siempre, sin dar vuelta: es la
+      // forma de que en casa siga un solo viaje si a alguien le interesa.
+      await NetworkConfigService.instance.setTlsFallbackEnabled(false);
       expect(route.routeUri(Uri.parse('https://tioanime.com/anime/naruto')).toString(),
           'https://tioanime.com/anime/naruto');
+      await NetworkConfigService.instance.setTlsFallbackEnabled(true);
 
       // En la empresa: el nombre al que la red ya deja pasar toma el relevo.
       NetworkConfigService.instance.setSystemProxyForTest('proxy.empresa.local:8080');
@@ -454,16 +468,22 @@ void main() {
           reason: 'la búsqueda salió por la base alterna del borde');
     });
 
-    test('en casa la base alterna no se usa: la ruta es la de siempre', () {
-      // Sin señales de red corporativa, `ensureEdgeBase()` no hace nada y la
-      // pestaña sale por la ruta de siempre. La alterna sólo toma el relevo cuando
-      // la red dio señales de filtrar.
+    test('en casa, con el aviso apagado, la ruta es la de siempre; con el aviso '
+        'puesto manda la base normal', () async {
+      // v3.3.50 — Con el aviso «Redes que revisan el tráfico» apagado,
+      // `ensureEdgeBase()` no hace nada y la pestaña sale por la ruta de siempre.
+      // Con el aviso puesto (ON por defecto) el relevo manda desde el primer
+      // intento, y la alterna sólo toma el frente cuando la red dio señales de
+      // cortar la base normal — eso lo prueba el test de arriba.
       RemoteProvidersConfig.instance.applyMap({'metaBaseAlt': srv.base});
+      await NetworkConfigService.instance.setTlsFallbackEnabled(false);
       expect(
           AnimeEdgeRoute.instance
               .routeUri(Uri.parse('https://tioanime.com/anime/naruto'))
               .toString(),
           'https://tioanime.com/anime/naruto');
+
+      await NetworkConfigService.instance.setTlsFallbackEnabled(true);
 
       // Y si la memoria de red pidiera dar la vuelta, en casa el relevo sigue
       // siendo la base normal: la alterna sólo entra cuando la red da señales de
@@ -477,7 +497,7 @@ void main() {
     });
   });
 
-  group('v3.3.47 a v3.3.49 — el aviso del usuario pone el relevo al frente', () {
+  group('v3.3.47 a v3.3.50 — el aviso del usuario pone el relevo al frente', () {
     test('el ajuste «Redes que revisan el tráfico» enciende el sondeo y la '
         'alterna responde antes de la primera petición', () async {
       // Medido desde la empresa el 2026-11-25 con la app ya en 3.3.46: el
@@ -548,8 +568,9 @@ void main() {
 
       expect(hits, isNotEmpty,
           reason: 'la vuelta por el borde tiene que traer la lista');
-      expect(srv.hits['/directorio'] ?? 0, 1,
-          reason: 'el viaje directo se hizo primero, como siempre');
+      expect(srv.hits['/directorio'] ?? 0, 0,
+          reason: 'con el aviso puesto la petición sale directo al relevo, '
+              'ya no se paga el viaje perdido');
       expect(srv.hits['/ak/tioanime/directorio'] ?? 0, 1,
           reason: 'una sola vuelta, no un bucle');
     });
@@ -597,24 +618,40 @@ void main() {
           reason: 'la segunda petición sale directo al borde, sin repasar el viaje perdido');
     });
 
-    test('en casa la petición es la de siempre: un solo viaje', () async {
+    test('en casa, con el aviso apagado un solo viaje directo; con el aviso '
+        'puesto sale por el relevo', () async {
       RemoteProvidersConfig.instance.applyMap({
         'metaBaseUrl': 'http://127.0.0.1:9',
         'metaBaseAlt': srv.base,
         'tioAnimeBaseUrl': srv.base,
       });
 
-      final hits = await TioAnimeService().search('naruto');
+      // Con el aviso apagado queda la ruta rápida de siempre: un solo viaje.
+      await NetworkConfigService.instance.setTlsFallbackEnabled(false);
+      final sinAviso = await TioAnimeService().search('naruto');
 
-      expect(hits, isNotEmpty);
+      expect(sinAviso, isNotEmpty);
       expect(srv.hits['/directorio'] ?? 0, 1,
           reason: 'la red de casa responde con contenido: no se paga la vuelta');
       expect(srv.hits['/ak/tioanime/directorio'] ?? 0, 0,
-          reason: 'en una red normal no se gasta ningún viaje extra');
+          reason: 'con el aviso apagado no se gasta ningún viaje extra');
+
+      // v3.3.50 — Con el aviso «Redes que revisan el tráfico» prendido (ON por
+      // defecto) el relevo manda desde el primer intento, en casa también. Es el
+      // costo de que la oficina funcione sin VPN, y se paga una sola vez: en
+      // cuanto el relevo responde, la memoria lo deja al frente.
+      await NetworkConfigService.instance.setTlsFallbackEnabled(true);
+      final conAviso = await TioAnimeService().search('naruto');
+
+      expect(conAviso, isNotEmpty);
+      expect(srv.hits['/directorio'] ?? 0, 1,
+          reason: 'con el aviso puesto la petición sale directo al relevo, '
+              'ya no se paga el viaje perdido');
+      expect(srv.hits['/ak/tioanime/directorio'] ?? 0, 1);
     });
   });
 
-  group('v3.3.49 — Changelog y versión sincronizados', () {
+  group('v3.3.50 — Changelog y versión sincronizados', () {
     const forbiddenTerms = [
       'pelisflix',
       'jkanime',
@@ -647,17 +684,17 @@ void main() {
           RegExp(r'^version:\s*(\d+\.\d+\.\d+)\+(\d+)', multiLine: true)
               .firstMatch(pubspec);
       expect(match, isNotNull);
-      expect(match!.group(1), '3.3.49');
-      expect(match.group(2), '98');
-      expect(AppInfo.appVersion, '3.3.49');
-      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.49'));
+      expect(match!.group(1), '3.3.50');
+      expect(match.group(2), '99');
+      expect(AppInfo.appVersion, '3.3.50');
+      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.50'));
     });
 
-    test('la nota de 3.3.49 no expone proveedores ni detalles internos', () {
+    test('la nota de 3.3.50 no expone proveedores ni detalles internos', () {
       final full = File('CHANGELOG.md').readAsStringSync();
-      final start = full.indexOf('## 3.3.49');
+      final start = full.indexOf('## 3.3.50');
       expect(start, greaterThan(0));
-      final end = full.indexOf('## 3.3.48', start);
+      final end = full.indexOf('## 3.3.49', start);
       expect(end, greaterThan(start));
       final entry = full.substring(start, end).toLowerCase();
 

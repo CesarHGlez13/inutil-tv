@@ -200,7 +200,14 @@ class AnimeEdgeRoute {
     // interceptador, no el proveedor, y eso confirma el aviso del usuario. El
     // relevo toma el frente para lo que queda de sesión.
     if (_inspeccionConfirmada) return true;
-    return NetworkConfigService.instance.corporateModeActive;
+    // v3.3.50 — Medido el 2026-11-25: en la oficina la única forma de que la app
+    // viera el anime era prender la VPN, que saca el tráfico de esa red. El
+    // interrupto «Redes que revisan el tráfico» es justo el aviso de que la red
+    // cifra lo que se navega, así que ahora también pone el relevo al frente desde
+    // el primer intento, sin esperar a que algo se caiga. Si alguien quiere el
+    // viaje directo de siempre (p. ej. en casa), apaga el interrupto.
+    final red = NetworkConfigService.instance;
+    return red.corporateModeActive || red.tlsFallbackEnabled;
   }
 
   /// true si la ruta pertenece a las que no dan la vuelta (primer segmento del
