@@ -30,6 +30,16 @@ import 'package:tubotv/services/vod_catalog_service.dart';
 /// sigue llegando completo aunque el catálogo principal esté bloqueado: la app
 /// lo reconoce, no lo vuelve a intentar, y usa el camino alterno para la lista,
 /// la ficha, los episodios y el video.
+///
+/// v3.3.44 — Medido desde casa con las cabeceras completas de la app, en la
+/// red de la empresa el catálogo principal de anime (jkanime) responde DIRECTO
+/// (200, 71 KB) y por el borde propio responde 403 con su propia verificación
+/// de Cloudflare, porque el borde es un Worker y no puede pasar ese filtro. Así
+/// que la decisión por tramo se invirtió para ese frente: la app prueba la ruta
+/// directa primero y el borde queda como respaldo para cuando la red propia sí
+/// filtre el dominio. Lo que el borde sí sirve (tioanime, kao, yourupload) sigue
+/// dando la vuelta en la empresa, y lo que responde directo (vidurl, los espejos
+/// y el puerto no estándar) se deja directo, como estaba.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -66,23 +76,23 @@ void main() {
     HttpOverrides.global = null;
   });
 
-  group('anime cuando la red bloquea el catálogo principal', () {
-    test('el video sigue resolviéndose por el camino alterno', () async {
+  group('anime cuando la red deja pasar el catálogo principal', () {
+    test('el video se resuelve por la ruta directa, sin dar la vuelta', () async {
       final sources = await JkAnimeService().getEpisodeSources('naruto', 1);
 
       expect(sources, isNotEmpty,
-          reason: 'un bloqueo en la red no puede dejar el episodio sin video');
+          reason: 'un viaje perdido al borde no puede dejar el episodio sin video');
       expect(sources.first.url, startsWith(srv.url('/up/')),
-          reason: 'la fuente debe venir del proveedor alterno, no del bloqueado');
+          reason: 'la fuente sale de la ruta directa, la que responde');
     });
 
     test('la pestaña de anime no queda en blanco', () async {
       final anime = await VodCatalogService().getAnime(page: 1);
 
       expect(anime, isNotEmpty,
-          reason: 'la lista debe armarse con lo que la red sí deja pasar');
-      expect(anime.first.provider, isNot('jkanime'),
-          reason: 'lo que se muestra tiene que ser jugable, no un espejo muerto');
+          reason: 'la lista se arma con el catálogo propio, que responde directo');
+      expect(anime.first.provider, 'jkanime',
+          reason: 'la red deja pasar este catálogo: se usa, no se descarta');
     });
 
     test('la búsqueda de anime también llega por el camino alterno', () async {
@@ -92,33 +102,32 @@ void main() {
       expect(hits.first.provider, 'tioanime');
     });
 
-    test('no se vuelve a tocar la puerta bloqueada en el resto de la sesión',
-        () async {
+    test('la ruta que funcionó se aprende una sola vez en la sesión', () async {
       final primero = await JkAnimeService().getEpisodeSources('naruto', 1);
       expect(primero, isNotEmpty);
-      final hitsBloqueadas = srv.hits['/jk/naruto/1/'] ?? 0;
-      expect(hitsBloqueadas, greaterThan(0),
-          reason: 'el primer intento sí sale, es cómo se descubre el bloqueo');
+      final hitsDirectas = srv.hits['/jk/naruto/1/'] ?? 0;
+      expect(hitsDirectas, greaterThan(0),
+          reason: 'el primer viaje sale por la directa, es la que responde');
 
       JkAnimeService.resetForTest(); // caches limpios, la memoria de red no
       final segundo = await JkAnimeService().getEpisodeSources('naruto', 2);
 
       expect(segundo, isNotEmpty);
-      expect(srv.hits['/jk/naruto/2/'] ?? 0, 0,
-          reason: 'ya se sabe que está bloqueado: no se le vuelve a preguntar');
+      expect(srv.hits['/jk/naruto/2/'] ?? 0, greaterThan(0),
+          reason: 'la ruta aprendida se repite, no se vuelve a pagar el borde');
       expect(srv.hits['/jk/ajax_search'] ?? 0, lessThan(3),
-          reason: 'la sesión se corta, no se reinventa en cada petición');
+          reason: 'la sesión no se reinventa en cada petición');
     });
 
-    test('el catálogo principal se deja de consultar mientras esté bloqueado',
-        () async {
+    test('cada página del catálogo se pide una sola vez', () async {
       final primera = await JkAnimeService().fetchDirectory(page: 1);
-      expect(primera, isEmpty, reason: 'bloqueado: no hay lista por ahí');
+      expect(primera, isNotEmpty, reason: 'responde directo: hay lista por ahí');
 
       final segunda = await JkAnimeService().fetchDirectory(page: 2);
-      expect(segunda, isEmpty);
-      expect(srv.hits['/jk/directorio'] ?? 0, 1,
-          reason: 'una sola vez; después la app ya sabe la respuesta');
+      expect(segunda, isNotEmpty);
+      expect(srv.hits['/jk/directorio?p=1'] ?? 0, 1,
+          reason: 'una sola vez por página; la app no repite el viaje');
+      expect(srv.hits['/jk/directorio?p=2'] ?? 0, 1);
     });
   });
 
@@ -166,6 +175,17 @@ void main() {
       expect(route.routeUri(
           Uri.parse('https://serieskao.top/vidurl/tt0388629-1x01/')).toString(),
           'https://serieskao.top/vidurl/tt0388629-1x01/');
+
+      // Mismo caso, medido el 2026-11-25 desde casa con las cabeceras de la app:
+      // jkanime.net responde directo (200, 71 KB de catálogo) y por el borde
+      // responde 403 con su propia verificación de Cloudflare (`Attention
+      // Required!`), porque el borde es un Worker y no puede pasar ese filtro.
+      // Antes de este cambio la app probaba el borde primero en modo
+      // corporativo, y ese viaje perdido marcaba el catálogo como bloqueado un
+      // rato: la pestaña de anime quedaba en cero en la red de la empresa.
+      expect(route.routeUri(
+          Uri.parse('https://jkanime.net/directorio?p=1')).toString(),
+          'https://jkanime.net/directorio?p=1');
 
       // Lo que el borde sí sirve medido (200 directo y 200 por el borde) sigue
       // dando la vuelta en la empresa: la decisión es por tramo, no global.
@@ -383,7 +403,7 @@ void main() {
     }, skip: live ? false : 'requiere INUTILTV_REAL_NET=1', timeout: const Timeout(Duration(seconds: 60)));
   });
 
-  group('v3.3.43 — Changelog y versión sincronizados', () {
+  group('v3.3.44 — Changelog y versión sincronizados', () {
     const forbiddenTerms = [
       'pelisflix',
       'jkanime',
@@ -416,15 +436,15 @@ void main() {
           RegExp(r'^version:\s*(\d+\.\d+\.\d+)\+(\d+)', multiLine: true)
               .firstMatch(pubspec);
       expect(match, isNotNull);
-      expect(match!.group(1), '3.3.43');
-      expect(match.group(2), '92');
-      expect(AppInfo.appVersion, '3.3.43');
-      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.43'));
+      expect(match!.group(1), '3.3.44');
+      expect(match.group(2), '93');
+      expect(AppInfo.appVersion, '3.3.44');
+      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.44'));
     });
 
-    test('la nota de 3.3.43 no expone proveedores ni detalles internos', () {
+    test('la nota de 3.3.44 no expone proveedores ni detalles internos', () {
       final full = File('CHANGELOG.md').readAsStringSync();
-      final start = full.indexOf('## 3.3.43');
+      final start = full.indexOf('## 3.3.44');
       expect(start, greaterThan(0));
       final end = full.indexOf('## 3.3.42', start);
       expect(end, greaterThan(start));
@@ -474,10 +494,40 @@ class _ToyServer {
     var status = 200;
 
     if (path.startsWith('/jk/')) {
-      // La red no deja pasar: respuesta de verificación, sin sesión ni token.
-      status = 403;
-      body = '<html><head><title>Just a moment...</title></head>'
-          '<body>Verifying your connection before granting access.</body></html>';
+      // v3.3.44 — Medido desde casa y desde la empresa con las cabeceras de la
+      // app: `jkanime.net` responde DIRECTO (200), y por el borde responde 403
+      // con su propia verificación de Cloudflare. Así que la app prueba la ruta
+      // directa primero y el borde queda como respaldo. El juguete sirve lo que
+      // la app necesita para armar catálogo, búsqueda y episodio, y cobra los
+      // viajes que de verdad le hicieron.
+      final fullUri = req.uri.toString();
+      hits[fullUri] = (hits[fullUri] ?? 0) + 1;
+      if (fullUri.startsWith('/jk/directorio')) {
+        status = 200;
+        body = 'var animes = {"data":[{"slug":"naruto",'
+            '"title":"Naruto","image":"/img/naruto.jpg",'
+            '"synopsis":"Cap 1","tipo":"Anime"}]};\n';
+      } else if (path == '/jk/naruto/1/' || path == '/jk/naruto/2/') {
+        status = 200;
+        body = '<html><body>video[0] = \'<iframe class="video" '
+            'src="${base}/up/embed/xyz"></iframe>\';'
+            'name="csrf-token" content="toy-token"</body></html>';
+      } else if (path == '/jk/ajax_search') {
+        status = 200;
+        req.response.headers
+            .set('Content-Type', 'application/json; charset=utf-8');
+        req.response.write('x<html><body>[]</body></html>');
+        await req.response.close();
+        return;
+      } else if (path == '/jk/') {
+        status = 200;
+        body = '<html><body>name="csrf-token" content="toy-token"'
+            '</body></html>';
+      } else {
+        status = 403;
+        body = '<html><head><title>Just a moment...</title></head>'
+            '<body>Verifying your connection before granting access.</body></html>';
+      }
     } else if (path == '/tio/anime/naruto') {
       body = '<html><body>var anime_info = {"slug":"naruto"};'
           'name="csrf-token" content=""</body></html>';

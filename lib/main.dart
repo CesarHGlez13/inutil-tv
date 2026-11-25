@@ -49,8 +49,10 @@ void main() {
   unawaited(TvModeService.instance.initialize());
   MediaKit.ensureInitialized();
   // Sonda de alcance al relay propio (S7) para que un build horneado con
-  // FB_RELAY_HOST no quede incomunicado si se ejecuta fuera de la LAN.
-  unawaited(FirebaseConfig.probeRelayReachability());
+  // FB_RELAY_HOST no quede incomunicado si se ejecuta fuera de la LAN. Con
+  // cache: si en un arranque anterior este equipo SÍ vivió en la LAN del relay
+  // y ahora no responde, la app ya sabe que debe re-sondear en segundo plano.
+  unawaited(FirebaseConfig.probeRelayReachabilityAndCache());
   // Carga espejos dinámicos VOD y gateways Edge (`meta.inutix.com` / `ota.inutix.com`)
   // desde `app_config/providers` en `api.inutix.com` con caché local instantánea.
   unawaited(RemoteProvidersConfig.instance.loadAndRefresh());

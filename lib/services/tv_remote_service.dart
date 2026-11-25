@@ -10,6 +10,7 @@ import 'package:uuid/uuid.dart';
 
 import '../models/models.dart';
 import 'firebase_auth_service.dart';
+import 'firebase_config.dart';
 import 'firebase_firestore_service.dart';
 import 'tv_daily_usage_service.dart';
 import 'tv_mode_service.dart';
@@ -258,6 +259,21 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
   Timer? _tvHeartbeatTimer;
   Timer? _tvCommandPollTimer;
   Timer? _mobilePollTimer;
+
+  /// Re-sonda del relay: a lo sumo una cada [_relayReprobeInterval] para no
+  /// gastar handshakes de más. Va colgada del tick de 1.5 s que ya existe
+  /// (`_tvCommandPollTimer`), no de un `Timer` nuevo.
+  static const Duration _relayReprobeInterval = Duration(seconds: 45);
+  DateTime _lastRelayReprobe = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Decisión pura del intervalo, expuesta para pruebas: dentro de la ventana
+  /// no se gasta otro handshake, así que dos ticks seguidos son una sola sonda.
+  @visibleForTesting
+  static bool reprobeDue({
+    required DateTime last,
+    required DateTime now,
+  }) =>
+      now.difference(last) >= _relayReprobeInterval;
 
   bool _pollingCommand = false;
   bool _pollingState = false;
@@ -516,8 +532,51 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
     _tvCommandPollTimer?.cancel();
     _tvCommandPollTimer =
         Timer.periodic(const Duration(milliseconds: 1500), (_) {
+      _maybeReprobeRelay();
       unawaited(_pollIncomingCommand());
     });
+  }
+
+  /// Re-sonda del relay, colgada del tick de 1.5 s que ya existe.
+  ///
+  /// El problema que cierra: [FirebaseConfig.markRelayUnreachable] latchea
+  /// Google para TODA la sesión. Si `relay.py` se reinicia en el S7 (o el S7, o
+  /// el WiFi) con la app abierta, los heartbeats de estado y los comandos
+  /// regresan a Firebase real y siguen pagando la cuota de `users/{uid}/...`
+  /// hasta que el usuario cierre y vuelva a abrir la app. Medido el 2026-11-20
+  /// justo después de reiniciar el relay: 0 peticiones de las apps al relay en
+  /// 3 minutos, mientras los writes aparecían escritos DIRECTO en Google.
+  ///
+  /// Va aquí y no en un `Timer` nuevo porque este tick ya existe y ya corre
+  /// cuando la app está en primer plano. Y sondea sólo cuando
+  /// [FirebaseConfig.relayRecoveryWorthy] (host horneado + declarado caído +
+  /// este equipo sí tuvo relación con el relay), a lo sumo una vez cada
+  /// [_relayReprobeInterval]. `zz-relay.sh` levanta el relay en ~10 s, así que
+  /// la re-sonda lo encuentra y la puerta se apaga sola.
+  void _maybeReprobeRelay() {
+    if (!FirebaseConfig.relayRecoveryWorthy) return;
+    final now = DateTime.now();
+    if (!reprobeDue(last: _lastRelayReprobe, now: now)) return;
+    _lastRelayReprobe = now;
+    unawaited(
+      FirebaseConfig.probeRelayReachability().then((ok) {
+        if (!ok) return;
+        debugPrint(
+          'Relay del S7 recuperado en caliente: el estado y los comandos '
+          'vuelven a pasar por el telefono y dejan de pagar cuota.',
+        );
+      }),
+    );
+  }
+
+  /// Permite a las pruebas disparar la re-sonda tal cual la ejecuta el tick.
+  @visibleForTesting
+  void reprobeRelayForTest() => _maybeReprobeRelay();
+
+  /// Reinicia el estado de la re-sonda (pruebas).
+  @visibleForTesting
+  void resetReprobeStateForTest() {
+    _lastRelayReprobe = DateTime.fromMillisecondsSinceEpoch(0);
   }
 
   Future<void> _detectLocalTvIp() async {

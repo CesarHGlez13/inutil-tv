@@ -1,5 +1,10 @@
 # Changelog — Inutix TV
 
+## 3.3.44 — 2026-11-25
+- **Anime en redes de empresa, hoteles y aeropuertos:** La app prueba primero el camino que le responde y deja el respaldo para después, así la lista, la ficha y los episodios no se cortan por un intento perdido.
+- **La conexión con tu servidor de datos se recupera sola:** Si el servicio se reinicia con la app abierta, la app lo detecta y vuelve a él sin que hagas nada, y tu cuenta sigue confirmando su actividad por ese camino.
+- **Lo que ya venía funcionando sigue igual:** Cine, Series y TV en vivo no cambian, y en tu red de casa todo va por el camino de siempre.
+
 ## 3.3.43 — 2026-11-25
 - **Anime completo en redes de empresa, hoteles y aeropuertos:** La app ya no se detiene antes de tiempo al reproducir un episodio: usa primero la dirección que sí le responde y deja para después la que no, así el video arranca sin que configures nada.
 - **La lista y la ficha siguen funcionando igual:** Lo que ya venía bien no cambia, y en tu red de casa todo va por el camino de siempre.

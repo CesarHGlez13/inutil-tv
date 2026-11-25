@@ -3,6 +3,7 @@ library;
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Configuración cliente de Firebase compartida por la familia INÚTIL
 /// (Inútil Music e InútilTV).
@@ -79,6 +80,8 @@ class FirebaseConfig {
 
   @visibleForTesting
   static String? relayHostOverrideForTest;
+  @visibleForTesting
+  static int? relayPortOverrideForTest;
   @visibleForTesting
   static String? cloudRelayHostOverrideForTest;
   @visibleForTesting
@@ -178,13 +181,13 @@ class FirebaseConfig {
     List<int>? ports,
     String? host,
   }) async {
-    final target = (host ?? relayHost).trim();
+    final target = (host ?? _activeRelayHost).trim();
     if (useEmulator || target.isEmpty) {
       _relayReachable = false;
       return false;
     }
     final candidates = <int>{
-      int.tryParse(relayPort.trim()) ?? 8080,
+      relayPortOverrideForTest ?? int.tryParse(relayPort.trim()) ?? 8080,
       5555,
     }.toList(growable: false);
     for (final port in ports ?? candidates) {
@@ -196,6 +199,51 @@ class FirebaseConfig {
     }
     _relayReachable = false;
     return false;
+  }
+
+  /// Sonda de arranque con cache, la que llama `main.dart`.
+  ///
+  /// El cache (`relayReachabilityCacheKey`) es sólo telemetría: cada arranque
+  /// vuelve a sondear, así que llevar la TV/box a otra red se autodetecta sin
+  /// reinstalar nada. Lo que sí se aprovecha del cache es la decisión de
+  /// recuperación: si en un arranque anterior este equipo SÍ vivió en la LAN
+  /// del relay y ahora no responde, se pide la re-sonda
+  /// ([noteRelayRecoveryWanted]). Es el caso medido en casa: `relay.py` o el S7
+  /// se reinician con la app ya abierta, y sin esta marca las lecturas se
+  /// quedan en Google todo el resto de la sesión pagando la cuota que el relay
+  /// ahorra (medido el 2026-11-20: 0 peticiones al relay en 3 minutos, los
+  /// heartbeats escritos directo en Google).
+  ///
+  /// Un build sin `FB_RELAY_HOST` horneado sale antes de tocar nada: no hay
+  /// relay que sondear y el comportamiento queda igual que antes. Se lee el
+  /// host con el override de pruebas (`_activeRelayHost`) para que la decisión
+  /// se pueda ejercitar entera; en producción el override está vacío y la
+  /// lectura es la misma constante de siempre.
+  static Future<void> probeRelayReachabilityAndCache() async {
+    if (_activeRelayHost.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getBool(relayReachabilityCacheKey);
+      final reachable = await probeRelayReachability();
+      if (reachable) {
+        debugPrint(
+          'Relay del S7 alcanzable: lecturas por él '
+          '(cacheaba ${cached == null ? "nada" : "$cached"}).',
+        );
+      } else {
+        debugPrint(
+          'Relay del S7 sin respuesta: lecturas directo a Google '
+          '(cacheaba ${cached == null ? "nada" : "$cached"}).',
+        );
+        if (cached == true) noteRelayRecoveryWanted();
+      }
+      if (cached != reachable) {
+        await prefs.setBool(relayReachabilityCacheKey, reachable);
+      }
+    } catch (error) {
+      debugPrint('Sonda de relay falló (se asume Google): $error');
+      markRelayUnreachable();
+    }
   }
 
   static Future<bool> _canOpen(
@@ -223,14 +271,20 @@ class FirebaseConfig {
     _relayReachable = false;
   }
 
-  /// Pide que se re-sondee el relay aunque ahora esté marcado caído.
+  /// Pide que se re-sondee el relay aunque ahora esté marcado caído. Lo llama
+  /// [probeRelayReachabilityAndCache] cuando la sonda de arranque falló PERO
+  /// este dispositivo lo declaró vivo en un arranque anterior: es el caso del
+  /// S7 levantándose del reboot con la app ya abierta. Quien llama ya descartó
+  /// el build sin relay (sale antes si `relayHost` está vacío), así que aquí no
+  /// se vuelve a comprobar el host.
   static void noteRelayRecoveryWanted() {
     if (useEmulator) return;
     _relayRecoveryDesired = true;
   }
 
   /// `true` sólo cuando la sonda declaró el relay caído y este equipo tiene
-  /// relación con él.
+  /// relación con él. Es la única puerta de la re-sonda de recuperación que
+  /// `TvRemoteService` cuelga de su tick de 1.5 s. Nunca se sondea por sondear.
   static bool get relayRecoveryWorthy =>
       !useEmulator && _relayReachable == false && _relayRecoveryDesired;
 
@@ -241,6 +295,7 @@ class FirebaseConfig {
     _relayRecoveryDesired = false;
     _cloudRelayFailedAt = null;
     relayHostOverrideForTest = null;
+    relayPortOverrideForTest = null;
     cloudRelayHostOverrideForTest = null;
     backupRelayHostOverrideForTest = null;
   }

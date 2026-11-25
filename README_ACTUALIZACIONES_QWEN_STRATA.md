@@ -65,7 +65,7 @@ bash tool/full_release_pipeline.sh <VERSION> --urgent
 
 ## Notas de Sincronía Externa (Cambios aplicados desde auditoría Familia Inutix — 2026-11-24)
 
-> **Importante para la conversación de Inutix TV:** estos cambios ya fueron **commiteados, pusheados a `origin/main` y publicados como OTA obligatoria `v3.3.40+89`** (`mandatory: true`, `minSupportedVersion: "3.3.40"`) para resolver de inmediato el bloqueo de sesiones en cuentas autorizadas. La siguiente release de Inutix TV debe partir de `3.3.43+92`.
+> **Importante para la conversación de Inutix TV:** estos cambios ya fueron **commiteados, pusheados a `origin/main` y publicados como OTA obligatoria `v3.3.40+89`** (`mandatory: true`, `minSupportedVersion: "3.3.40"`) para resolver de inmediato el bloqueo de sesiones en cuentas autorizadas. La siguiente release de Inutix TV debe partir de `3.3.44+93`.
 
 1. **Corrección de «Sesión bloqueada / Tu cuenta fue eliminada» en cuentas autorizadas:**
    - Se añadió `FirebaseConfig.directFirestoreBaseUrl` + `InutilFirestoreService.getDocumentDirect()` / `getUserProfileDirect()`.
@@ -79,7 +79,7 @@ bash tool/full_release_pipeline.sh <VERSION> --urgent
 
 ## Notas de Sincronía Externa (Panel Profesional Familia Inutix — 2026-11-25)
 
-> **Importante para la conversación de Inutix TV:** el reporte diario de uso ya fue **commiteado, pusheado a `origin/main` y publicado como OTA obligatoria `v3.3.41+90`** (`mandatory: true`, `minSupportedVersion: "3.3.41"`). La siguiente release de Inutix TV debe partir de `3.3.43+92`.
+> **Importante para la conversación de Inutix TV:** el reporte diario de uso ya fue **commiteado, pusheado a `origin/main` y publicado como OTA obligatoria `v3.3.41+90`** (`mandatory: true`, `minSupportedVersion: "3.3.41"`). La siguiente release de Inutix TV debe partir de `3.3.44+93`.
 
 1. **Reporte diario de uso al servidor** (`commit fdffa1b`):
    - Nuevo `lib/services/tv_daily_usage_service.dart`; contadores diarios por día calendario UTC en `lib/services/inutil_wrapped_service.dart` (clave aparte `inutiltv_daily_usage_v1`, retención de 7 días, persistida para sobrevivir cierres bruscos de Android TV).

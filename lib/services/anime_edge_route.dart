@@ -76,9 +76,27 @@ class AnimeEdgeRoute {
   /// SeriesKao ese viaje devolvía 444 y la cadena se rendía sin probar la ruta
   /// directa. La decisión quedó escrita en el test
   /// `el borde no sirve todo: lo que responde directo se deja directo`.
-  static final Map<String, Set<String>> _noDetourFirstPaths = <String, Set<String>>{
+  /// Las claves son el primer segmento del path, que es lo que compara
+  /// [_isNoDetourPath].
+  ///
+  /// `jkAnime` entró aquí el 2026-11-25 por el mismo motivo, medido desde casa
+  /// con las cabeceras completas de la app: directo a `jkanime.net` responde 200
+  /// (71 KB de catálogo), y por el borde responde 403 con la verificación propia
+  /// de Cloudflare (`Attention Required!`) — el borde es un Worker y no puede
+  /// pasar ese filtro, así que dar ahí la vuelta era un viaje perdido que además
+  /// hacía que la app marcara el catálogo como bloqueado un rato y dejara la
+  /// pestaña de anime en cero. El borde se queda como respaldo para cuando la red
+  /// propia sí filtre el dominio (en la empresa se probó por los dos caminos y
+  /// ninguno respondió; con VPN de la misma empresa sí entra). Como todas las
+  /// rutas que la app arma para ese proveedor (catálogo, búsqueda, episodes
+  /// AJAX, ficha y página del episodio) entran por el mismo camino, la decisión
+  /// es por proveedor completo y está en [_noDetourFirstKeys].
+  static const Map<String, Set<String>> _noDetourFirstPaths = <String, Set<String>>{
     'seriesKao': {'vidurl'},
   };
+
+  /// Proveedores completos que siempre se dejan directos, por cualquier ruta.
+  static const Set<String> _noDetourFirstKeys = <String>{'jkAnime'};
 
   /// Cabeceras de navegador real. Los filtros de las redes de empresa puntúan
   /// la petición antes de dejarla pasar, y con una huella pelada de robot toca
@@ -150,9 +168,11 @@ class AnimeEdgeRoute {
   }
 
   /// true si la ruta pertenece a las que no dan la vuelta (primer segmento del
-  /// path, p. ej. `/vidurl/...`).
+  /// path, p. ej. `/vidurl/...`), o si el proveedor está marcado completo
+  /// ([_noDetourFirstKeys]).
   bool _isNoDetourPath(String? key, String? uriPath) {
     if (key == null) return false;
+    if (_noDetourFirstKeys.contains(key)) return true;
     final segs = _noDetourFirstPaths[key];
     if (segs == null || segs.isEmpty) return false;
     if (uriPath == null) return false;

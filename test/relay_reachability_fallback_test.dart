@@ -3,8 +3,10 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tubotv/services/firebase_config.dart';
 import 'package:tubotv/services/firebase_firestore_service.dart';
+import 'package:tubotv/services/tv_remote_service.dart';
 
 void main() {
   group('relayAwareUrl (decisión pura de endpoint)', () {
@@ -139,6 +141,159 @@ void main() {
         expect(FirebaseConfig.relayRecoveryWorthy, isTrue);
       },
     );
+  });
+
+  group('re-sonda de recuperación del relay (medido 2026-11-20)', () {
+    setUp(() => FirebaseConfig.resetRelayReachability());
+    tearDown(() => FirebaseConfig.resetRelayReachability());
+
+    test('tras caerse MIENTRAS se usaba quiere re-sondear, y se recupera sola '
+        'cuando el relay vuelve', () async {
+      final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(server.close);
+      Future<bool> ver() => FirebaseConfig.probeRelayReachability(
+            timeout: const Duration(milliseconds: 400),
+            ports: [server.port],
+            host: server.address.address,
+          );
+      expect(await ver(), isTrue);
+      expect(
+        FirebaseConfig.relayRecoveryWorthy,
+        isFalse,
+        reason: 'con el relay vivo no hay nada que re-sondear',
+      );
+      // El caso real: `relay.py` se reinicia en el S7 y los servicios reciben
+      // Connection refused. Sin esta marca la app latcheaba Google para toda la
+      // sesión (medido: 0 peticiones al relay en 3 min) y sus heartbeats
+      // volvían a pagar cuota escritos directo en Google.
+      FirebaseConfig.markRelayUnreachable();
+      expect(
+        FirebaseConfig.relayRecoveryWorthy,
+        isTrue,
+        reason: 'se cayó estando en uso: hay que recuperarlo sin cerrar la app',
+      );
+      // `zz-relay.sh` lo levanta en ~10 s: la re-sonda lo encuentra y la puerta
+      // se apaga sola, no se sigue sondeando.
+      expect(await ver(), isTrue);
+      expect(FirebaseConfig.relayReachabilityState, isTrue);
+      expect(
+        FirebaseConfig.relayRecoveryWorthy,
+        isFalse,
+        reason: 'recuperado: no gastar handshakes de más',
+      );
+    });
+
+    test('un equipo que nunca usó el relay no pide re-sonda: el usuario '
+        'off-LAN no paga timeouts cada 45 s', () async {
+      final probe = await FirebaseConfig.probeRelayReachability(
+        timeout: const Duration(milliseconds: 300),
+        ports: [40001, 40002],
+        host: '192.168.100.253',
+      );
+      expect(probe, isFalse);
+      expect(
+        FirebaseConfig.relayRecoveryWorthy,
+        isFalse,
+        reason: 'nunca lo vio vivo: no hay relación que recuperar',
+      );
+      // Un error de red contra Google (estando `null`) tampoco la enciende:
+      // `markRelayUnreachable` sólo deja marca si estaba EN USO.
+      FirebaseConfig.markRelayUnreachable();
+      expect(FirebaseConfig.relayRecoveryWorthy, isFalse);
+    });
+
+    test('noteRelayRecoveryWanted es el caso del S7 levantándose con la app '
+        'ya abierta (cache true + sonda de arranque fallida)', () {
+      FirebaseConfig.markRelayUnreachable();
+      expect(
+        FirebaseConfig.relayRecoveryWorthy,
+        isFalse,
+        reason: 'sin relación previa no se sondea',
+      );
+      FirebaseConfig.noteRelayRecoveryWanted();
+      expect(FirebaseConfig.relayRecoveryWorthy, isTrue);
+      FirebaseConfig.resetRelayReachability();
+      expect(
+        FirebaseConfig.relayRecoveryWorthy,
+        isFalse,
+        reason: 'el reset limpia la marca, para que las pruebas arranquen limpias',
+      );
+    });
+
+    test('la sonda de arranque con cache decide la recuperación y persiste lo '
+        'que midió', () async {
+      SharedPreferences.setMockInitialValues(
+          {FirebaseConfig.relayReachabilityCacheKey: true});
+      FirebaseConfig.relayHostOverrideForTest = '192.168.100.253';
+      FirebaseConfig.relayPortOverrideForTest = 40001;
+      await FirebaseConfig.probeRelayReachabilityAndCache();
+      expect(FirebaseConfig.relayReachabilityState, isFalse);
+      expect(
+        FirebaseConfig.relayRecoveryWorthy,
+        isTrue,
+        reason: 'el cache decía vivo: este equipo SÍ vive en la LAN del relay',
+      );
+      final prefs = await SharedPreferences.getInstance();
+      expect(
+        prefs.getBool(FirebaseConfig.relayReachabilityCacheKey),
+        isFalse,
+        reason: 'el cache es telemetría: guarda lo medido en este arranque',
+      );
+    });
+
+    test('un build sin host horneado no sondea ni decide nada', () async {
+      SharedPreferences.setMockInitialValues(
+          {FirebaseConfig.relayReachabilityCacheKey: true});
+      await FirebaseConfig.probeRelayReachabilityAndCache();
+      expect(
+        FirebaseConfig.relayReachabilityState,
+        isNull,
+        reason: 'sin relay horneado la función sale antes de tocar la red',
+      );
+    });
+
+    test('la re-sonda del tick encuentra el relay levantado y apaga la puerta '
+        'sola', () async {
+      final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(server.close);
+      FirebaseConfig.relayHostOverrideForTest = server.address.address;
+      FirebaseConfig.relayPortOverrideForTest = server.port;
+      FirebaseConfig.setRelayReachableForTest(false);
+      FirebaseConfig.noteRelayRecoveryWanted();
+      expect(FirebaseConfig.relayRecoveryWorthy, isTrue);
+
+      final svc = TvRemoteService.instance;
+      svc.resetReprobeStateForTest();
+      svc.reprobeRelayForTest();
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+
+      expect(FirebaseConfig.relayReachabilityState, isTrue,
+          reason: 'la re-sonda colgada del tick encontró el relay');
+      expect(FirebaseConfig.relayRecoveryWorthy, isFalse,
+          reason: 'recuperado: la puerta se apaga sola');
+    });
+
+    test('la re-sonda respeta su intervalo: dentro de la ventana no se gasta '
+        'otro handshake', () {
+      final now = DateTime.now();
+      expect(
+        TvRemoteService.reprobeDue(
+            last: DateTime.fromMillisecondsSinceEpoch(0), now: now),
+        isTrue,
+      );
+      expect(TvRemoteService.reprobeDue(last: now, now: now), isFalse);
+      expect(
+        TvRemoteService.reprobeDue(
+            last: now.subtract(const Duration(seconds: 44)), now: now),
+        isFalse,
+        reason: '44 s: todavía dentro de la ventana de 45 s',
+      );
+      expect(
+        TvRemoteService.reprobeDue(
+            last: now.subtract(const Duration(seconds: 45)), now: now),
+        isTrue,
+      );
+    });
   });
 
   group('clasificación de errores que activan el reintento', () {

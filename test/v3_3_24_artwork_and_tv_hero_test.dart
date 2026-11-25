@@ -68,15 +68,15 @@ void main() {
     ),
   ];
 
-  group('v3.3.24 a v3.3.43 — pins de versión y documentación', () {
-    test('pubspec.yaml en 3.3.43+92', () {
-      expect(_pubspecVersion(), '3.3.43+92');
+  group('v3.3.24 a v3.3.44 — pins de versión y documentación', () {
+    test('pubspec.yaml en 3.3.44+93', () {
+      expect(_pubspecVersion(), '3.3.44+93');
     });
 
-    test('lib/constants/app_info.dart en 3.3.43', () {
+    test('lib/constants/app_info.dart en 3.3.44', () {
       expect(File('lib/constants/app_info.dart').readAsStringSync(),
-          contains("static const String appVersion = '3.3.43'"));
-      expect(AppInfo.appVersion, '3.3.43');
+          contains("static const String appVersion = '3.3.44'"));
+      expect(AppInfo.appVersion, '3.3.44');
     });
 
     test('CHANGELOG.md documenta 3.3.24 a 3.3.37 con mejoras de portadas, navegación TV, colores, logos Crunchyroll, seguridad LAN, inutix.com, redes lentas, rebrand Inutix TV, proxy del sistema y redes corporativas', () {
