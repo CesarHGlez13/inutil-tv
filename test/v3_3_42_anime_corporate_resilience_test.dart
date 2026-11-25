@@ -469,7 +469,56 @@ void main() {
     });
   });
 
-  group('v3.3.46 — Changelog y versión sincronizados', () {
+  group('v3.3.47 — el aviso del usuario pone el relevo al frente', () {
+    test('el ajuste «Redes que revisan el tráfico» enciende el sondeo y la '
+        'alterna responde antes de la primera petición', () async {
+      // Medido desde la empresa el 2026-11-25 con la app ya en 3.3.46: el
+      // interrupto estaba ON, la salida por proxy era «Directo», el DNS cifrado
+      // respondía y los cinco renglones del sondeo salieron verdes — pero ni una
+      // sola petición del celular llegó al relay. En el código la razón estaba
+      // clara: `corporateModeActive` se queda en false en esa red (no hay proxy
+      // del sistema, el DNS no miente, y la app nunca VE una conexión fallida
+      // porque los proveedores le contestan con la página de comprobación de la
+      // red, y eso se parsea como «sin resultados»), así que el sondeo no se
+      // hacía y todo salía directo. El ajuste es el aviso que el usuario nos dio:
+      // ahora también enciende el sondeo, y la base normal se da por cortada
+      // cuando responde su página de filtro en vez del contrato de salud.
+      expect(NetworkConfigService.instance.corporateModeActive, isFalse,
+          reason: 'esa red no da ninguna de las señales que se usaban antes');
+      expect(NetworkConfigService.instance.tlsFallbackEnabled, isTrue,
+          reason: 'el usuario dijo que su red inspecciona: con eso basta');
+
+      srv.serveFilterPageOnHealthz = true; // el filtro de la red, tal cual
+      final altSrv = await _ToyServer.start(); // el relay, en el nombre que sí deja pasar
+      RemoteProvidersConfig.instance.applyMap({
+        'metaBaseUrl': srv.base, // sondeada: contesta la página de filtro
+        'metaBaseAlt': altSrv.base,
+        'tioAnimeBaseUrl': 'https://tioanime.com',
+      });
+
+      await AnimeEdgeRoute.instance.ensureEdgeBase();
+
+      expect(
+          AnimeEdgeRoute.instance
+              .routeUri(Uri.parse('https://tioanime.com/directorio?q=naruto'))
+              .toString(),
+          '${altSrv.base}/ak/tioanime/directorio?q=naruto',
+          reason: 'la alterna ya está al frente antes de la primera petición');
+
+      final hits = await TioAnimeService().search('naruto');
+
+      expect(hits, isNotEmpty, reason: 'la búsqueda tiene que responder, no quedar en cero');
+      expect(hits.first.provider, 'tioanime');
+      expect(altSrv.hits['/ak/tioanime/directorio'] ?? 0, greaterThan(0),
+          reason: 'la búsqueda salió por la base alterna del borde');
+      expect(srv.hits['/healthz'] ?? 0, greaterThan(0),
+          reason: 'el sondeo se pagó una sola vez, sobre la base normal');
+
+      await altSrv.stop();
+    });
+  });
+
+  group('v3.3.47 — Changelog y versión sincronizados', () {
     const forbiddenTerms = [
       'pelisflix',
       'jkanime',
@@ -502,17 +551,17 @@ void main() {
           RegExp(r'^version:\s*(\d+\.\d+\.\d+)\+(\d+)', multiLine: true)
               .firstMatch(pubspec);
       expect(match, isNotNull);
-      expect(match!.group(1), '3.3.46');
-      expect(match.group(2), '95');
-      expect(AppInfo.appVersion, '3.3.46');
-      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.46'));
+      expect(match!.group(1), '3.3.47');
+      expect(match.group(2), '96');
+      expect(AppInfo.appVersion, '3.3.47');
+      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.47'));
     });
 
-    test('la nota de 3.3.46 no expone proveedores ni detalles internos', () {
+    test('la nota de 3.3.47 no expone proveedores ni detalles internos', () {
       final full = File('CHANGELOG.md').readAsStringSync();
-      final start = full.indexOf('## 3.3.46');
+      final start = full.indexOf('## 3.3.47');
       expect(start, greaterThan(0));
-      final end = full.indexOf('## 3.3.42', start);
+      final end = full.indexOf('## 3.3.46', start);
       expect(end, greaterThan(start));
       final entry = full.substring(start, end).toLowerCase();
 
@@ -541,6 +590,9 @@ class _ToyServer {
   final HttpServer _server;
   final String base;
   final Map<String, int> hits = {};
+  /// v3.3.47 — Pone el juguete en la piel del filtro de la red de la empresa:
+  /// `/healthz` contesta 200 con su página de aviso en vez del contrato de salud.
+  bool serveFilterPageOnHealthz = false;
 
   static Future<_ToyServer> start() async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -569,7 +621,13 @@ class _ToyServer {
     final String body;
     var status = 200;
 
-    if (path.startsWith('/jk/')) {
+    if (path == '/healthz' && serveFilterPageOnHealthz) {
+      // v3.3.47 — La página de filtro tal cual la respondió el proxy de la
+      // empresa el 2026-11-25 desde el celular de la oficina: 200 con su aviso.
+      body = '<html><head><title>Página web bloqueada</title></head>'
+          '<body><p>La página web que intentaste visitar ha sido bloqueada de '
+          'acuerdo con la política de la empresa.</p></body></html>';
+    } else if (path.startsWith('/jk/')) {
       // v3.3.46 — Medido desde casa y desde la empresa con las cabeceras de la
       // app: `jkanime.net` responde DIRECTO (200), y por el borde responde 403
       // con su propia verificación de Cloudflare. Así que la app prueba la ruta

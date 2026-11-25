@@ -186,6 +186,10 @@ class AnimeEdgeRoute {
     if (!prefixByRouteKey.containsKey(routeKey)) return false;
     if (_isNoDetourPath(routeKey, uriPath)) return false;
     if (_edgePreferred.contains(routeKey)) return true;
+    // v3.3.47 — El sondeo de `ensureEdgeBase()` ya aprendió que la base normal
+    // está cortada en esta red, así que el relevo manda en todos los proveedores
+    // que el borde sirve, aunque la red no dé ninguna otra señal.
+    if (_altPreferred) return true;
     return NetworkConfigService.instance.corporateModeActive;
   }
 
@@ -340,16 +344,38 @@ class AnimeEdgeRoute {
     return lower.contains('just a moment') ||
         lower.contains('verifying your connection') ||
         lower.contains('cf-browser-verification') ||
-        lower.contains('enable javascript and cookies');
+        lower.contains('enable javascript and cookies') ||
+        // v3.3.47 — La página de filtro de la red de la empresa, medida el
+        // 2026-11-25 desde el celular de la oficina: el proxy responde 200 con su
+        // aviso de política («Página web bloqueada») en vez de contenido, y eso
+        // no es una respuesta usable, es el filtro de la red.
+        lower.contains('página web bloqueada') ||
+        lower.contains('web page blocked') ||
+        lower.contains('ha sido bloqueada') ||
+        lower.contains('ha sido bloqueado');
   }
 
   /// v3.3.46 — Asegura la base del borde antes de que la red la necesite, para
   /// que la primera petición ya salga por la que responde y no por la que la red
-  /// corta. Sondea la base normal una sola vez por sesión y sólo en modo
-  /// corporativo (en casa no hace nada). Si no responde, la alterna toma el
-  /// relevo para toda la sesión.
+  /// corta. Sondea la base normal una sola vez por sesión. Si no responde, la
+  /// alterna toma el relevo para toda la sesión.
+  ///
+  /// v3.3.47 — El sondeo lo activa también el ajuste «Redes que revisan el
+  /// tráfico». Medido desde la empresa el 2026-11-25 con la app en 3.3.46: esa
+  /// red no tiene proxy del sistema, su DNS cifrado responde y el sondeo de
+  /// conexión sale verde, así que `corporateModeActive` se queda en `false` y el
+  /// relevo nunca se activaba (el celular mandó todo directo y no llegó ni una
+  /// petición al camino alterno). La app además nunca VE una conexión fallida:
+  /// los proveedores le contestan con la página de comprobación de la red, y eso
+  /// se parsea como «sin resultados». El ajuste es el aviso del usuario de que su
+  /// red inspecciona: con eso basta para pagar el sondeo, una sola petición por
+  /// sesión. En casa el sondeo responde sano y el orden queda exactamente como
+  /// antes.
   Future<void> ensureEdgeBase() async {
-    if (!NetworkConfigService.instance.corporateModeActive) return;
+    if (!(NetworkConfigService.instance.corporateModeActive ||
+        NetworkConfigService.instance.tlsFallbackEnabled)) {
+      return;
+    }
     final alt = RemoteProvidersConfig.instance.metaBaseAlt;
     if (alt.isEmpty || _baseChecked) return;
     _baseChecked = true;
@@ -357,7 +383,13 @@ class AnimeEdgeRoute {
       final res = await http
           .get(Uri.parse('${RemoteProvidersConfig.instance.metaBaseUrl}/healthz'))
           .timeout(const Duration(seconds: 4));
-      if (_looksBlocked(res)) _altPreferred = true;
+      // v3.3.47 — La base está sana sólo si contesta su contrato de salud. Todo
+      // lo demás —la página de filtro de la red, la verificación de Cloudflare,
+      // un 200 cualquiera— significa que por ahí no va a llegar el contenido.
+      final body = res.body.replaceAll(RegExp(r'\s'), '');
+      if (res.statusCode != 200 || !body.contains('{"ok":true}')) {
+        _altPreferred = true;
+      }
     } catch (_) {
       // ni respondió: la alterna es la que toca probar primero
       _altPreferred = true;

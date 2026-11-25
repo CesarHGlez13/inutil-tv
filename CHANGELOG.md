@@ -1,5 +1,10 @@
 # Changelog — Inutix TV
 
+## 3.3.47 — 2026-11-25
+- **El aviso de «Redes que revisan el tráfico» ahora sí decide:** Si tu empresa u hotel cifra lo que navegas, la app ya lo toma en cuenta para elegir el camino del anime desde el primer intento, sin esperar a que algo se caiga.
+- **La página de bloqueo de tu red no se confunde con el catálogo:** Si el filtro de la empresa responde con su aviso, la app lo reconoce y usa el camino alterno, así la lista, la ficha, los episodios y el video no quedan en cero.
+- **Lo que ya venía funcionando sigue igual:** Cine, Series y TV en vivo no cambian, y en tu red de casa todo va por el camino de siempre.
+
 ## 3.3.46 — 2026-11-25
 - **Anime en la red de la empresa, sin trabas:** Si el filtro de tu empresa corta el camino por el que la app buscaba el anime, ahora usa el camino alterno desde el primer intento, así la lista, la ficha, los episodios y el video no quedan en cero.
 - **Se quitó un panel interno que solo usaba el administrador:** La gestión de cuentas se hace desde la página oficial de inutix.com, así Ajustes queda más limpio.
