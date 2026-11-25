@@ -4,7 +4,7 @@ class AppInfo {
   const AppInfo._();
 
   static const String appName = 'Inutix TV';
-  static const String appVersion = '3.3.37';
+  static const String appVersion = '3.3.38';
   static const String creatorName = 'César';
   static const String supportEmail = 'cesarmaster133@gmail.com';
 
@@ -21,6 +21,7 @@ class AppInfo {
       'Ecosistema inutix.com · Inutix TV & Inutix Music';
 
   static const List<String> whatsNewHighlights = [
+    'PelisFlix vuelve a listar y reproducir: la app reconoce la nueva forma en que el sitio publica sus servidores',
     'Funciona en redes de empresa, hoteles y aeropuertos, incluso cuando tu red exige un punto de salida',
     'Nueva identidad oficial Inutix TV con el logo renovado iX TV en móvil y Android TV',
     'Detección automática del punto de salida (proxy) de tu red Wi‑Fi, aplicada solo a lo que sale de la app',

@@ -315,6 +315,55 @@ class PelisflixService {
     }
   }
 
+  /// Saca los servidores que publica una página (ver [playerUrlsFromHtml]).
+  /// `responded` false significa que no contestó, distinto de "respondió pero no
+  /// lista jugadores".
+  Future<({bool responded, List<String> urls})> _playersFor(String pageUrl) async {
+    try {
+      final res = await http
+          .get(Uri.parse(pageUrl), headers: _headers)
+          .timeout(const Duration(seconds: 10));
+      if (res.statusCode != 200) return (responded: false, urls: <String>[]);
+      return (responded: true, urls: playerUrlsFromHtml(res.body));
+    } catch (e) {
+      debugPrint('[PelisflixService] Error cargando $pageUrl: $e');
+      return (responded: false, urls: <String>[]);
+    }
+  }
+
+  /// Servidores que publica el HTML de una página. El template histórico los
+  /// publicaba como `data-url` en base64; el de ahora los lista en un `<select>`
+  /// con `<option value="http...">`, y algunos vienen envueltos (`?url=`
+  /// codificado) por el proveedor, así que el servidor real es el de adentro. Se
+  /// aceptan las tres formas para no romper a los proveedores que cambiaron de
+  /// template.
+  @visibleForTesting
+  static List<String> playerUrlsFromHtml(String html) {
+    final urls = <String>[];
+    void add(String u) {
+      if (u.startsWith('http') && !urls.contains(u)) urls.add(u);
+    }
+
+    for (final raw in RegExp(r'''data-(?:url|server)=["\']([^"\']+)["\']''')
+        .allMatches(html)) {
+      try {
+        add(utf8.decode(base64.decode(raw.group(1)!), allowMalformed: true));
+      } catch (_) {}
+    }
+
+    final optionRe = RegExp(
+      '''<option[^>]*value=["\'](https?://[^"\']+)["\']''',
+      caseSensitive: false,
+    );
+    for (final m in optionRe.allMatches(html)) {
+      final u = m.group(1)!;
+      add(u);
+      final inner = Uri.parse(u).queryParameters['url'];
+      if (inner != null) add(inner);
+    }
+    return urls;
+  }
+
   /// Resuelve TODAS las fuentes de reproducción válidas (Nupload + VOE + directos)
   /// reportando progreso humano paso a paso para el HUD del reproductor.
   Future<List<StreamSource>> resolveAllStreamSources(
@@ -330,39 +379,47 @@ class PelisflixService {
 
     final resolved = <StreamSource>[];
     final seenUrls = <String>{};
-    final playbackHeaders = {
+    var playbackHeaders = {
       'Referer': '$baseUrl/',
       'User-Agent': _headers['User-Agent']!,
     };
 
     try {
-      final pageUrl = slugOrUrl.startsWith('http')
+      var pageUrl = slugOrUrl.startsWith('http')
           ? slugOrUrl
           : '$baseUrl/pelicula/$slugOrUrl/';
+      final isSlug = !slugOrUrl.startsWith('http');
 
       onStatus?.call('Consultando servidores disponibles...');
-      final res = await http
-          .get(Uri.parse(pageUrl), headers: _headers)
-          .timeout(const Duration(seconds: 10));
-      if (res.statusCode != 200) {
+      final primary = await _playersFor(pageUrl);
+      var responded = primary.responded;
+      var decodedUrls = primary.urls;
+
+      // v3.3.38: el dominio principal responde con un template cuyo reproductor
+      // llena el navegador, así que ahí el scraper no ve servidores. Reintentamos
+      // los espejos publicados, que sí listan los jugadores en el HTML.
+      if (responded && decodedUrls.isEmpty && isSlug) {
+        for (final mirror in mirrors) {
+          final mirrorUrl = '$mirror/pelicula/$slugOrUrl/';
+          if (mirrorUrl == pageUrl) continue;
+          onStatus?.call('Probando un espejo...');
+          pageUrl = mirrorUrl;
+          final tried = await _playersFor(pageUrl);
+          responded = tried.responded;
+          decodedUrls = tried.urls;
+          if (decodedUrls.isNotEmpty) break;
+        }
+      }
+
+      // El Referer de reproducción es el de la página que dio la lista.
+      playbackHeaders = {
+        'Referer': pageUrl,
+        'User-Agent': _headers['User-Agent']!,
+      };
+
+      if (!responded) {
         onStatus?.call('Servidor no disponible temporalmente.');
         return [];
-      }
-      final html = res.body;
-
-      final dataUrls = RegExp(r'''data-(?:url|server)=["\']([^"\']+)["\']''')
-          .allMatches(html)
-          .map((m) => m.group(1)!)
-          .toList();
-
-      final decodedUrls = <String>[];
-      for (final raw in dataUrls) {
-        try {
-          final dec = utf8.decode(base64.decode(raw), allowMalformed: true);
-          if (dec.startsWith('http') && !decodedUrls.contains(dec)) {
-            decodedUrls.add(dec);
-          }
-        } catch (_) {}
       }
 
       if (decodedUrls.isEmpty) {
@@ -517,25 +574,30 @@ class PelisflixService {
 
   /// Descifra el HLS directo de VOE.sx
   Future<String?> _decryptVoe(String voeUrl, {required String referer}) async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+    client.userAgent = _headers['User-Agent']!;
     try {
-      final client = HttpClient()
-        ..connectionTimeout = const Duration(seconds: 8);
-      client.userAgent = _headers['User-Agent']!;
-      final req = await client.getUrl(Uri.parse(voeUrl));
-      req.headers.set('User-Agent', _headers['User-Agent']!);
-      req.headers.set('Referer', referer);
-      final res = await req.close().timeout(const Duration(seconds: 8));
-      final html = await res.transform(utf8.decoder).join();
-      client.close();
+      var html = await _getVia(client, voeUrl, referer);
 
-      final jsonMatch = RegExp(
+      final jsonRe = RegExp(
         r'<script\s+type="application/json">(.*?)</script>',
         dotAll: true,
-      ).firstMatch(html);
+      );
+      var jsonMatch = jsonRe.firstMatch(html);
       if (jsonMatch == null) {
         final direct = RegExp(r'''(https?://[^\s"'<>]+\.m3u8[^\s"'<>]*)''')
             .firstMatch(html);
-        return direct?.group(1);
+        if (direct != null) return direct.group(1);
+
+        // v3.3.38: VOE ya no publica el JSON en la URL corta, responde una página
+        // con el salto que daría el navegador (`window.location.href = 'https://
+        // <dominio en rotacion>/e/<id>'`). Hay que dar ese salto; el dominio rota,
+        // así que se usa el que la propia página dice, nunca uno fijado aqui.
+        final hop = voeHopUrl(html);
+        if (hop == null) return null;
+        html = await _getVia(client, hop, referer);
+        jsonMatch = jsonRe.firstMatch(html);
+        if (jsonMatch == null) return null;
       }
 
       final rawList = jsonDecode(jsonMatch.group(1)!) as List;
@@ -554,7 +616,28 @@ class PelisflixService {
     } catch (e) {
       debugPrint('[PelisflixService] Fallo descifrando VOE: $e');
       return null;
+    } finally {
+      client.close();
     }
+  }
+
+  /// URL del salto que la página de VOE manda dar al navegador. El dominio del
+  /// destino rota, así que se usa siempre el que la página dice.
+  @visibleForTesting
+  static String? voeHopUrl(String html) {
+    final m = RegExp(
+      r'''window\.location\.href\s*=\s*["\'](https?://[^"\']+)["\']''',
+    ).firstMatch(html);
+    return m?.group(1);
+  }
+
+  /// GET con los headers de la app, para dar el salto que daría el navegador.
+  Future<String> _getVia(HttpClient client, String url, String referer) async {
+    final req = await client.getUrl(Uri.parse(url));
+    req.headers.set('User-Agent', _headers['User-Agent']!);
+    req.headers.set('Referer', referer);
+    final res = await req.close().timeout(const Duration(seconds: 8));
+    return res.transform(utf8.decoder).join().timeout(const Duration(seconds: 8));
   }
 
   static String _rot13(String input) {

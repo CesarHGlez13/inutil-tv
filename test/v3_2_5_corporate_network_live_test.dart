@@ -22,6 +22,12 @@ void main() async {
   final live = Platform.environment.containsKey('INUTILTV_REAL_NET');
   final net = NetworkConfigService.instance;
 
+  /// IP de la máquina que no sea bucle interno. Los tests de proxy la usan para
+  /// dirigirse a los servidores locales: el motor de red deja el bucle interno
+  /// siempre en `DIRECT` (v3.3.36), así que si se llamara a `localhost` el proxy
+  /// nunca se ejercitaría y el test sería decorativo.
+  final lanIp = live ? await _firstNonLoopbackIp() : null;
+
   /// El ejecutor de pruebas de Flutter suele estar aislado de internet y,
   /// ademas, Flutter sustituye HttpClient por uno de burla dentro de las
   /// pruebas. Por eso la puerta de los grupos remotos se mide con sockets
@@ -152,20 +158,31 @@ void main() async {
     test(
       'proxy de la red: CONNECT y bytes reales a traves del tunel',
       () async {
-        final origin = await _SelfSignedServer.start();
+        final origin = await _SelfSignedServer.start(sanIp: lanIp!);
         final proxy = await _ConnectProxy.start();
         try {
           expect(await net.setProxy('127.0.0.1:${proxy.port}'), isNull);
           expect(net.mpvProxyUrl, 'http://127.0.0.1:${proxy.port}');
-          // Con proxy, el nombre lo resuelve el proxy: el DNS seguro no estorba.
+
+          // Con proxy activo el nombre lo resuelve el proxy, asi que el DNS
+          // cifrado se mantiene en silencio (v3.2.5). El bucle interno en cambio
+          // siempre va DIRECT (v3.3.36), y por eso el servidor de juguete se
+          // llama aqui por la IP del equipo: si fuera `localhost` el proxy nunca
+          // se ejercitaria y el test solo simularia pasar.
+          expect(
+            net.resolveProxyDirectiveForUri(Uri.parse('http://localhost:1/')),
+            'DIRECT',
+          );
           expect(await net.resolve('peliculas.inutiltv.tv'), isNull);
 
-          // Cliente como el del video: tolera el certificado del firewall.
+          // Cliente como el del video: tolera el certificado del firewall. Se
+          // llama a la IP de la maquina (no al bucle interno) para que el
+          // trafico salga de verdad por el tunel del proxy.
           final client = HttpClient();
           net.apply(client, tolerateBadCertificates: true);
           try {
             final req = await client
-                .getUrl(Uri.parse('https://localhost:${origin.port}/'));
+                .getUrl(Uri.parse('https://$lanIp:${origin.port}/'));
             final res = await req.close().timeout(const Duration(seconds: 12));
             final body = await utf8.decoder.bind(res).join();
             expect(res.statusCode, 200);
@@ -176,7 +193,7 @@ void main() async {
 
           // El trafico salio por el proxy y el certificado se valido contra el
           // servidor de destino, no contra el proxy.
-          expect(proxy.tunnels, contains('localhost:${origin.port}'));
+          expect(proxy.tunnels, contains('$lanIp:${origin.port}'));
         } finally {
           await proxy.close();
           await origin.close();
@@ -195,7 +212,10 @@ void main() async {
         final client = HttpClient();
         Object? fallo;
         try {
-          final req = await client.getUrl(Uri.parse('https://localhost:9/'));
+          // Se llama a la IP de la maquina, no al bucle interno, para que el
+          // trafico pase de verdad por el proxy muerto (el bucle interno siempre
+          // va DIRECT, v3.3.36).
+          final req = await client.getUrl(Uri.parse('https://$lanIp:9/'));
           await req.close().timeout(const Duration(seconds: 12));
         } catch (e) {
           fallo = e;
@@ -326,7 +346,7 @@ void main() async {
     );
 
     test(
-      'Comprobacion de conexion mide los cuatro frentes',
+      'Comprobacion de conexion mide los cinco frentes',
       () async {
         final report = await net.runDiagnostics();
         for (final c in report.checks) {
@@ -335,7 +355,7 @@ void main() async {
         }
         expect(
           report.checks.map((c) => c.label).toList(),
-          ['Cuenta', 'Catálogo', 'Video', 'Actualizaciones'],
+          ['Cuenta', 'Catálogo', 'Video', 'Actualizaciones', 'DNS cifrado'],
         );
         expect(report.viaSecureDns, isTrue);
         expect(report.viaProxy, isFalse);
@@ -350,6 +370,22 @@ void main() async {
           : 'sin acceso a todos los frentes de la app',
     );
   });
+}
+
+/// La IP del equipo que no es bucle interno. Los tests de proxy la usan para
+/// dirigirse a los servidores locales: el bucle interno siempre va DIRECT
+/// (v3.3.36), asi que llamarlo por `localhost` dejaria el proxy sin ejercitar.
+Future<String> _firstNonLoopbackIp() async {
+  final interfaces = await NetworkInterface.list(
+    type: InternetAddressType.IPv4,
+    includeLoopback: false,
+  );
+  for (final iface in interfaces) {
+    for (final address in iface.addresses) {
+      if (!address.isLoopback) return address.address;
+    }
+  }
+  throw StateError('este equipo no tiene una IP que no sea el bucle interno');
 }
 
 /// Comprueba, sin usar HttpClient, si este entorno puede abrir TLS contra un
@@ -515,10 +551,13 @@ class _SelfSignedServer {
 
   int get port => _server.port;
 
-  static Future<_SelfSignedServer> start() async {
+  static Future<_SelfSignedServer> start({String? sanIp}) async {
     final dir = await Directory.systemTemp.createTemp('inutiltv_tls_fixture');
     final key = '${dir.path}/key.pem';
     final crt = '${dir.path}/cert.pem';
+    final subjectAltName =
+        'subjectAltName=DNS:localhost,IP:127.0.0.1'
+        '${sanIp == null ? '' : ',IP:$sanIp'}';
     final result = await Process.run('openssl', [
       'req',
       '-x509',
@@ -534,7 +573,7 @@ class _SelfSignedServer {
       '-subj',
       '/CN=localhost',
       '-addext',
-      'subjectAltName=DNS:localhost,IP:127.0.0.1',
+      subjectAltName,
     ]);
     if (result.exitCode != 0) {
       throw StateError(
@@ -544,11 +583,11 @@ class _SelfSignedServer {
     final ctx = SecurityContext()
       ..useCertificateChain(crt)
       ..usePrivateKey(key);
-    final server = await HttpServer.bindSecure(
-      InternetAddress.loopbackIPv4,
-      0,
-      ctx,
-    );
+    // Con sanIp se escucha en todas las interfaces para que el test la alcance
+    // por la IP del equipo y el trafico salga por el tunel del proxy.
+    final escucha =
+        sanIp == null ? InternetAddress.loopbackIPv4 : InternetAddress.anyIPv4;
+    final server = await HttpServer.bindSecure(escucha, 0, ctx);
     server.listen((req) async {
       req.response
         ..statusCode = 200
