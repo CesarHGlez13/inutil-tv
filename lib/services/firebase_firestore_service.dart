@@ -30,6 +30,16 @@ class InutilFirestoreService {
 
   String? get _idToken => InutilAuthService.instance.currentUser?.idToken;
 
+  /// Cliente propio, sólo para `postDailyMetrics`. Los demás métodos siguen con
+  /// las funciones top-level de `package:http` para no cambiar su comportamiento.
+  http.Client? _httpClient;
+  http.Client get _client => _httpClient ??= http.Client();
+
+  /// Permite inyectar un cliente HTTP en pruebas (mismo patrón que
+  /// `TitleLogoService.testClient`), sin tocar la red real.
+  @visibleForTesting
+  set testClient(http.Client? client) => _httpClient = client;
+
   /// Reduce el cuerpo de un error de Google a una sola línea legible.
   static String briefErrorBody(String body) {
     final flat = body.replaceAll(RegExp(r'\s+'), ' ').trim();
@@ -370,6 +380,37 @@ class InutilFirestoreService {
           .timeout(const Duration(seconds: 10)),
     );
     return response.statusCode >= 200 && response.statusCode < 300;
+  }
+
+  /// Reporte diario de telemetría: `POST {BASE}/metrics/<uid>/daily`.
+  ///
+  /// A diferencia de las escrituras de Firestore, el cuerpo es JSON PLANO (no el
+  /// envoltorio `fields`), porque el endpoint es del relay, no de Google. El
+  /// cuerpo es el TOTAL ACUMULADO del día calendario UTC, no un delta, y el relay
+  /// hace merge por columna (el último valor del día gana), así que reenviar el
+  /// mismo total es idempotente. Mismo token Bearer que toda escritura.
+  ///
+  /// Devuelve la respuesta cruda para que la capa de arriba decida; no hace el
+  /// `ensureFreshIdToken` de los métodos de documento porque el llamante reintenta
+  /// en el siguiente cierre de sesión y ahí el token ya estará fresco.
+  Future<http.Response> postDailyMetrics({
+    required String uid,
+    required Map<String, dynamic> body,
+    String? overrideToken,
+  }) async {
+    final path = 'metrics/$uid/daily';
+    final encoded = jsonEncode(body);
+    return _sendWithRelayFallback(
+      label: 'POST $path',
+      urlBuilder: () => Uri.parse('${FirebaseConfig.firestoreBaseUrl}/$path'),
+      send: (url) => _client
+          .post(
+            url,
+            headers: _headers(overrideToken: overrideToken),
+            body: encoded,
+          )
+          .timeout(const Duration(seconds: 10)),
+    );
   }
 
   // ---------------------------------------------------------------------------

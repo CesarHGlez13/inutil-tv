@@ -11,6 +11,7 @@ import 'package:uuid/uuid.dart';
 import '../models/models.dart';
 import 'firebase_auth_service.dart';
 import 'firebase_firestore_service.dart';
+import 'tv_daily_usage_service.dart';
 import 'tv_mode_service.dart';
 
 /// Estado en vivo publicado por la Smart TV para que el celular actúe como
@@ -425,6 +426,9 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
   void _handleTvBackgrounded() {
     debugPrint(
         '🌙 [TvRemoteService] Smart TV app en pausa/fondo. Notificando estado OFFLINE...');
+    // Cierre de sesión: momento de mandar el acumulado del día al relay. En Android
+    // TV la app se mata sin avisar, así que el reporte se apoya en este hook.
+    unawaited(TvDailyUsageService.instance.flush());
     _tvHeartbeatTimer?.cancel();
     _tvCommandPollTimer?.cancel();
     try {

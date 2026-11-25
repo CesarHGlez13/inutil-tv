@@ -18,6 +18,7 @@ import '../services/network_config_service.dart';
 import '../services/offline_vault_service.dart';
 import '../services/sleep_timer_service.dart';
 import '../services/stream_validator.dart';
+import '../services/tv_daily_usage_service.dart';
 import '../services/tv_mode_service.dart';
 import '../services/tv_remote_service.dart';
 import '../services/vod_catalog_service.dart';
@@ -1425,6 +1426,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   @override
   void dispose() {
     _saveCurrentProgress();
+    // Cierre de sesión (stop del último playback): momento de mandar el acumulado
+    // del día al relay. El servicio garantiza una sola escritura por día, así que
+    // los cierres extra son no-ops y no añaden timers ni polls.
+    unawaited(TvDailyUsageService.instance.flush());
     _hideTimer?.cancel();
     _tvSeekBarTimer?.cancel();
     _tvLiveBannerTimer?.cancel();

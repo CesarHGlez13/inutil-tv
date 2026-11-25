@@ -146,6 +146,23 @@ class InutilTvWrappedSummary {
   }
 }
 
+/// Totales acumulados de un día calendario UTC, en el formato que acepta el
+/// relay (`tvMinutes` double, `tvSessions`/`tvOpens` int). No es un delta.
+@immutable
+class TvDailyTotals {
+  const TvDailyTotals({
+    required this.minutes,
+    required this.sessions,
+    required this.opens,
+  });
+
+  final double minutes;
+  final int sessions;
+  final int opens;
+
+  bool get isEmpty => minutes == 0 && sessions == 0 && opens == 0;
+}
+
 /// Motor de estadísticas anuales («Tu Año en InútilTV») portado desde Inútil Music,
 /// con respaldo automático en Firestore (`users/{uid}/data/tv_wrapped_<year>`).
 class InutilTvWrappedService {
@@ -155,10 +172,20 @@ class InutilTvWrappedService {
   static const _prefsPrefix = 'inutiltv_wrapped_stats_v1_';
   static const _maxStoredTitles = 100;
 
+  /// Contabilidad diaria del store, clave aparte del bucket anual para no cambiar
+  /// la forma del documento `tv_wrapped_<año>` que ya lee la consola del relay.
+  static const _dailyKey = 'inutiltv_daily_usage_v1';
+  static const _dailyRetentionDays = 7;
+
   final Map<int, _TvYearBucket> _buckets = {};
   Timer? _persistTimer;
   Timer? _cloudTimer;
   String? _lastCountedSessionKey;
+
+  /// Contadores acumulados por día calendario UTC (`YYYYMMDD`), la fuente de la
+  /// telemetría diaria que sube al relay (`tvMinutes`/`tvSessions`/`tvOpens`).
+  final Map<String, _TvDayUsage> _dailyUsage = {};
+  bool _dailyHydrated = false;
 
   bool get _canSyncCloud =>
       InutilAuthService.instance.currentUser?.idToken.isNotEmpty == true &&
@@ -204,7 +231,117 @@ class InutilTvWrappedService {
       seconds: (prev?.seconds ?? 0) + deltaSeconds,
     );
 
+    // Contabilidad diaria (día calendario UTC, no local como `activeDays`): es la
+    // fuente del reporte al relay. Se persiste enseguida porque en Android TV la
+    // app la matan sin avisar y el cierre nunca llega a ocurrir.
+    unawaited(_noteDay(now.toUtc(), deltaSeconds: deltaSeconds, sessionId: cleanId));
+
     _schedulePersist();
+  }
+
+  /// Suma una apertura de app al día calendario UTC en curso. La llama el gate de
+  /// sesión en el arranque en primer plano / `resumed`, que es el hook que ya
+  /// existía; no se le agregaron timers ni polls a este servicio.
+  void noteAppOpen() {
+    unawaited(_noteDay(DateTime.now().toUtc(), opens: 1));
+  }
+
+  /// Totales acumulados por día calendario UTC (`YYYYMMDD`), ordenados del más
+  /// viejo al más nuevo, listos para el reporte diario. Minutos, no segundos.
+  Future<Map<String, TvDailyTotals>> dailyTotalsUtc() async {
+    await _hydrateDaily();
+    final keys = _dailyUsage.keys.toList()..sort();
+    return {for (final k in keys) k: _dailyUsage[k]!.asTotals()};
+  }
+
+  /// Acumula en el día UTC indicado y deja la contabilidad lista para el cierre.
+  Future<void> _noteDay(
+    DateTime utcNow, {
+    int deltaSeconds = 0,
+    String? sessionId,
+    int opens = 0,
+  }) async {
+    final dayKey = _utcDayKey(utcNow);
+    final day = _dailyUsage.putIfAbsent(dayKey, () => _TvDayUsage());
+    day.seconds += deltaSeconds;
+    if (sessionId != null && day.sessionIds.add(sessionId)) {
+      day.sessions += 1;
+    }
+    day.opens += opens;
+    await _persistDaily();
+  }
+
+  /// Carga del disco la contabilidad diaria que quedó pendiente tras un cierre sin
+  /// reporte. Lo ya visto en esta sesión manda sobre lo del disco: el proceso actual
+  /// es la fuente de sus propios contadores.
+  Future<void> _hydrateDaily() async {
+    if (_dailyHydrated) return;
+    _dailyHydrated = true;
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final raw = sp.getString(_dailyKey);
+      if (raw == null || raw.isEmpty) return;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return;
+      for (final entry in decoded.entries) {
+        final value = entry.value;
+        if (value is! Map) continue;
+        final dayKey = entry.key.toString();
+        final fromDisk = _TvDayUsage.fromMap(value.cast<String, dynamic>());
+        final current = _dailyUsage[dayKey];
+        if (current == null) {
+          _dailyUsage[dayKey] = fromDisk;
+          continue;
+        }
+        if (fromDisk.seconds > current.seconds) current.seconds = fromDisk.seconds;
+        if (fromDisk.sessions > current.sessions) {
+          current.sessions = fromDisk.sessions;
+        }
+        if (fromDisk.opens > current.opens) current.opens = fromDisk.opens;
+        current.sessionIds.addAll(fromDisk.sessionIds);
+      }
+    } catch (e) {
+      debugPrint('[TvWrapped] Daily hydrate err: $e');
+    }
+  }
+
+  Future<void> _persistDaily() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      _pruneDaily();
+      final out = <String, dynamic>{};
+      for (final entry in _dailyUsage.entries) {
+        out[entry.key] = entry.value.toMap();
+      }
+      await sp.setString(_dailyKey, jsonEncode(out));
+    } catch (e) {
+      debugPrint('[TvWrapped] Daily persist err: $e');
+    }
+  }
+
+  /// Deja sólo los últimos `_dailyRetentionDays` días: el reporte manda el
+  /// acumulado del día, así que un día ya cerrado nunca vuelve a cambiar.
+  void _pruneDaily() {
+    final cutoff = DateTime.now().toUtc().subtract(
+      const Duration(days: _dailyRetentionDays - 1),
+    );
+    final cutoffKey = _utcDayKey(cutoff);
+    _dailyUsage.removeWhere((day, _) => day.compareTo(cutoffKey) < 0);
+  }
+
+  static String _utcDayKey(DateTime utc) {
+    final t = utc.isUtc ? utc : utc.toUtc();
+    return '${t.year}${t.month.toString().padLeft(2, '0')}'
+        '${t.day.toString().padLeft(2, '0')}';
+  }
+
+  /// Reinicia la contabilidad diaria en memoria (pruebas): deja solo lo que quedó
+  /// en el disco, que es exactamente lo que vería la app tras un reinicio.
+  @visibleForTesting
+  void resetDailyCountersForTest() {
+    _dailyUsage.clear();
+    _dailyHydrated = false;
+    _lastCountedSessionKey = null;
   }
 
   void _schedulePersist() {
@@ -366,6 +503,40 @@ class InutilTvWrappedService {
       fromHistoryFallback: true,
     );
   }
+}
+
+/// Contadores de un día calendario UTC, persistidos en SharedPreferences para que
+/// sobrevivan a los cierres brusos de Android TV.
+class _TvDayUsage {
+  _TvDayUsage();
+
+  int seconds = 0;
+  int sessions = 0;
+  int opens = 0;
+
+  /// Títulos vistos hoy: la primera vez que aparece uno se cuenta la sesión, y la
+  /// lista se guarda para no contar dos veces la misma tras un reinicio.
+  final Set<String> sessionIds = {};
+
+  TvDailyTotals asTotals() => TvDailyTotals(
+        minutes: double.parse((seconds / 60).toStringAsFixed(1)),
+        sessions: sessions,
+        opens: opens,
+      );
+
+  Map<String, dynamic> toMap() => <String, dynamic>{
+        'seconds': seconds,
+        'sessions': sessions,
+        'opens': opens,
+        'sessionIds': sessionIds.toList(),
+      };
+
+  factory _TvDayUsage.fromMap(Map<String, dynamic> m) => _TvDayUsage()
+    ..seconds = (m['seconds'] as num?)?.toInt() ?? 0
+    ..sessions = (m['sessions'] as num?)?.toInt() ?? 0
+    ..opens = (m['opens'] as num?)?.toInt() ?? 0
+    ..sessionIds
+        .addAll(((m['sessionIds'] as List?) ?? const <dynamic>[]).map((e) => e.toString()));
 }
 
 class _TvYearBucket {

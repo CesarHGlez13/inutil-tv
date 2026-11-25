@@ -13,6 +13,7 @@ import '../services/fullscreen_playback_coordinator.dart';
 import '../services/inutil_cloud_backup_service.dart';
 import '../services/network_config_service.dart';
 import '../services/sleep_timer_service.dart';
+import '../services/tv_daily_usage_service.dart';
 import '../services/tv_mode_service.dart';
 import '../services/tv_remote_service.dart';
 import '../services/xuper_service.dart';
@@ -319,6 +320,8 @@ class _TvScreenState extends State<TvScreen> with WidgetsBindingObserver {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
+      // Cierre de sesión: es el momento de mandar al relay el acumulado del día.
+      unawaited(TvDailyUsageService.instance.flush());
       _pauseEmbeddedForBackground();
     } else if (state == AppLifecycleState.resumed &&
         widget.isTabActive &&

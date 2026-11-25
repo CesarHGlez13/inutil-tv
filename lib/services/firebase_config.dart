@@ -105,6 +105,24 @@ class FirebaseConfig {
   static bool get backupRelayUsable =>
       !useEmulator && _activeBackupRelayHost.isNotEmpty;
 
+  /// `true` sólo cuando el prefijo REST de escritura (`firestoreBaseUrl`) apunta a
+  /// un relay propio (LAN del S7, `api.inutix.com` o `backup.inutix.com`) y NO a
+  /// Google directo.
+  ///
+  /// Replica la misma cadena de decisión de `firestoreBaseUrl`, pero sin los
+  /// efectos secundarios de `cloudRelayUsable` (que limpia su cooldown al
+  /// consultarse), porque aquí sólo se quiere responder si el endpoint existe:
+  /// `POST metrics/<uid>/daily` vive únicamente en el relay, contra Google no hay
+  /// ruta, así que la telemetría diaria no se escribe cuando se resuelve directo.
+  static bool get dailyReportEndpointIsRelay =>
+      !useEmulator &&
+      ((_activeRelayHost.isNotEmpty && _relayReachable == true) ||
+       (_activeCloudRelayHost.isNotEmpty &&
+        (_cloudRelayFailedAt == null ||
+         DateTime.now().difference(_cloudRelayFailedAt!) >=
+             _cloudRelayCooldown)) ||
+       _activeBackupRelayHost.isNotEmpty);
+
   static void markCloudRelayUnreachable() {
     _cloudRelayFailedAt = DateTime.now();
   }

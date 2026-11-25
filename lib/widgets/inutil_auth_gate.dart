@@ -5,6 +5,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../services/firebase_auth_service.dart';
 import '../services/inutil_cloud_backup_service.dart';
+import '../services/tv_daily_usage_service.dart';
 import '../services/tv_mode_service.dart';
 import '../services/tv_qr_pairing_service.dart';
 import '../theme/app_colors.dart';
@@ -46,8 +47,12 @@ class _InutilAuthGateState extends State<InutilAuthGate>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _auth.onAppResumed();
+      // Apertura de app (arranque en primer plano o `resumed`): único hook de
+      // lifecycle que ya existía, la contabilidad la lleva el store.
+      TvDailyUsageService.instance.noteAppOpen();
     } else if (state == AppLifecycleState.paused) {
       unawaited(InutilTvCloudBackupService.instance.pushNow());
+      unawaited(TvDailyUsageService.instance.flush());
     }
   }
 
