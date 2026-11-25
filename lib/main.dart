@@ -14,6 +14,7 @@ import 'screens/search_screen.dart';
 import 'screens/series_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/tv_screen.dart';
+import 'services/anime_edge_route.dart';
 import 'services/app_settings_service.dart';
 import 'services/artwork_cache_service.dart';
 import 'services/firebase_auth_service.dart';
@@ -45,7 +46,8 @@ void main() {
   // Red tolerante a restricciones (DNS seguro / proxy de empresa). Debe
   // instalarse antes de la primera petición, incluida la caché de carátulas.
   NetworkConfigService.instance.installGlobalOverride();
-  unawaited(NetworkConfigService.instance.load());
+  unawaited(NetworkConfigService.instance.load()
+      .then((_) => AnimeEdgeRoute.instance.ensureEdgeBase()));
   unawaited(TvModeService.instance.initialize());
   MediaKit.ensureInitialized();
   // Sonda de alcance al relay propio (S7) para que un build horneado con

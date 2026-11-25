@@ -21,6 +21,7 @@ class AppInfo {
       'Ecosistema inutix.com · Inutix TV & Inutix Music';
 
   static const List<String> whatsNewHighlights = [
+    'Anime en la red de la empresa, sin trabas: si el filtro de tu empresa corta un camino, la app usa el alterno desde el primer intento, así la lista, la ficha, los episodios y el video no quedan en cero',
     'Anime en redes de empresa, hoteles y aeropuertos, ahora completo: la app usa el camino que sí le responde para la lista, la ficha, la búsqueda y el reproductor, sin vueltas innecesarias',
     'Anime completo en redes de empresa, hoteles y aeropuertos: la app prueba primero el camino que sí le responde, así la lista, la ficha y los episodios no se cortan por un intento perdido',
     'La conexión con tu servidor de datos se recupera sola: si se reinicia con la app abierta, la app lo detecta y vuelve a él sin que hagas nada',

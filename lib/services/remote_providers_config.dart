@@ -24,6 +24,14 @@ class RemoteProvidersConfig {
 
   // Defaults verificados en producción (usados al instante antes de cualquier red).
   static const String defaultMetaBaseUrl = 'https://meta.inutix.com';
+  /// Base alterna del borde. Se llena desde `app_config/providers` con el nombre
+  /// que el proxy de la red SÍ deja pasar: medido desde la empresa el
+  /// 2026-11-25, `meta.inutix.com/healthz` responde "Página web bloqueada" (el
+  /// filtro lo categoriza como dominio recién registrado), y ahí la ruta asistida
+  /// se cae si no hay otro nombre. Es la misma ruta `workers.dev` por la que ya
+  /// se usa el relay en la capa de datos.
+  static const String defaultMetaBaseAlt =
+      'https://inutil-edge-gateway.scada-xiaomi-server.workers.dev';
   static const String defaultOtaBaseUrl = 'https://ota.inutix.com';
   static const String defaultSeriesKaoBaseUrl = 'https://serieskao.top';
   static const String defaultJkAnimeBaseUrl = 'https://jkanime.net';
@@ -55,6 +63,7 @@ class RemoteProvidersConfig {
   ];
 
   String _metaBaseUrl = defaultMetaBaseUrl;
+  String _metaBaseAlt = defaultMetaBaseAlt;
   String _otaBaseUrl = defaultOtaBaseUrl;
   String _seriesKaoBaseUrl = defaultSeriesKaoBaseUrl;
   String _jkAnimeBaseUrl = defaultJkAnimeBaseUrl;
@@ -67,6 +76,7 @@ class RemoteProvidersConfig {
   Future<void>? _inFlightRefresh;
 
   String get metaBaseUrl => _metaBaseUrl;
+  String get metaBaseAlt => _metaBaseAlt;
   String get otaBaseUrl => _otaBaseUrl;
   String get seriesKaoBaseUrl => _seriesKaoBaseUrl;
   String get jkAnimeBaseUrl => _jkAnimeBaseUrl;
@@ -198,6 +208,7 @@ class RemoteProvidersConfig {
     final result = <String, dynamic>{};
     for (final k in const [
       'metaBaseUrl',
+      'metaBaseAlt',
       'otaBaseUrl',
       'seriesKaoBaseUrl',
       'jkAnimeBaseUrl',
@@ -222,6 +233,9 @@ class RemoteProvidersConfig {
   void applyMap(Map<String, dynamic> map) {
     final meta = _cleanHttpBase(map['metaBaseUrl']);
     if (meta != null) _metaBaseUrl = meta;
+
+    final metaAlt = _cleanHttpBase(map['metaBaseAlt']);
+    if (metaAlt != null) _metaBaseAlt = metaAlt;
 
     final ota = _cleanHttpBase(map['otaBaseUrl']);
     if (ota != null) _otaBaseUrl = ota;
@@ -293,6 +307,7 @@ class RemoteProvidersConfig {
   @visibleForTesting
   void resetToDefaults() {
     _metaBaseUrl = defaultMetaBaseUrl;
+    _metaBaseAlt = defaultMetaBaseAlt;
     _otaBaseUrl = defaultOtaBaseUrl;
     _seriesKaoBaseUrl = defaultSeriesKaoBaseUrl;
     _jkAnimeBaseUrl = defaultJkAnimeBaseUrl;

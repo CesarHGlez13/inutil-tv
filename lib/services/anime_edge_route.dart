@@ -127,6 +127,22 @@ class AnimeEdgeRoute {
 
   final Map<String, DateTime> _blockedUntil = <String, DateTime>{};
   final Set<String> _edgePreferred = <String>{};
+  /// true cuando la base normal del borde ya falló y la alterna es la que toca
+  /// probar primero. Se aprende sola, y `resetForTest()` la deja como estaba.
+  bool _altPreferred = false;
+  /// true si el sondeo de `ensureEdgeBase()` ya se hizo en esta sesión (una sola
+  /// vez, para no pagar un viaje extra en cada pantalla).
+  bool _baseChecked = false;
+
+  /// Bases del borde en el orden en que conviene probarlas. La alterna sólo
+  /// existe si la config remota la llenó (`metaBaseAlt`); sin ella el orden es
+  /// el de siempre y no se gasta ningún viaje extra.
+  List<String> _basesEnOrden() {
+    final primary = RemoteProvidersConfig.instance.metaBaseUrl;
+    final alt = RemoteProvidersConfig.instance.metaBaseAlt;
+    if (alt.isEmpty) return <String>[primary];
+    return _altPreferred ? <String>[alt, primary] : <String>[primary, alt];
+  }
 
   /// Clave canónica de un proveedor (`routeKey` o el host que se conoce).
   /// `null` si el host no es del frente de anime: eso se deja siempre directo.
@@ -193,18 +209,23 @@ class AnimeEdgeRoute {
     final key = keyFor(uri, routeKey: routeKey);
     if (key == null) return uri;
     final host = uri.host.toLowerCase();
-    final edgeHost = RemoteProvidersConfig.instance.metaBaseUrl
-        .replaceFirst(RegExp(r'^https?://'), '')
-        .toLowerCase();
-    if (host == 'localhost' || host == '::1' || host == '127.0.0.1' || host == edgeHost) {
+    final edgeHosts = <String>{
+      RemoteProvidersConfig.instance.metaBaseUrl,
+      RemoteProvidersConfig.instance.metaBaseAlt,
+    }.map((b) => b.replaceFirst(RegExp(r'^https?://'), '').toLowerCase()).toSet();
+    if (host == 'localhost' ||
+        host == '::1' ||
+        host == '127.0.0.1' ||
+        edgeHosts.contains(host)) {
       return uri;
     }
     if (!shouldUseEdge(key, uriPath: uri.path)) return uri;
-    return _edgeUrl(uri, prefixByRouteKey[key]!);
+    return _edgeUrl(uri, prefixByRouteKey[key]!,
+        baseOverride: _basesEnOrden().first);
   }
 
-  Uri _edgeUrl(Uri uri, String prefix) {
-    final base = RemoteProvidersConfig.instance.metaBaseUrl;
+  Uri _edgeUrl(Uri uri, String prefix, {String? baseOverride}) {
+    final base = baseOverride ?? RemoteProvidersConfig.instance.metaBaseUrl;
     final tail = uri.path.replaceFirst(RegExp(r'^/+'), '');
     final q = uri.queryParameters.isEmpty
         ? ''
@@ -228,21 +249,43 @@ class AnimeEdgeRoute {
     String? routeKey,
   }) async {
     final key = keyFor(uri, routeKey: routeKey);
-    final edge = key == null ? null : _edgeUrl(uri, prefixByRouteKey[key]!);
+    final primaryBase = RemoteProvidersConfig.instance.metaBaseUrl;
 
-    final order = <Uri>[uri];
-    if (edge != null && shouldUseEdge(key!, uriPath: uri.path)) {
-      order.insert(0, edge);
-      order.removeLast();
-    } else if (edge != null) {
-      order.add(edge);
+    // Rutas en el orden que dicta la memoria de red. Sin base alterna la lista
+    // queda exactamente como antes (borde + directo, o directo + borde); con ella
+    // hay dos viajes por el borde antes de rendirse con el directo.
+    final order = <Uri>[];
+    final baseDeRuta = <String?>[]; // `null` es la ruta directa
+    void addDirecta() {
+      order.add(uri);
+      baseDeRuta.add(null);
+    }
+
+    void addEdge(String base) {
+      order.add(_edgeUrl(uri, prefixByRouteKey[key]!, baseOverride: base));
+      baseDeRuta.add(base);
+    }
+
+    if (key == null) {
+      addDirecta();
+    } else if (shouldUseEdge(key, uriPath: uri.path)) {
+      for (final b in _basesEnOrden()) {
+        addEdge(b);
+      }
+      addDirecta();
+    } else {
+      addDirecta();
+      for (final b in _basesEnOrden()) {
+        addEdge(b);
+      }
     }
 
     http.Response? last;
     var viaEdge = false;
 
-    for (final target in order) {
-      final isEdge = target != uri;
+    for (var i = 0; i < order.length; i++) {
+      final target = order[i];
+      final isEdge = baseDeRuta[i] != null;
       final h = Map<String, String>.from(headers);
       if (isEdge) {
         for (final k in const [
@@ -272,6 +315,11 @@ class AnimeEdgeRoute {
       } catch (_) {
         // ni respondió: se prueba la otra ruta antes de rendirse
       }
+      if (isEdge && baseDeRuta[i] == primaryBase) {
+        // La base normal del borde no sirvió en esta red: la alterna pasa al
+        // frente para los viajes que siguen en la sesión.
+        _altPreferred = true;
+      }
     }
 
     if (key != null) markBlocked(key);
@@ -295,9 +343,32 @@ class AnimeEdgeRoute {
         lower.contains('enable javascript and cookies');
   }
 
+  /// v3.3.46 — Asegura la base del borde antes de que la red la necesite, para
+  /// que la primera petición ya salga por la que responde y no por la que la red
+  /// corta. Sondea la base normal una sola vez por sesión y sólo en modo
+  /// corporativo (en casa no hace nada). Si no responde, la alterna toma el
+  /// relevo para toda la sesión.
+  Future<void> ensureEdgeBase() async {
+    if (!NetworkConfigService.instance.corporateModeActive) return;
+    final alt = RemoteProvidersConfig.instance.metaBaseAlt;
+    if (alt.isEmpty || _baseChecked) return;
+    _baseChecked = true;
+    try {
+      final res = await http
+          .get(Uri.parse('${RemoteProvidersConfig.instance.metaBaseUrl}/healthz'))
+          .timeout(const Duration(seconds: 4));
+      if (_looksBlocked(res)) _altPreferred = true;
+    } catch (_) {
+      // ni respondió: la alterna es la que toca probar primero
+      _altPreferred = true;
+    }
+  }
+
   @visibleForTesting
   void resetForTest() {
     _blockedUntil.clear();
     _edgePreferred.clear();
+    _altPreferred = false;
+    _baseChecked = false;
   }
 }

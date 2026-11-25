@@ -409,6 +409,63 @@ void main() {
     }, skip: live ? false : 'requiere INUTILTV_REAL_NET=1', timeout: const Timeout(Duration(seconds: 60)));
   });
 
+  group('v3.3.46 — base alterna del borde cuando la red corta el nombre', () {
+    test('la base alterna toma el relevo antes de la primera petición', () async {
+      // Medido desde la empresa el 2026-11-25 con el navegador del celular:
+      // `meta.inutix.com/healthz` responde «Página web bloqueada» — el proxy de la
+      // red lo corta por categorizarlo como dominio recién registrado — mientras
+      // `api.inutix.com` (el relay) sí deja pasar. La base alterna, la misma capa
+      // `workers.dev` por la que ya se usa el relay, es la que toma el relevo, y
+      // el sondeo de `ensureEdgeBase()` la pone al frente ANTES de la primera
+      // petición para que la búsqueda no se caiga en el primer intento.
+      NetworkConfigService.instance.setSystemProxyForTest('proxy.empresa.local:8080');
+      RemoteProvidersConfig.instance.applyMap({
+        'metaBaseUrl': 'http://127.0.0.1:9', // cortada: conexión rechazada
+        'metaBaseAlt': srv.base, // la alterna sirve lo del proveedor
+        'tioAnimeBaseUrl': 'https://tioanime.com',
+      });
+
+      await AnimeEdgeRoute.instance.ensureEdgeBase();
+
+      expect(
+          AnimeEdgeRoute.instance
+              .routeUri(Uri.parse('https://tioanime.com/directorio?q=naruto'))
+              .toString(),
+          '${srv.base}/ak/tioanime/directorio?q=naruto',
+          reason: 'la base alterna ya está al frente: la primera petición sale por ella');
+
+      final hits = await TioAnimeService().search('naruto');
+
+      expect(hits, isNotEmpty,
+          reason: 'la cadena de anime tiene que responder, no quedar en cero');
+      expect(hits.first.provider, 'tioanime');
+      expect(srv.hits['/ak/tioanime/directorio'] ?? 0, greaterThan(0),
+          reason: 'la búsqueda salió por la base alterna del borde');
+    });
+
+    test('en casa la base alterna no se usa: la ruta es la de siempre', () {
+      // Sin señales de red corporativa, `ensureEdgeBase()` no hace nada y la
+      // pestaña sale por la ruta de siempre. La alterna sólo toma el relevo cuando
+      // la red dio señales de filtrar.
+      RemoteProvidersConfig.instance.applyMap({'metaBaseAlt': srv.base});
+      expect(
+          AnimeEdgeRoute.instance
+              .routeUri(Uri.parse('https://tioanime.com/anime/naruto'))
+              .toString(),
+          'https://tioanime.com/anime/naruto');
+
+      // Y si la memoria de red pidiera dar la vuelta, en casa el relevo sigue
+      // siendo la base normal: la alterna sólo entra cuando la red da señales de
+      // cortar esa base, y eso lo prueba el test de arriba.
+      AnimeEdgeRoute.instance.markEdgePreferred('tioanime.com');
+      expect(
+          AnimeEdgeRoute.instance
+              .routeUri(Uri.parse('https://tioanime.com/anime/naruto'))
+              .toString(),
+          'https://meta.inutix.com/ak/tioanime/anime/naruto');
+    });
+  });
+
   group('v3.3.46 — Changelog y versión sincronizados', () {
     const forbiddenTerms = [
       'pelisflix',
@@ -493,8 +550,18 @@ class _ToyServer {
   String url(String path) => '$base$path';
 
   Future<void> _handle(HttpRequest req) async {
-    final path = req.uri.path;
-    hits[path] = (hits[path] ?? 0) + 1;
+    final arrived = req.uri.path;
+    hits[arrived] = (hits[arrived] ?? 0) + 1;
+    // v3.3.46 — Lo que llega por la base alterna del borde (`/ak/<proveedor>/...`)
+    // sirve exactamente lo mismo que el proveedor, así que se normaliza aquí y se
+    // cobra bajo el nombre con el que llegó la petición.
+    final path = arrived.startsWith('/ak/tioanime')
+        ? arrived.replaceFirst('/ak/tioanime', '/tio')
+        : arrived.startsWith('/ak/kao')
+            ? arrived.replaceFirst('/ak/kao', '/kao')
+            : arrived.startsWith('/ak/yourupload')
+                ? arrived.replaceFirst('/ak/yourupload', '/up')
+                : arrived;
 
     final String body;
     var status = 200;
