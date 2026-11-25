@@ -1,5 +1,10 @@
 # Changelog — Inutix TV
 
+## 3.3.39 — 2026-11-24
+- **Mayor disponibilidad en películas y series:** Mejoras en la búsqueda y carga automática de enlaces de video para encontrar más opciones reproducibles.
+- **Reproducción más estable sin configurar nada:** Se afinó el arranque de video para reducir errores y pantallas sin respuesta cuando una fuente cambia.
+- **Identidad Inutix TV consistente:** Ajustes finales de estabilidad general, íconos y notas de versión pensadas para el usuario.
+
 ## 3.3.38 — 2026-11-24
 - **Mayor disponibilidad en películas y series:** Mejoras en la búsqueda y carga automática de enlaces de video para encontrar más opciones reproducibles.
 - **Reproducción más estable sin configurar nada:** Se afinó el arranque de video para reducir errores y pantallas sin respuesta cuando una fuente cambia.

@@ -86,7 +86,7 @@ void main() {
       'libmpv',
     ];
     final full = File('CHANGELOG.md').readAsStringSync();
-    final start = full.indexOf('## 3.3.38');
+    final start = full.indexOf('## 3.3.39');
     expect(start, greaterThan(0));
     final end = full.indexOf('## 3.3.37', start);
     expect(end, greaterThan(start));
@@ -94,7 +94,7 @@ void main() {
     final highlights = AppInfo.whatsNewHighlights.join('\n');
     for (final term in forbiddenTerms) {
       expect(entry.toLowerCase(), isNot(contains(term.toLowerCase())),
-          reason: 'CHANGELOG 3.3.38 no debe exponer $term');
+          reason: 'CHANGELOG 3.3.38–3.3.39 no debe exponer $term');
       expect(highlights.toLowerCase(), isNot(contains(term.toLowerCase())),
           reason: 'AppInfo.whatsNewHighlights no debe exponer $term');
     }
