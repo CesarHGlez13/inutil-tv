@@ -9,7 +9,6 @@ import 'package:tubotv/screens/about_screen.dart';
 import 'package:tubotv/services/firebase_auth_service.dart';
 import 'package:tubotv/services/firebase_config.dart';
 import 'package:tubotv/services/firebase_firestore_service.dart';
-import 'package:tubotv/widgets/inutil_admin_panel.dart';
 import 'package:tubotv/widgets/inutil_auth_gate.dart';
 
 Future<void> seedSession({
@@ -333,61 +332,6 @@ void main() {
       expect(find.text('APP_INTERIOR'), findsOneWidget);
       expect(find.byType(InutilAuthScreen), findsNothing);
       expect(find.byType(InutilLicenseBlockedScreen), findsNothing);
-    });
-
-    testWidgets('InutilAdminPanel renderiza controles y usuarios sin overflow',
-        (tester) async {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-        'inutil_tv_users_cache_v3',
-        jsonEncode([
-          {
-            'uid': 'uid_admin',
-            'email': 'cesar@inutilmusic.com',
-            'displayName': 'César',
-            'role': 'admin',
-            'status': 'active',
-            'isActive': true,
-            'accountExpiresAt': DateTime(2099, 12, 31).toIso8601String(),
-          },
-          {
-            'uid': 'uid_pending_1',
-            'email': 'nuevo@cliente.com',
-            'displayName': 'Juan',
-            'role': 'user',
-            'status': 'pending',
-            'isActive': false,
-          },
-        ]),
-      );
-      await seedSession(
-        uid: 'uid_admin',
-        email: 'cesar@inutilmusic.com',
-        role: 'admin',
-        status: 'active',
-        isActive: true,
-        expiresAt: DateTime(2099, 12, 31).toIso8601String(),
-      );
-      await InutilAuthService.instance.initialize();
-
-      // Probar en tamaño de teléfono angosto (390x844) para descartar overflows.
-      tester.view.physicalSize = const Size(390, 844);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.resetPhysicalSize);
-
-      await tester.pumpWidget(
-        const MaterialApp(
-          home: Scaffold(body: InutilAdminPanel()),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.text('Panel de Control César'), findsOneWidget);
-      expect(find.text('Nuevo Usuario'), findsOneWidget);
-      expect(find.text('cesar@inutilmusic.com'), findsOneWidget);
-      expect(find.text('nuevo@cliente.com'), findsOneWidget);
-      expect(find.text('⏳ PENDIENTE'), findsOneWidget);
-      expect(find.text('👑 ADMIN'), findsOneWidget);
     });
 
     testWidgets('AboutScreen muestra creador, versión, novedades y donaciones',

@@ -1,5 +1,9 @@
 # Changelog — Inutix TV
 
+## 3.3.46 — 2026-11-25
+- **Se quitó un panel interno que solo usaba el administrador:** La gestión de cuentas se hace desde la página oficial de inutix.com, así Ajustes queda más limpio.
+- **Nada cambia para ti:** Cine, Series, Anime y TV en vivo siguen igual, y en tu red de casa todo va por el camino de siempre.
+
 ## 3.3.45 — 2026-11-25
 - **Anime en redes de empresa, hoteles y aeropuertos, ahora completo:** La app deja de dar vueltas innecesarias: usa el camino que sí le responde para la lista, la ficha, la búsqueda y el reproductor, sin perder un intento que la dejaba en cero.
 - **Lo que ya venía funcionando sigue igual:** Cine, Series y TV en vivo no cambian, y en tu red de casa todo va por el camino de siempre.

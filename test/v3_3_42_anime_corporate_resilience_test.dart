@@ -31,7 +31,7 @@ import 'package:tubotv/services/vod_catalog_service.dart';
 /// lo reconoce, no lo vuelve a intentar, y usa el camino alterno para la lista,
 /// la ficha, los episodios y el video.
 ///
-/// v3.3.45 — Medido desde casa con las cabeceras completas de la app, en la
+/// v3.3.46 — Medido desde casa con las cabeceras completas de la app, en la
 /// red de la empresa el catálogo principal de anime (jkanime) responde DIRECTO
 /// (200, 71 KB) y por el borde propio responde 403 con su propia verificación
 /// de Cloudflare, porque el borde es un Worker y no puede pasar ese filtro. Así
@@ -409,7 +409,7 @@ void main() {
     }, skip: live ? false : 'requiere INUTILTV_REAL_NET=1', timeout: const Timeout(Duration(seconds: 60)));
   });
 
-  group('v3.3.45 — Changelog y versión sincronizados', () {
+  group('v3.3.46 — Changelog y versión sincronizados', () {
     const forbiddenTerms = [
       'pelisflix',
       'jkanime',
@@ -442,15 +442,15 @@ void main() {
           RegExp(r'^version:\s*(\d+\.\d+\.\d+)\+(\d+)', multiLine: true)
               .firstMatch(pubspec);
       expect(match, isNotNull);
-      expect(match!.group(1), '3.3.45');
-      expect(match.group(2), '94');
-      expect(AppInfo.appVersion, '3.3.45');
-      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.45'));
+      expect(match!.group(1), '3.3.46');
+      expect(match.group(2), '95');
+      expect(AppInfo.appVersion, '3.3.46');
+      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.46'));
     });
 
-    test('la nota de 3.3.45 no expone proveedores ni detalles internos', () {
+    test('la nota de 3.3.46 no expone proveedores ni detalles internos', () {
       final full = File('CHANGELOG.md').readAsStringSync();
-      final start = full.indexOf('## 3.3.45');
+      final start = full.indexOf('## 3.3.46');
       expect(start, greaterThan(0));
       final end = full.indexOf('## 3.3.42', start);
       expect(end, greaterThan(start));
@@ -500,7 +500,7 @@ class _ToyServer {
     var status = 200;
 
     if (path.startsWith('/jk/')) {
-      // v3.3.45 — Medido desde casa y desde la empresa con las cabeceras de la
+      // v3.3.46 — Medido desde casa y desde la empresa con las cabeceras de la
       // app: `jkanime.net` responde DIRECTO (200), y por el borde responde 403
       // con su propia verificación de Cloudflare. Así que la app prueba la ruta
       // directa primero y el borde queda como respaldo. El juguete sirve lo que

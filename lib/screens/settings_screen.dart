@@ -14,7 +14,6 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_ui.dart';
 import '../theme/inutil_icons.dart';
-import '../widgets/inutil_admin_panel.dart';
 import '../widgets/inutil_sleep_timer_sheet.dart';
 import '../services/tv_mode_service.dart';
 import '../services/tv_remote_service.dart';
@@ -572,95 +571,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
               const SizedBox(height: 22),
 
-              // ─── 1.5 Administración VIP (Solo para cuentas con rol admin) ───
-              if (user?.isAdmin == true) ...[
-                Text('Administración Firebase VIP',
-                    style: appSectionTitleStyle(context)),
-                const SizedBox(height: 10),
-                _cardContainer(
-                  context,
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFE8B949)
-                                  .withValues(alpha: 0.16),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: const Color(0xFFE8B949)
-                                    .withValues(alpha: 0.4),
-                              ),
-                            ),
-                            child: const Center(
-                              child: Icon(
-                                Icons.admin_panel_settings_rounded,
-                                color: Color(0xFFE8B949),
-                                size: 24,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Panel de Licencias y Cuentas',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 15.5,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'Gestión profesional de usuarios, roles, días y equipos en Firebase',
-                                  style: TextStyle(
-                                    color: subColor,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFE8B949),
-                            foregroundColor: Colors.black,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            elevation: 0,
-                          ),
-                          onPressed: () => InutilAdminPanel.show(context),
-                          icon: const Icon(Icons.manage_accounts_rounded,
-                              size: 19),
-                          label: const Text(
-                            'Abrir Panel de Control VIP',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 13.5,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 22),
-              ],
 
               // 2. Apariencia (exactamente igual que Inútil Music!)
               Text('Apariencia', style: appSectionTitleStyle(context)),
