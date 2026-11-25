@@ -4,7 +4,7 @@ class AppInfo {
   const AppInfo._();
 
   static const String appName = 'Inutix TV';
-  static const String appVersion = '3.3.44';
+  static const String appVersion = '3.3.45';
   static const String creatorName = 'César';
   static const String supportEmail = 'cesarmaster133@gmail.com';
 
@@ -21,6 +21,7 @@ class AppInfo {
       'Ecosistema inutix.com · Inutix TV & Inutix Music';
 
   static const List<String> whatsNewHighlights = [
+    'Anime en redes de empresa, hoteles y aeropuertos, ahora completo: la app usa el camino que sí le responde para la lista, la ficha, la búsqueda y el reproductor, sin vueltas innecesarias',
     'Anime completo en redes de empresa, hoteles y aeropuertos: la app prueba primero el camino que sí le responde, así la lista, la ficha y los episodios no se cortan por un intento perdido',
     'La conexión con tu servidor de datos se recupera sola: si se reinicia con la app abierta, la app lo detecta y vuelve a él sin que hagas nada',
     'Anime completo en redes de empresa, hoteles y aeropuertos: al reproducir un episodio la app usa primero la dirección que sí le responde, así el video arranca sin que configures nada',

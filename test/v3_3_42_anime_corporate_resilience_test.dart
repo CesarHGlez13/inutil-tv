@@ -31,7 +31,7 @@ import 'package:tubotv/services/vod_catalog_service.dart';
 /// lo reconoce, no lo vuelve a intentar, y usa el camino alterno para la lista,
 /// la ficha, los episodios y el video.
 ///
-/// v3.3.44 — Medido desde casa con las cabeceras completas de la app, en la
+/// v3.3.45 — Medido desde casa con las cabeceras completas de la app, en la
 /// red de la empresa el catálogo principal de anime (jkanime) responde DIRECTO
 /// (200, 71 KB) y por el borde propio responde 403 con su propia verificación
 /// de Cloudflare, porque el borde es un Worker y no puede pasar ese filtro. Así
@@ -145,12 +145,18 @@ void main() {
           'https://meta.inutix.com/ak/tioanime/anime/naruto');
       expect(route.routeUri(Uri.parse('https://serieskao.top/animes/populares')).toString(),
           'https://meta.inutix.com/ak/kao/animes/populares');
+      // Los que el borde no sirve de verdad (medido 2026-11-25 con cabeceras de
+      // la app, midiendo los dos caminos): se dejan directos incluso en la
+      // empresa. `cdn.jkdesa.com` y `nika.playmudos.com` están detrás de
+      // Cloudflare y responden directo; dar ahí la vuelta es un viaje extra sin
+      // ganancia, y en el reproductor de Playmudos el borde ve la salida
+      // compartida de la red, que es justo lo que ese dominio filtra.
       expect(
           route.routeUri(Uri.parse('https://cdn.jkdesa.com/assets/images/animes/image/naruto.jpg')).toString(),
-          'https://meta.inutix.com/ak/cdn/assets/images/animes/image/naruto.jpg');
+          'https://cdn.jkdesa.com/assets/images/animes/image/naruto.jpg');
       expect(
           route.routeUri(Uri.parse('https://nika.playmudos.com/naruto/x.m3u8?st=abc')).toString(),
-          'https://meta.inutix.com/ak/player/naruto/x.m3u8?st=abc');
+          'https://nika.playmudos.com/naruto/x.m3u8?st=abc');
       expect(
           route.routeUri(Uri.parse('https://www.yourupload.com/embed/xyz')).toString(),
           'https://meta.inutix.com/ak/yourupload/embed/xyz');
@@ -403,7 +409,7 @@ void main() {
     }, skip: live ? false : 'requiere INUTILTV_REAL_NET=1', timeout: const Timeout(Duration(seconds: 60)));
   });
 
-  group('v3.3.44 — Changelog y versión sincronizados', () {
+  group('v3.3.45 — Changelog y versión sincronizados', () {
     const forbiddenTerms = [
       'pelisflix',
       'jkanime',
@@ -436,15 +442,15 @@ void main() {
           RegExp(r'^version:\s*(\d+\.\d+\.\d+)\+(\d+)', multiLine: true)
               .firstMatch(pubspec);
       expect(match, isNotNull);
-      expect(match!.group(1), '3.3.44');
-      expect(match.group(2), '93');
-      expect(AppInfo.appVersion, '3.3.44');
-      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.44'));
+      expect(match!.group(1), '3.3.45');
+      expect(match.group(2), '94');
+      expect(AppInfo.appVersion, '3.3.45');
+      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.45'));
     });
 
-    test('la nota de 3.3.44 no expone proveedores ni detalles internos', () {
+    test('la nota de 3.3.45 no expone proveedores ni detalles internos', () {
       final full = File('CHANGELOG.md').readAsStringSync();
-      final start = full.indexOf('## 3.3.44');
+      final start = full.indexOf('## 3.3.45');
       expect(start, greaterThan(0));
       final end = full.indexOf('## 3.3.42', start);
       expect(end, greaterThan(start));
@@ -494,7 +500,7 @@ class _ToyServer {
     var status = 200;
 
     if (path.startsWith('/jk/')) {
-      // v3.3.44 — Medido desde casa y desde la empresa con las cabeceras de la
+      // v3.3.45 — Medido desde casa y desde la empresa con las cabeceras de la
       // app: `jkanime.net` responde DIRECTO (200), y por el borde responde 403
       // con su propia verificación de Cloudflare. Así que la app prueba la ruta
       // directa primero y el borde queda como respaldo. El juguete sirve lo que

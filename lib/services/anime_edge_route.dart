@@ -78,25 +78,31 @@ class AnimeEdgeRoute {
   /// `el borde no sirve todo: lo que responde directo se deja directo`.
   /// Las claves son el primer segmento del path, que es lo que compara
   /// [_isNoDetourPath].
-  ///
-  /// `jkAnime` entró aquí el 2026-11-25 por el mismo motivo, medido desde casa
-  /// con las cabeceras completas de la app: directo a `jkanime.net` responde 200
-  /// (71 KB de catálogo), y por el borde responde 403 con la verificación propia
-  /// de Cloudflare (`Attention Required!`) — el borde es un Worker y no puede
-  /// pasar ese filtro, así que dar ahí la vuelta era un viaje perdido que además
-  /// hacía que la app marcara el catálogo como bloqueado un rato y dejara la
-  /// pestaña de anime en cero. El borde se queda como respaldo para cuando la red
-  /// propia sí filtre el dominio (en la empresa se probó por los dos caminos y
-  /// ninguno respondió; con VPN de la misma empresa sí entra). Como todas las
-  /// rutas que la app arma para ese proveedor (catálogo, búsqueda, episodes
-  /// AJAX, ficha y página del episodio) entran por el mismo camino, la decisión
-  /// es por proveedor completo y está en [_noDetourFirstKeys].
   static const Map<String, Set<String>> _noDetourFirstPaths = <String, Set<String>>{
     'seriesKao': {'vidurl'},
   };
 
   /// Proveedores completos que siempre se dejan directos, por cualquier ruta.
-  static const Set<String> _noDetourFirstKeys = <String>{'jkAnime'};
+  /// Medido el 2026-11-25 (desde casa, con la red de casa que es la que puede
+  /// medir, y con las cabeceras de la app en los casos clave):
+  /// - `jkAnime`: directo 200 (71 KB de catálogo / 62 KB de ficha); por el
+  ///   borde 403 con la verificación propia de Cloudflare, porque el borde es un
+  ///   Worker. El borde queda como respaldo para redes que filtren el dominio.
+  /// - `jkCdn` (cdn.jkdesa.com): Cloudflare-fronted, responde directo; dar la
+  ///   vuelta es un viaje extra sin ganancia.
+  /// - `playmudos` (nika.playmudos.com): Cloudflare-fronted y con token de
+  ///   reproducción; en modo corporativo el borde ve la salida compartida de la
+  ///   red y eso es lo que estos dominios filtran, así que se deja directo.
+  /// - `vidcache` (puerto 8161): Workers no puede servir ese puerto.
+  /// Los que el borde SÍ sirve medidos (tioanime, kao, yourupload: 200 por los
+  /// dos caminos, mismo bytes) siguen dando la vuelta en la empresa, porque ahí
+  /// el borde sí aporta: es el nombre que la red de la empresa ya deja pasar.
+  static const Set<String> _noDetourFirstKeys = <String>{
+    'jkAnime',
+    'jkCdn',
+    'playmudos',
+    'vidcache',
+  };
 
   /// Cabeceras de navegador real. Los filtros de las redes de empresa puntúan
   /// la petición antes de dejarla pasar, y con una huella pelada de robot toca
