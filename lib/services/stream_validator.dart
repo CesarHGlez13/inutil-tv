@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'anime_edge_route.dart';
 import 'network_config_service.dart';
 
 /// Resultado granular de la validación de un enlace de video:
@@ -27,18 +28,52 @@ class StreamValidator {
   /// Elimina acentos y diacríticos para búsquedas tolerantes (`dragón` -> `dragon`).
   static String stripAccents(String input) {
     const map = {
-      'á': 'a', 'à': 'a', 'ä': 'a', 'â': 'a', 'ã': 'a',
-      'é': 'e', 'è': 'e', 'ë': 'e', 'ê': 'e',
-      'í': 'i', 'ì': 'i', 'ï': 'i', 'î': 'i',
-      'ó': 'o', 'ò': 'o', 'ö': 'o', 'ô': 'o', 'õ': 'o',
-      'ú': 'u', 'ù': 'u', 'ü': 'u', 'û': 'u',
-      'ñ': 'n', 'ç': 'c',
-      'Á': 'A', 'À': 'A', 'Ä': 'A', 'Â': 'A',
-      'É': 'E', 'È': 'E', 'Ë': 'E', 'Ê': 'E',
-      'Í': 'I', 'Ì': 'I', 'Ï': 'I', 'Î': 'I',
-      'Ó': 'O', 'Ò': 'O', 'Ö': 'O', 'Ô': 'O',
-      'Ú': 'U', 'Ù': 'U', 'Ü': 'U', 'Û': 'U',
-      'Ñ': 'N', 'Ç': 'C',
+      'á': 'a',
+      'à': 'a',
+      'ä': 'a',
+      'â': 'a',
+      'ã': 'a',
+      'é': 'e',
+      'è': 'e',
+      'ë': 'e',
+      'ê': 'e',
+      'í': 'i',
+      'ì': 'i',
+      'ï': 'i',
+      'î': 'i',
+      'ó': 'o',
+      'ò': 'o',
+      'ö': 'o',
+      'ô': 'o',
+      'õ': 'o',
+      'ú': 'u',
+      'ù': 'u',
+      'ü': 'u',
+      'û': 'u',
+      'ñ': 'n',
+      'ç': 'c',
+      'Á': 'A',
+      'À': 'A',
+      'Ä': 'A',
+      'Â': 'A',
+      'É': 'E',
+      'È': 'E',
+      'Ë': 'E',
+      'Ê': 'E',
+      'Í': 'I',
+      'Ì': 'I',
+      'Ï': 'I',
+      'Î': 'I',
+      'Ó': 'O',
+      'Ò': 'O',
+      'Ö': 'O',
+      'Ô': 'O',
+      'Ú': 'U',
+      'Ù': 'U',
+      'Ü': 'U',
+      'Û': 'U',
+      'Ñ': 'N',
+      'Ç': 'C',
     };
     final sb = StringBuffer();
     for (var i = 0; i < input.length; i++) {
@@ -149,7 +184,8 @@ class StreamValidator {
       }
     }
     // Fallback para segmentos cortos (< 564B): 2 paquetes consecutivos
-    final shortLimit = bytes.length - 188 < maxScan ? bytes.length - 188 : maxScan;
+    final shortLimit =
+        bytes.length - 188 < maxScan ? bytes.length - 188 : maxScan;
     for (var i = 0; i < shortLimit; i++) {
       if (bytes[i] == 0x47 && bytes[i + 188] == 0x47) {
         return i;
@@ -221,7 +257,9 @@ class StreamValidator {
     final client = sharedClient ?? _validationClient(timeout);
 
     try {
-      final uri = Uri.parse(url);
+      // La memoria de red decide por dónde sale la comprobación: directo en una
+      // red normal, por el borde propio si el host del anime ya mostró que filtra.
+      final uri = AnimeEdgeRoute.instance.routeUri(Uri.parse(url));
       final req = await client.getUrl(uri).timeout(timeout);
       req.headers.set('User-Agent', headers['User-Agent'] ?? defaultUserAgent);
       headers.forEach((k, v) {
@@ -316,7 +354,9 @@ class StreamValidator {
     required HttpClient client,
   }) async {
     try {
-      final req = await client.getUrl(Uri.parse(segmentUrl)).timeout(timeout);
+      final req = await client
+          .getUrl(AnimeEdgeRoute.instance.routeUri(Uri.parse(segmentUrl)))
+          .timeout(timeout);
       req.headers.set('User-Agent', headers['User-Agent'] ?? defaultUserAgent);
       headers.forEach((k, v) {
         if (k.toLowerCase() != 'user-agent') {
@@ -344,7 +384,8 @@ class StreamValidator {
     }
   }
 
-  static Future<List<int>> _readUpTo(HttpClientResponse res, int maxBytes) async {
+  static Future<List<int>> _readUpTo(
+      HttpClientResponse res, int maxBytes) async {
     final out = <int>[];
     await for (final chunk in res) {
       final remaining = maxBytes - out.length;

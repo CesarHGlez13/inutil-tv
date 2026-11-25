@@ -1,5 +1,10 @@
 # Changelog — Inutix TV
 
+## 3.3.42 — 2026-11-25
+- **Anime también funciona en redes de empresa:** Si tu red no deja entrar a la lista de anime, la app lo reconoce y cambia sola al camino alterno para cargar la lista, la ficha, los episodios y el video. No tienes que configurar nada.
+- **Deja de insistir en lo que no responde:** Cuando una dirección no contesta, la app ya no la vuelve a consultar en cada pantalla durante la sesión, así la interfaz responde rápido.
+- **Lo que ya venía funcionando sigue igual:** Cine, Series y TV en vivo no cambian, y en tu red de casa todo va por el camino de siempre.
+
 ## 3.3.41 — 2026-11-25
 - **Tu actividad se registra al cerrar la sesión:** La app envía un resumen diario de tu uso (aperturas, sesiones y minutos) una sola vez al día, en segundo plano y sin ventanas nuevas. Con eso el sistema confirma que tu cuenta sigue activa según la política de 15 días.
 - **Sin cambios en tu forma de reproducir:** El registro acompaña los guardados que la app ya hacía al terminar, no consume datos extra ni aparece en pantalla.

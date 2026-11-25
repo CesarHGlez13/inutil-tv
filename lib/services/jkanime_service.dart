@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/models.dart';
+import 'anime_edge_route.dart';
 import 'remote_providers_config.dart';
 import 'stream_validator.dart';
 import 'tioanime_service.dart';
@@ -32,10 +33,54 @@ class JkAnimeService {
   JkAnimeService._internal();
 
   static String get baseUrl => RemoteProvidersConfig.instance.jkAnimeBaseUrl;
-  static const Map<String, String> _headers = {
-    'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36',
-  };
+
+  /// Cabeceras de navegador completo: en una red de empresa puntúan la petición
+  /// antes de dejarla pasar, y con una huella pelada de robot toca verificación.
+  static const Map<String, String> _headers = AnimeEdgeRoute.browserHeaders;
+
+  /// Clave de este proveedor en la memoria de red ([AnimeEdgeRoute]).
+  static const String _routeKey = 'jkAnime';
+
+  @visibleForTesting
+  static Map<String, String> get headersForAssertions => _headers;
+
+  /// Manda la petición por la ruta que toque: directo en una red normal, por el
+  /// borde propio cuando la red ya mostró que filtra. Devuelve la respuesta o
+  /// `null` si ningún camino la trajo.
+  Future<AnimeRouteResult> _send(
+    String method,
+    String url, {
+    Object? body,
+    Map<String, String>? extra,
+    required Duration timeout,
+  }) async {
+    final headers = Map<String, String>.from(_headers);
+    if (extra != null) headers.addAll(extra);
+    return AnimeEdgeRoute.instance.send(
+      method,
+      Uri.parse(url),
+      headers,
+      body: body,
+      timeout: timeout,
+      routeKey: _routeKey,
+    );
+  }
+
+  /// true si la memoria de red ya sabe que este proveedor no responde.
+  bool get _bloqueado => AnimeEdgeRoute.instance.isBlocked(_routeKey);
+
+  /// Limpia las cachés del servicio (no la memoria de red, que es del proceso).
+  @visibleForTesting
+  static void resetForTest() {
+    final s = _instance;
+    s._cache.clear();
+    s._metaCache.clear();
+    s._pageHtmlCache.clear();
+    s._seasonChainCache.clear();
+    s._sessionCookie = null;
+    s._csrfToken = null;
+    s._sessionExpiry = null;
+  }
 
   /// Géneros oficiales de JKAnime (slugs tomados del <select name="genero">
   /// del propio /directorio y verificados en vivo contra el control de
@@ -91,9 +136,14 @@ class JkAnimeService {
     }
 
     try {
-      final res = await http
-          .get(Uri.parse(baseUrl), headers: _headers)
-          .timeout(const Duration(seconds: 8));
+      final result =
+          await _send('GET', baseUrl, timeout: const Duration(seconds: 8));
+      final res = result.response;
+      if (res == null) {
+        // Ningún camino trajo la página: la memoria de red ya sabe que este
+        // proveedor no responde y las siguientes peticiones no lo van a molestar.
+        return;
+      }
       final rawCookie = res.headers['set-cookie'] ?? '';
       _sessionCookie = _formatCookieHeader(rawCookie);
       final tokenMatch =
@@ -118,6 +168,7 @@ class JkAnimeService {
   }
 
   Future<List<VodItem>> fetchDirectory({int page = 1, String? genre}) async {
+    if (_bloqueado) return []; // la red ya mostró que no deja pasar a este catálogo
     try {
       final String url;
       if (genre != null && genre.startsWith('tipo:')) {
@@ -130,10 +181,10 @@ class JkAnimeService {
         url = '$baseUrl/directorio?p=$page';
       }
 
-      final res = await http
-          .get(Uri.parse(url), headers: _headers)
-          .timeout(const Duration(seconds: 10));
-      if (res.statusCode != 200) return [];
+      final result =
+          await _send('GET', url, timeout: const Duration(seconds: 10));
+      final res = result.response;
+      if (res == null || res.statusCode != 200) return [];
 
       final html = res.body;
       const key = 'var animes = ';
@@ -279,13 +330,14 @@ class JkAnimeService {
   Future<String?> _fetchAnimePageHtml(String slug) async {
     final cleanSlug = slug.replaceAll('jk_', '').trim();
     if (cleanSlug.isEmpty) return null;
+    if (_bloqueado) return null; // la red no deja pasar este catálogo
     if (_pageHtmlCache.containsKey(cleanSlug)) return _pageHtmlCache[cleanSlug];
     try {
       final pageUrl = '$baseUrl/$cleanSlug/';
-      final res = await http
-          .get(Uri.parse(pageUrl), headers: _headers)
-          .timeout(const Duration(seconds: 8));
-      if (res.statusCode != 200) return null;
+      final result =
+          await _send('GET', pageUrl, timeout: const Duration(seconds: 8));
+      final res = result.response;
+      if (res == null || res.statusCode != 200) return null;
       final html = res.body;
       _pageHtmlCache[cleanSlug] = html;
 
@@ -465,59 +517,50 @@ class JkAnimeService {
   }
 
   Future<List<VodItem>> _performAjaxSearch(String q) async {
+    if (_bloqueado) return []; // ya se sabe que esta red no deja pasar el catálogo
     try {
       await _ensureSession();
-      final res = await http
-          .post(
-            Uri.parse('$baseUrl/ajax_search'),
-            headers: {
-              ..._headers,
-              'Referer': '$baseUrl/',
-              'X-Requested-With': 'XMLHttpRequest',
-              if (_csrfToken != null) 'X-CSRF-TOKEN': _csrfToken!,
-              if (_sessionCookie != null && _sessionCookie!.isNotEmpty)
-                'Cookie': _sessionCookie!,
-            },
-            body: {
-              if (_csrfToken != null) '_token': _csrfToken!,
-              'q': q,
-            },
-          )
-          .timeout(const Duration(seconds: 8));
+      final first = await _ajaxSearchOnce(q);
+      if (first == null) return [];
 
-      if (res.statusCode == 419) {
+      if (first.statusCode == 419) {
         _sessionCookie = null;
         _csrfToken = null;
         await _ensureSession();
-        final retryRes = await http
-            .post(
-              Uri.parse('$baseUrl/ajax_search'),
-              headers: {
-                ..._headers,
-                'Referer': '$baseUrl/',
-                'X-Requested-With': 'XMLHttpRequest',
-                if (_csrfToken != null) 'X-CSRF-TOKEN': _csrfToken!,
-                if (_sessionCookie != null && _sessionCookie!.isNotEmpty)
-                  'Cookie': _sessionCookie!,
-              },
-              body: {
-                if (_csrfToken != null) '_token': _csrfToken!,
-                'q': q,
-              },
-            )
-            .timeout(const Duration(seconds: 8));
-        if (retryRes.statusCode == 200) {
+        final retryRes = await _ajaxSearchOnce(q);
+        if (retryRes != null && retryRes.statusCode == 200) {
           return _parseAjaxSearch(retryRes.body);
         }
       }
 
-      if (res.statusCode == 200) {
-        return _parseAjaxSearch(res.body);
+      if (first.statusCode == 200) {
+        return _parseAjaxSearch(first.body);
       }
     } catch (e) {
       debugPrint('[JkAnimeService] Error en búsqueda $q: $e');
     }
     return [];
+  }
+
+  /// Un viaje de `/ajax_search` por la ruta que toque.
+  Future<http.Response?> _ajaxSearchOnce(String q) async {
+    final result = await _send(
+      'POST',
+      '$baseUrl/ajax_search',
+      body: {
+        if (_csrfToken != null) '_token': _csrfToken!,
+        'q': q,
+      },
+      extra: {
+        'Referer': '$baseUrl/',
+        'X-Requested-With': 'XMLHttpRequest',
+        if (_csrfToken != null) 'X-CSRF-TOKEN': _csrfToken!,
+        if (_sessionCookie != null && _sessionCookie!.isNotEmpty)
+          'Cookie': _sessionCookie!,
+      },
+      timeout: const Duration(seconds: 8),
+    );
+    return result.response;
   }
 
   List<VodItem> _parseAjaxSearch(String jsonStr) {
@@ -601,20 +644,20 @@ class JkAnimeService {
           ? '$baseUrl/ajax/episodes/${meta.ajaxId}/'
           : '$baseUrl/ajax/episodes/${meta.ajaxId}/?p=$page';
 
-      final postRes = await http
-          .post(
-            Uri.parse(url),
-            headers: {
-              ..._headers,
-              if (meta.csrf.isNotEmpty) 'X-CSRF-TOKEN': meta.csrf,
-              if (meta.cookie.isNotEmpty) 'Cookie': meta.cookie,
-              'X-Requested-With': 'XMLHttpRequest',
-              'Referer': meta.pageUrl,
-            },
-          )
-          .timeout(const Duration(seconds: 10));
+      final result = await _send(
+        'POST',
+        url,
+        extra: {
+          if (meta.csrf.isNotEmpty) 'X-CSRF-TOKEN': meta.csrf,
+          if (meta.cookie.isNotEmpty) 'Cookie': meta.cookie,
+          'X-Requested-With': 'XMLHttpRequest',
+          'Referer': meta.pageUrl,
+        },
+        timeout: const Duration(seconds: 10),
+      );
+      final postRes = result.response;
 
-      if (postRes.statusCode == 200) {
+      if (postRes != null && postRes.statusCode == 200) {
         final j = jsonDecode(postRes.body) as Map<String, dynamic>;
         final data = j['data'] as List? ?? [];
         final total = (j['total'] as num?)?.toInt() ?? data.length;
@@ -785,19 +828,27 @@ class JkAnimeService {
 
     try {
       final episodePageUrl = '$baseUrl/$slug/$episodeNumber/';
-      onStatus?.call('Buscando servidores (Ep. $episodeNumber)...');
-      final res = await http
-          .get(Uri.parse(episodePageUrl), headers: _headers)
-          .timeout(const Duration(seconds: 8));
-      if (res.statusCode != 200) {
-        onStatus?.call('Servidor no disponible temporalmente.');
-        return [];
+      String? pageHtml;
+      if (!_bloqueado) {
+        onStatus?.call('Buscando servidores (Ep. $episodeNumber)...');
+        final result = await _send(
+            'GET', episodePageUrl, timeout: const Duration(seconds: 8));
+        final r = result.response;
+        if (r != null && r.statusCode == 200) {
+          pageHtml = r.body;
+        } else {
+          // No la trajo ni por un camino ni por el otro: se pasa al respaldo,
+          // que es lo que la red de la empresa deja pasar.
+          onStatus?.call('Servidor no disponible temporalmente.');
+        }
       }
 
       final regex = RegExp(
         r'''video\[\d+\]\s*=\s*['"]<iframe[^>]*src=['"]([^'"]+)['"]''',
       );
-      final matches = regex.allMatches(res.body).toList();
+      final matches = pageHtml == null
+          ? const <RegExpMatch>[]
+          : regex.allMatches(pageHtml).toList();
       var idx = 0;
 
       for (final m in matches) {
@@ -807,17 +858,15 @@ class JkAnimeService {
         onStatus?.call('Verificando servidor #$idx...');
 
         try {
-          final pRes = await http
-              .get(
-                Uri.parse(playerUrl),
-                headers: {
-                  ..._headers,
-                  'Referer': episodePageUrl,
-                },
-              )
-              .timeout(const Duration(seconds: 7));
+          final sent = await _send(
+            'GET',
+            playerUrl,
+            extra: {'Referer': episodePageUrl},
+            timeout: const Duration(seconds: 7),
+          );
+          final pRes = sent.response;
 
-          if (pRes.statusCode != 200) continue;
+          if (pRes == null || pRes.statusCode != 200) continue;
 
           String? streamUrl;
           final m3Match = RegExp(r'''(https?://[^\s"'<>]+\.m3u8[^\s"'<>]*)''')

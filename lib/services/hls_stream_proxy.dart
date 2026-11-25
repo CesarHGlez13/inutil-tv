@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
+import 'anime_edge_route.dart';
 import 'network_config_service.dart';
 import 'stream_validator.dart';
 import 'vault_crypto.dart';
@@ -56,8 +57,9 @@ class HlsStreamProxy {
   void _recordThroughput(int bytes, int elapsedMs) {
     if (bytes < 4096 || elapsedMs <= 0) return;
     final sample = (bytes * 1000.0) / elapsedMs;
-    _ewmaBytesPerSec =
-        _ewmaBytesPerSec <= 0 ? sample : (_ewmaBytesPerSec * 0.65 + sample * 0.35);
+    _ewmaBytesPerSec = _ewmaBytesPerSec <= 0
+        ? sample
+        : (_ewmaBytesPerSec * 0.65 + sample * 0.35);
   }
 
   HttpClient get _httpClient {
@@ -167,9 +169,8 @@ class HlsStreamProxy {
     );
     _sessions[id] = session;
 
-    final safeExt = RegExp(r'^[a-z0-9]{1,5}$').hasMatch(extension)
-        ? extension
-        : 'mp4';
+    final safeExt =
+        RegExp(r'^[a-z0-9]{1,5}$').hasMatch(extension) ? extension : 'mp4';
     return ProxyRegistration(
       sessionId: id,
       localUrl: 'http://127.0.0.1:$_port/m/$id/video.$safeExt',
@@ -279,7 +280,10 @@ class HlsStreamProxy {
     }
 
     try {
-      final uri = Uri.parse(session.upstreamMasterUrl);
+      // La ruta hacia el origen la decide la memoria de red: lo local (lo que
+      // ve el reproductor) no se toca, solo la URL que sale a la calle.
+      final uri = AnimeEdgeRoute.instance
+          .routeUri(Uri.parse(session.upstreamMasterUrl));
       final req = await _httpClient.getUrl(uri).timeout(_upstreamTimeout);
       _applyUpstreamHeaders(req, session.headers);
       req.headers.set('Range', 'bytes=0-${maxBytes - 1}');
@@ -298,8 +302,7 @@ class HlsStreamProxy {
       }
       session.mp4TotalLength ??=
           res.contentLength > 0 ? res.contentLength : null;
-      session.mp4ContentType =
-          res.headers.contentType?.mimeType ?? 'video/mp4';
+      session.mp4ContentType = res.headers.contentType?.mimeType ?? 'video/mp4';
 
       final builder = BytesBuilder(copy: false);
       var lastReported = 0;
@@ -436,12 +439,17 @@ class HlsStreamProxy {
     }
 
     // Cabecera de imagen disfrazada (PNG, JPEG, GIF, BMP, WebP)
-    final isDisguisedImage =
-        (bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) ||
+    final isDisguisedImage = (bytes[0] == 0x89 &&
+            bytes[1] == 0x50 &&
+            bytes[2] == 0x4E &&
+            bytes[3] == 0x47) ||
         (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) ||
         (bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46) ||
         (bytes[0] == 0x42 && bytes[1] == 0x4D) ||
-        (bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46);
+        (bytes[0] == 0x52 &&
+            bytes[1] == 0x49 &&
+            bytes[2] == 0x46 &&
+            bytes[3] == 0x46);
 
     if (isDisguisedImage) {
       final tsOff = StreamValidator.findMpegTsSyncOffset(bytes);
@@ -465,7 +473,8 @@ class HlsStreamProxy {
         return;
       }
 
-      final kind = segs[0]; // 's' (HLS), 'm' (MP4) o 'v' (Bóveda Offline cifrada)
+      final kind =
+          segs[0]; // 's' (HLS), 'm' (MP4) o 'v' (Bóveda Offline cifrada)
       final sessionId = segs[1];
 
       if (kind == 'v') {
@@ -555,7 +564,8 @@ class HlsStreamProxy {
       if (fetched.segmentIndices.isNotEmpty) {
         session.activeMediaSegmentIndices = fetched.segmentIndices;
         // Comenzar a descargar el primer segmento inmediatamente mientras libmpv parsea
-        _triggerLookahead(session, fetched.segmentIndices.first - 1, maxAhead: 1);
+        _triggerLookahead(session, fetched.segmentIndices.first - 1,
+            maxAhead: 1);
       }
     }
 
@@ -594,7 +604,8 @@ class HlsStreamProxy {
       if (fetched.segmentIndices.isNotEmpty) {
         session.activeMediaSegmentIndices = fetched.segmentIndices;
         // Comenzar a descargar el primer segmento inmediatamente mientras libmpv parsea
-        _triggerLookahead(session, fetched.segmentIndices.first - 1, maxAhead: 1);
+        _triggerLookahead(session, fetched.segmentIndices.first - 1,
+            maxAhead: 1);
       }
     }
 
@@ -645,7 +656,8 @@ class HlsStreamProxy {
     await req.response.close();
   }
 
-  void _triggerLookahead(_ProxySession session, int currentIdx, {int? maxAhead}) {
+  void _triggerLookahead(_ProxySession session, int currentIdx,
+      {int? maxAhead}) {
     final ahead = maxAhead ?? adaptiveLookaheadForThroughput(_ewmaBytesPerSec);
     for (var offset = 1; offset <= ahead; offset++) {
       final nextIdx = currentIdx + offset;
@@ -724,7 +736,10 @@ class HlsStreamProxy {
     // Fuera del prefijo precargado: proxy streaming directo con pool Keep-Alive
     try {
       final upReq = await _httpClient
-          .getUrl(Uri.parse(session.upstreamMasterUrl))
+          .getUrl(
+            AnimeEdgeRoute.instance
+                .routeUri(Uri.parse(session.upstreamMasterUrl)),
+          )
           .timeout(_upstreamTimeout);
       _applyUpstreamHeaders(upReq, session.headers);
       if (rangeHeader != null) {
@@ -734,11 +749,17 @@ class HlsStreamProxy {
 
       req.response.statusCode = upRes.statusCode;
       final ct = upRes.headers.value(HttpHeaders.contentTypeHeader);
-      if (ct != null) req.response.headers.set(HttpHeaders.contentTypeHeader, ct);
+      if (ct != null) {
+        req.response.headers.set(HttpHeaders.contentTypeHeader, ct);
+      }
       final cr = upRes.headers.value(HttpHeaders.contentRangeHeader);
-      if (cr != null) req.response.headers.set(HttpHeaders.contentRangeHeader, cr);
+      if (cr != null) {
+        req.response.headers.set(HttpHeaders.contentRangeHeader, cr);
+      }
       final ar = upRes.headers.value(HttpHeaders.acceptRangesHeader);
-      if (ar != null) req.response.headers.set(HttpHeaders.acceptRangesHeader, ar);
+      if (ar != null) {
+        req.response.headers.set(HttpHeaders.acceptRangesHeader, ar);
+      }
       if (upRes.contentLength >= 0) {
         req.response.headers
             .set(HttpHeaders.contentLengthHeader, upRes.contentLength);
@@ -807,7 +828,8 @@ class HlsStreamProxy {
         await raf.setPosition(start);
         var offset = start;
         var remaining = length;
-        const chunkSize = 256 * 1024; // 256 KB en Isolate trabajador + backpressure
+        const chunkSize =
+            256 * 1024; // 256 KB en Isolate trabajador + backpressure
         while (remaining > 0) {
           final toRead = remaining < chunkSize ? remaining : chunkSize;
           final encrypted = await raf.read(toRead);
@@ -864,7 +886,8 @@ class HlsStreamProxy {
         HttpHeaders.contentTypeHeader,
         'application/vnd.apple.mpegurl',
       );
-      req.response.headers.set(HttpHeaders.contentLengthHeader, outBytes.length);
+      req.response.headers
+          .set(HttpHeaders.contentLengthHeader, outBytes.length);
       req.response.add(outBytes);
       await req.response.close();
       return;
@@ -965,7 +988,8 @@ class HlsStreamProxy {
     await req.response.close();
   }
 
-  Future<Uint8List?> _loadVaultSegment(_VaultPlaybackSession vs, int idx) async {
+  Future<Uint8List?> _loadVaultSegment(
+      _VaultPlaybackSession vs, int idx) async {
     final cached = vs.decryptedSegments[idx];
     if (cached != null) return cached;
     final running = vs.inFlight[idx];
@@ -1016,7 +1040,7 @@ class HlsStreamProxy {
     _ProxySession session,
     String upstreamUrl,
   ) async {
-    final uri = Uri.parse(upstreamUrl);
+    final uri = AnimeEdgeRoute.instance.routeUri(Uri.parse(upstreamUrl));
     for (var attempt = 0; attempt < 3; attempt++) {
       try {
         final req = await _httpClient.getUrl(uri).timeout(_connectTimeout);
@@ -1112,11 +1136,13 @@ class HlsStreamProxy {
               bestBandwidth = lastBandwidth;
               preferredVariantIdx = plIdx;
             }
-            out.writeln('http://127.0.0.1:$_port/s/${session.id}/pl/$plIdx.m3u8');
+            out.writeln(
+                'http://127.0.0.1:$_port/s/${session.id}/pl/$plIdx.m3u8');
           } else {
             final segIdx = session.registerSegment(absUrl);
             segmentIndices.add(segIdx);
-            out.writeln('http://127.0.0.1:$_port/s/${session.id}/seg/$segIdx.ts');
+            out.writeln(
+                'http://127.0.0.1:$_port/s/${session.id}/seg/$segIdx.ts');
           }
           lastLineWasStreamInf = false;
           lastBandwidth = 0;
@@ -1129,7 +1155,8 @@ class HlsStreamProxy {
           segmentIndices: segmentIndices,
         );
       } catch (e) {
-        debugPrint('[HlsStreamProxy] Playlist fetch err (intento ${attempt + 1}): $e');
+        debugPrint(
+            '[HlsStreamProxy] Playlist fetch err (intento ${attempt + 1}): $e');
         if (attempt < 2) {
           await Future<void>.delayed(
             Duration(milliseconds: attempt == 0 ? 250 : 750),
@@ -1160,7 +1187,7 @@ class HlsStreamProxy {
           try {
             final sw = Stopwatch()..start();
             final req = await _httpClient
-                .getUrl(Uri.parse(upstream))
+                .getUrl(AnimeEdgeRoute.instance.routeUri(Uri.parse(upstream)))
                 .timeout(_connectTimeout);
             _applyUpstreamHeaders(req, session.headers);
             final res = await req.close().timeout(_upstreamTimeout);
@@ -1210,7 +1237,7 @@ class HlsStreamProxy {
 
     try {
       final req = await _httpClient
-          .getUrl(Uri.parse(upstream))
+          .getUrl(AnimeEdgeRoute.instance.routeUri(Uri.parse(upstream)))
           .timeout(_upstreamTimeout);
       _applyUpstreamHeaders(req, session.headers);
       final res = await req.close().timeout(_upstreamTimeout);
@@ -1226,7 +1253,8 @@ class HlsStreamProxy {
     }
   }
 
-  void _applyUpstreamHeaders(HttpClientRequest req, Map<String, String> headers) {
+  void _applyUpstreamHeaders(
+      HttpClientRequest req, Map<String, String> headers) {
     req.headers.set(
       'User-Agent',
       headers['User-Agent'] ?? StreamValidator.defaultUserAgent,

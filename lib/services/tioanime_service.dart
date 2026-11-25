@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/models.dart';
+import 'anime_edge_route.dart';
 import 'remote_providers_config.dart';
 import 'stream_validator.dart';
 
@@ -23,14 +24,26 @@ class TioAnimeService {
 
   final Map<String, List<VodEpisode>> _episodeCache = {};
 
+  /// Limpia las cachés del servicio (no la memoria de red, que es del proceso).
+  @visibleForTesting
+  static void resetForTest() {
+    _instance._episodeCache.clear();
+  }
+
   /// Directorio de anime de TioAnime (`/directorio?p=$page`, verificado 200 OK).
   Future<List<VodItem>> fetchDirectory({int page = 1, String? genre}) async {
     try {
       final url = (genre != null && genre.isNotEmpty)
           ? '$baseUrl/directorio?genero[]=$genre&p=$page'
           : '$baseUrl/directorio?p=$page';
+      // La memoria de red decide por dónde sale la petición: directo en una red
+      // normal, por el borde propio cuando ya aprendió que el proveedor tropieza.
       final res = await http
-          .get(Uri.parse(url), headers: _headers)
+          .get(
+            AnimeEdgeRoute.instance
+                .routeUri(Uri.parse(url), routeKey: 'tioAnime'),
+            headers: _headers,
+          )
           .timeout(const Duration(seconds: 9));
       if (res.statusCode != 200) return [];
       return parseDirectoryCards(res.body);
@@ -47,7 +60,13 @@ class TioAnimeService {
     try {
       final q = Uri.encodeQueryComponent(clean);
       final res = await http
-          .get(Uri.parse('$baseUrl/directorio?q=$q'), headers: _headers)
+          .get(
+            AnimeEdgeRoute.instance.routeUri(
+              Uri.parse('$baseUrl/directorio?q=$q'),
+              routeKey: 'tioAnime',
+            ),
+            headers: _headers,
+          )
           .timeout(const Duration(seconds: 8));
       if (res.statusCode != 200) return [];
       return parseDirectoryCards(res.body);
@@ -69,11 +88,18 @@ class TioAnimeService {
 
     try {
       final res = await http
-          .get(Uri.parse('$baseUrl/anime/$slug'), headers: _headers)
+          .get(
+            AnimeEdgeRoute.instance.routeUri(
+              Uri.parse('$baseUrl/anime/$slug'),
+              routeKey: 'tioAnime',
+            ),
+            headers: _headers,
+          )
           .timeout(const Duration(seconds: 8));
       if (res.statusCode != 200) return [];
 
-      final m = RegExp(r'var\s+episodes\s*=\s*\[([^\]]*)\]').firstMatch(res.body);
+      final m =
+          RegExp(r'var\s+episodes\s*=\s*\[([^\]]*)\]').firstMatch(res.body);
       if (m == null) return [];
       final nums = m
           .group(1)!
@@ -120,7 +146,8 @@ class TioAnimeService {
       final href = RegExp(r'href="/anime/([^"]+)"').firstMatch(block)?.group(1);
       if (href == null || href.isEmpty || !seen.add(href)) continue;
 
-      final img = RegExp(r'<img[^>]+src="([^"]+)"').firstMatch(block)?.group(1) ?? '';
+      final img =
+          RegExp(r'<img[^>]+src="([^"]+)"').firstMatch(block)?.group(1) ?? '';
       final rawTitle = RegExp(r'<h3[^>]*class="title"[^>]*>([^<]+)</h3>')
               .firstMatch(block)
               ?.group(1) ??
@@ -130,9 +157,8 @@ class TioAnimeService {
           .replaceAll('&#039;', "'")
           .replaceAll('&quot;', '"')
           .trim();
-      final poster = img.startsWith('http')
-          ? img
-          : (img.isNotEmpty ? '$baseUrl$img' : '');
+      final poster =
+          img.startsWith('http') ? img : (img.isNotEmpty ? '$baseUrl$img' : '');
 
       out.add(VodItem(
         id: 'tio_$href',
@@ -164,12 +190,16 @@ class TioAnimeService {
 
       final epUrl = '$baseUrl/ver/$slug-$episodeNumber';
       final res = await http
-          .get(Uri.parse(epUrl), headers: _headers)
+          .get(
+            AnimeEdgeRoute.instance
+                .routeUri(Uri.parse(epUrl), routeKey: 'tioAnime'),
+            headers: _headers,
+          )
           .timeout(const Duration(seconds: 8));
       if (res.statusCode != 200) return [];
 
-      final vidsMatch = RegExp(r'var\s+videos\s*=\s*(\[.*?\]);')
-          .firstMatch(res.body);
+      final vidsMatch =
+          RegExp(r'var\s+videos\s*=\s*(\[.*?\]);').firstMatch(res.body);
       if (vidsMatch == null) return [];
 
       final list = jsonDecode(vidsMatch.group(1)!) as List;
@@ -204,9 +234,8 @@ class TioAnimeService {
   }
 
   Future<String?> _findAnimeSlug(String titleOrSlug) async {
-    final cleanQuery = StreamValidator.stripAccents(titleOrSlug)
-        .replaceAll('-', ' ')
-        .trim();
+    final cleanQuery =
+        StreamValidator.stripAccents(titleOrSlug).replaceAll('-', ' ').trim();
     if (cleanQuery.isEmpty) return null;
 
     // 1. Probar slug directo primero (ultrarrápido)
@@ -216,7 +245,13 @@ class TioAnimeService {
         .replaceAll(RegExp(r'^-|-$'), '');
     try {
       final check = await http
-          .get(Uri.parse('$baseUrl/anime/$directSlug'), headers: _headers)
+          .get(
+            AnimeEdgeRoute.instance.routeUri(
+              Uri.parse('$baseUrl/anime/$directSlug'),
+              routeKey: 'tioAnime',
+            ),
+            headers: _headers,
+          )
           .timeout(const Duration(seconds: 6));
       if (check.statusCode == 200 && check.body.contains('var anime_info')) {
         return directSlug;
@@ -227,7 +262,13 @@ class TioAnimeService {
     try {
       final q = Uri.encodeQueryComponent(cleanQuery);
       final res = await http
-          .get(Uri.parse('$baseUrl/directorio?q=$q'), headers: _headers)
+          .get(
+            AnimeEdgeRoute.instance.routeUri(
+              Uri.parse('$baseUrl/directorio?q=$q'),
+              routeKey: 'tioAnime',
+            ),
+            headers: _headers,
+          )
           .timeout(const Duration(seconds: 8));
       if (res.statusCode != 200) return null;
       final m = RegExp(r'href="/anime/([^"]+)"').firstMatch(res.body);
@@ -239,12 +280,10 @@ class TioAnimeService {
 
   Future<StreamSource?> _extractYourUpload(String embedUrl) async {
     try {
-      final res = await http
-          .get(
-            Uri.parse(embedUrl),
-            headers: {..._headers, 'Referer': '$baseUrl/'},
-          )
-          .timeout(const Duration(seconds: 8));
+      final res = await http.get(
+        AnimeEdgeRoute.instance.routeUri(Uri.parse(embedUrl)),
+        headers: {..._headers, 'Referer': '$baseUrl/'},
+      ).timeout(const Duration(seconds: 8));
       if (res.statusCode != 200) return null;
 
       final m = RegExp(r"""file\s*:\s*['"]([^'"]+)['"]""").firstMatch(res.body);

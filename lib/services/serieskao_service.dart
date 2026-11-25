@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:pointycastle/export.dart' as pc;
 
 import '../models/models.dart';
+import 'anime_edge_route.dart';
 import 'cuevana_poseidon_service.dart';
 import 'remote_providers_config.dart';
 import 'stream_validator.dart';
@@ -126,8 +127,14 @@ class SeriesKaoService {
     bool onlyAnime = false,
   }) async {
     try {
+      // La memoria de red decide por dónde sale la petición: directo en una red
+      // normal, por el borde propio cuando ya aprendió que el proveedor tropieza.
       final res = await http
-          .get(Uri.parse(url), headers: _headers)
+          .get(
+            AnimeEdgeRoute.instance
+                .routeUri(Uri.parse(url), routeKey: 'seriesKao'),
+            headers: _headers,
+          )
           .timeout(const Duration(seconds: 9));
       if (res.statusCode != 200) return [];
       return parseCatalogCards(
@@ -178,8 +185,8 @@ class SeriesKaoService {
         r'''class="card__title"[^>]*>([^<]+)<''',
       ).firstMatch(block);
       final yearMatch = RegExp(
-        r'''class="card__year"[^>]*>(\d{4})<''',
-      ).firstMatch(block) ??
+            r'''class="card__year"[^>]*>(\d{4})<''',
+          ).firstMatch(block) ??
           RegExp(r'''card__badge--year"[^>]*>(\d{4})<''').firstMatch(block);
       final ratingMatch = RegExp(
         r'''class="card__rating"[^>]*>.*?(\d(?:\.\d)?)<''',
@@ -234,13 +241,25 @@ class SeriesKaoService {
 
     try {
       var res = await http
-          .get(Uri.parse('$baseUrl/$kind/$slug'), headers: _headers)
+          .get(
+            AnimeEdgeRoute.instance.routeUri(
+              Uri.parse('$baseUrl/$kind/$slug'),
+              routeKey: 'seriesKao',
+            ),
+            headers: _headers,
+          )
           .timeout(const Duration(seconds: 9));
       var effectiveKind = kind;
       if (res.statusCode != 200) {
         effectiveKind = kind == 'anime' ? 'serie' : 'anime';
         res = await http
-            .get(Uri.parse('$baseUrl/$effectiveKind/$slug'), headers: _headers)
+            .get(
+              AnimeEdgeRoute.instance.routeUri(
+                Uri.parse('$baseUrl/$effectiveKind/$slug'),
+                routeKey: 'seriesKao',
+              ),
+              headers: _headers,
+            )
             .timeout(const Duration(seconds: 9));
       }
       if (res.statusCode != 200) return null;
@@ -392,16 +411,17 @@ class SeriesKaoService {
       final apiUrl =
           '$baseUrl/api/episodio/$kind/${Uri.encodeComponent(slug)}/${episode.seasonNumber}/${episode.episodeNumber}';
       final referer = '$baseUrl/$kind/$slug';
-      final apiRes = await http
-          .get(
-            Uri.parse(apiUrl),
-            headers: {
-              ..._headers,
-              'Accept': 'application/json',
-              'Referer': referer,
-            },
-          )
-          .timeout(const Duration(seconds: 9));
+      final apiRes = await http.get(
+        AnimeEdgeRoute.instance.routeUri(
+          Uri.parse(apiUrl),
+          routeKey: 'seriesKao',
+        ),
+        headers: {
+          ..._headers,
+          'Accept': 'application/json',
+          'Referer': referer,
+        },
+      ).timeout(const Duration(seconds: 9));
       if (apiRes.statusCode != 200) return [];
 
       final decoded = jsonDecode(apiRes.body);
@@ -409,21 +429,22 @@ class SeriesKaoService {
       final epHtml = (decoded['html'] ?? '').toString();
       if (epHtml.isEmpty) return [];
 
-      final vidUrlMatch =
-          RegExp(r'''data-url=["\'](/vidurl/[^"\']+)["\']''').firstMatch(epHtml);
+      final vidUrlMatch = RegExp(r'''data-url=["\'](/vidurl/[^"\']+)["\']''')
+          .firstMatch(epHtml);
       if (vidUrlMatch == null) return [];
 
       final vidUrl = '$baseUrl${vidUrlMatch.group(1)!}';
       onStatus?.call('Preparando señal HD...');
-      final vidRes = await http
-          .get(
-            Uri.parse(vidUrl),
-            headers: {
-              ..._headers,
-              'Referer': referer,
-            },
-          )
-          .timeout(const Duration(seconds: 9));
+      final vidRes = await http.get(
+        AnimeEdgeRoute.instance.routeUri(
+          Uri.parse(vidUrl),
+          routeKey: 'seriesKao',
+        ),
+        headers: {
+          ..._headers,
+          'Referer': referer,
+        },
+      ).timeout(const Duration(seconds: 9));
       if (vidRes.statusCode != 200) return [];
 
       final embeds = extractDecryptedEmbeds(vidRes.body);
@@ -431,7 +452,8 @@ class SeriesKaoService {
 
       // Ordenar: LAT primero -> ESP -> SUB; VidHide y StreamWish primero
       embeds.sort((a, b) {
-        final langCmp = _langPriority(a.language).compareTo(_langPriority(b.language));
+        final langCmp =
+            _langPriority(a.language).compareTo(_langPriority(b.language));
         if (langCmp != 0) return langCmp;
         return _hostPriority(a.server).compareTo(_hostPriority(b.server));
       });
@@ -451,7 +473,8 @@ class SeriesKaoService {
           'Verificando servidor (${batch.first.langLabel})...',
         );
 
-        final batchResults = await CuevanaPoseidonService.collectBatchWithFastWin(
+        final batchResults =
+            await CuevanaPoseidonService.collectBatchWithFastWin(
           batch.map((e) async {
             List<StreamSource> extracted = const [];
             if (e.server == 'vidhide') {
@@ -533,7 +556,8 @@ class SeriesKaoService {
     int episodeNumber, {
     void Function(String status)? onStatus,
   }) async {
-    onStatus?.call('Buscando servidor alterno (T$seasonNumber·E$episodeNumber)...');
+    onStatus
+        ?.call('Buscando servidor alterno (T$seasonNumber·E$episodeNumber)...');
     final hits = await searchSeries(title);
     if (hits.isEmpty) return [];
 
@@ -570,10 +594,12 @@ class SeriesKaoService {
   /// `SHA-256(LINK_CHALLENGE + LINK_SALT)` + AES-256-CBC (PKCS7) puro en Dart.
   @visibleForTesting
   static List<DecryptedEmbed> extractDecryptedEmbeds(String html) {
-    final challenge =
-        RegExp(r"""LINK_CHALLENGE\s*=\s*['"]([^'"]+)['"]""").firstMatch(html)?.group(1);
-    final salt =
-        RegExp(r"""LINK_SALT\s*=\s*['"]([^'"]+)['"]""").firstMatch(html)?.group(1);
+    final challenge = RegExp(r"""LINK_CHALLENGE\s*=\s*['"]([^'"]+)['"]""")
+        .firstMatch(html)
+        ?.group(1);
+    final salt = RegExp(r"""LINK_SALT\s*=\s*['"]([^'"]+)['"]""")
+        .firstMatch(html)
+        ?.group(1);
     final dataLinkMatch = RegExp(
       r'let\s+dataLink\s*=\s*(\[.*?\]);',
       dotAll: true,
@@ -674,10 +700,7 @@ class SeriesKaoService {
     if (item.slug.isNotEmpty) {
       return item.slug.replaceFirst(RegExp(r'^/?(?:serie|anime)/'), '').trim();
     }
-    return item.id
-        .replaceFirst('sk_s_', '')
-        .replaceFirst('sk_a_', '')
-        .trim();
+    return item.id.replaceFirst('sk_s_', '').replaceFirst('sk_a_', '').trim();
   }
 
   static String _decodeHtmlEntities(String input) {
