@@ -4,7 +4,7 @@ class AppInfo {
   const AppInfo._();
 
   static const String appName = 'Inutix TV';
-  static const String appVersion = '3.3.39';
+  static const String appVersion = '3.3.40';
   static const String creatorName = 'César';
   static const String supportEmail = 'cesarmaster133@gmail.com';
 
@@ -21,6 +21,7 @@ class AppInfo {
       'Ecosistema inutix.com · Inutix TV & Inutix Music';
 
   static const List<String> whatsNewHighlights = [
+    'Sesión siempre estable para cuentas activas: corrige bloqueos inesperados de acceso ante cambios de red y recupera tu cuenta al instante al pulsar «Comprobar Estado»',
     'Mayor disponibilidad en películas y series: búsqueda y reproducción automática más estable',
     'Funciona en redes de empresa, hoteles y aeropuertos, incluso cuando tu red exige un punto de salida',
     'Nueva identidad oficial Inutix TV con el logo renovado iX TV en móvil y Android TV',

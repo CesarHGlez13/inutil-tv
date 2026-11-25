@@ -1,5 +1,10 @@
 # Changelog — Inutix TV
 
+## 3.3.40 — 2026-11-24
+- **Acceso más estable para cuentas activas:** Se corrigieron avisos erróneos de sesión bloqueada que podían aparecer tras cambios de red o intermitencias de conexión.
+- **Recuperación automática de tu sesión:** Si ocurre una interrupción momentánea, la app revalida tu acceso automáticamente y responde de inmediato al pulsar *Comprobar Estado*.
+- **Activación y renovación al instante:** Al extender o reactivar una cuenta activa, el acceso queda listo de inmediato sin pasos adicionales.
+
 ## 3.3.39 — 2026-11-24
 - **Mayor disponibilidad en películas y series:** Mejoras en la búsqueda y carga automática de enlaces de video para encontrar más opciones reproducibles.
 - **Reproducción más estable sin configurar nada:** Se afinó el arranque de video para reducir errores y pantallas sin respuesta cuando una fuente cambia.

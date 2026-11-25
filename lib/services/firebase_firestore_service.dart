@@ -289,6 +289,29 @@ class InutilFirestoreService {
     return _decodeDocument(json);
   }
 
+  /// Lee un documento directamente contra Google Firestore sin pasar por
+  /// relays/respaldo. Se usa como doble verificación antes de aceptar un 404
+  /// de cuenta eliminada.
+  Future<Map<String, dynamic>?> getDocumentDirect(
+    String path, {
+    String? overrideToken,
+  }) async {
+    final url = Uri.parse('${FirebaseConfig.directFirestoreBaseUrl}/$path');
+    final response = await http
+        .get(url, headers: _headers(overrideToken: overrideToken))
+        .timeout(const Duration(seconds: 8));
+    if (response.statusCode == 404) return null;
+    if (response.statusCode != 200) {
+      throw FirestoreOperationException(
+        path,
+        response.statusCode,
+        response.body,
+      );
+    }
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    return _decodeDocument(json);
+  }
+
   /// Escribe o actualiza campos en un documento de Firestore.
   /// Cuando [merge] es `true` (por defecto), solo se actualizan las claves de
   /// [data] mediante `updateMask.fieldPaths` para preservar el resto del
@@ -357,6 +380,13 @@ class InutilFirestoreService {
     String? overrideToken,
   }) async {
     return getDocument('users/$uid', overrideToken: overrideToken);
+  }
+
+  Future<Map<String, dynamic>?> getUserProfileDirect(
+    String uid, {
+    String? overrideToken,
+  }) async {
+    return getDocumentDirect('users/$uid', overrideToken: overrideToken);
   }
 
   Future<bool> adminUpdateUser(String uid, Map<String, dynamic> updates) async {

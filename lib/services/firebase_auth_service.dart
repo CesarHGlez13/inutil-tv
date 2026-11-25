@@ -863,8 +863,7 @@ class InutilAuthService extends ChangeNotifier {
     final user = _currentUser;
     if (user == null || user.uid.isEmpty || user.idToken.isEmpty) return;
     try {
-      final remote =
-          await InutilFirestoreService.instance.getUserProfile(user.uid);
+      final remote = await _fetchVerifiedUserProfile(user.uid);
       if (remote == null || remote.isEmpty) {
         if (!createIfMissing) return;
         final isAdminSeed = isBootstrapAdminEmail(user.email);
@@ -1111,6 +1110,69 @@ class InutilAuthService extends ChangeNotifier {
     }
   }
 
+  static const String _accountDeletedReason =
+      'Tu cuenta fue eliminada. Contacta al administrador.';
+
+  /// Consulta `users/{uid}` en el tier activo y, si recibe un 404 mientras un
+  /// relay está configurado, hace una doble verificación directa contra Google
+  /// Firestore antes de concluir que la cuenta no existe.
+  Future<Map<String, dynamic>?> _fetchVerifiedUserProfile(String uid) async {
+    final remote = await InutilFirestoreService.instance.getUserProfile(uid);
+    if (remote != null && remote.isNotEmpty) return remote;
+    final usingRelay = FirebaseConfig.relayUsable ||
+        FirebaseConfig.cloudRelayUsable ||
+        FirebaseConfig.backupRelayUsable;
+    if (!usingRelay || FirebaseConfig.useEmulator) {
+      return remote;
+    }
+    return await InutilFirestoreService.instance.getUserProfileDirect(uid);
+  }
+
+  /// Reconcilia `_kickedOutReason` con el perfil recién leído para que una
+  /// cuenta autorizada nunca se quede atascada en «Sesión bloqueada».
+  Future<void> _reconcileRemoteProfile(
+    Map<String, dynamic> remote, {
+    bool allowClaimEmptySlot = false,
+  }) async {
+    await _applyRemoteDoc(remote);
+    final updated = _currentUser;
+    if (updated == null) return;
+
+    if (allowClaimEmptySlot && updated.licenseValid && !_tvSessionOk(updated)) {
+      final emptySlot = _isSmartTvSlot
+          ? updated.currentSmartTvDeviceId.isEmpty
+          : updated.currentTvDeviceId.isEmpty;
+      if (emptySlot) {
+        await _claimTvDevice();
+      }
+    }
+
+    final current = _currentUser!;
+    if (!current.isAdmin && !_tvSessionOk(current)) {
+      _kickedOutReason =
+          'Otro dispositivo inició sesión con esta cuenta en Inutix TV. '
+          'Esta sesión quedó bloqueada.';
+      notifyListeners();
+      return;
+    }
+    if (!current.licenseValid) {
+      if (_kickedOutReason == _accountDeletedReason ||
+          _kickedOutReason.contains('Otro dispositivo')) {
+        _kickedOutReason = '';
+      }
+      notifyListeners();
+      return;
+    }
+    final clearedKick = _kickedOutReason.isNotEmpty;
+    if (clearedKick) {
+      _kickedOutReason = '';
+    }
+    await _enforceInactivityPolicy(remote);
+    if (clearedKick) {
+      notifyListeners();
+    }
+  }
+
   /// Revalida la licencia y el dispositivo contra Firestore.
   Future<void> _validateSession({required String reason}) async {
     final user = _currentUser;
@@ -1120,30 +1182,15 @@ class InutilAuthService extends ChangeNotifier {
     _validating = true;
     try {
       await _ensureFreshIdToken();
-      final remote =
-          await InutilFirestoreService.instance.getUserProfile(user.uid);
+      final remote = await _fetchVerifiedUserProfile(user.uid);
       if (remote == null) {
-        _kickedOutReason =
-            'Tu cuenta fue eliminada. Contacta al administrador.';
+        if (_kickedOutReason.isEmpty) {
+          _kickedOutReason = _accountDeletedReason;
+        }
         notifyListeners();
         return;
       }
-      await _applyRemoteDoc(remote);
-
-      final updated = _currentUser!;
-      if (!updated.isAdmin && !_tvSessionOk(updated)) {
-        _kickedOutReason =
-            'Otro dispositivo inició sesión con esta cuenta en Inutix TV. '
-            'Esta sesión quedó bloqueada.';
-        notifyListeners();
-        return;
-      }
-      if (!updated.licenseValid) {
-        _kickedOutReason = blockedReason;
-        notifyListeners();
-      } else {
-        await _enforceInactivityPolicy(remote);
-      }
+      await _reconcileRemoteProfile(remote);
     } catch (e) {
       debugPrint('[InutilAuth] Validación ($reason) sin conexión: $e');
     } finally {
@@ -1157,21 +1204,13 @@ class InutilAuthService extends ChangeNotifier {
     if (testSkipOnlineValidation) return;
     try {
       await _ensureFreshIdToken();
-      final remoteDoc = await InutilFirestoreService.instance
-          .getUserProfile(_currentUser!.uid);
+      final remoteDoc = await _fetchVerifiedUserProfile(_currentUser!.uid);
       if (remoteDoc != null && remoteDoc.isNotEmpty) {
-        await _applyRemoteDoc(remoteDoc);
-        if (_currentUser!.licenseValid && !_tvSessionOk(_currentUser!)) {
-          // Si estaba pendiente y el admin acaba de aprobarla, reclamamos el equipo.
-          final emptySlot = _isSmartTvSlot
-              ? _currentUser!.currentSmartTvDeviceId.isEmpty
-              : _currentUser!.currentTvDeviceId.isEmpty;
-          if (emptySlot) {
-            await _claimTvDevice();
-          }
-        }
-        if (_currentUser?.licenseValid == true) {
-          await _enforceInactivityPolicy(remoteDoc);
+        await _reconcileRemoteProfile(remoteDoc, allowClaimEmptySlot: true);
+      } else if (remoteDoc == null) {
+        if (_kickedOutReason.isEmpty) {
+          _kickedOutReason = _accountDeletedReason;
+          notifyListeners();
         }
       }
     } catch (e) {
@@ -1492,6 +1531,7 @@ class InutilAuthService extends ChangeNotifier {
       'isActive': true,
       'status': 'active',
       'accountDurationDays': days,
+      'lastActiveAt': DateTime.now(),
     });
     if (!ok) {
       throw Exception(
@@ -1545,6 +1585,7 @@ class InutilAuthService extends ChangeNotifier {
     final ok = await InutilFirestoreService.instance.adminUpdateUser(uid, {
       'isActive': isActive,
       'status': isActive ? 'active' : 'blocked',
+      if (isActive) 'lastActiveAt': DateTime.now(),
     });
     if (!ok) {
       throw Exception('No se pudo actualizar la cuenta en la nube.');

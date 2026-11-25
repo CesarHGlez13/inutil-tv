@@ -3,7 +3,7 @@
 > **App Oficial:** **Inutix TV** (ecosistema **inutix.com** junto con **Inutix Music** / **Familia Inutix**)
 > **Package ID Android:** `dev.cesar.tubotv` *(namespace interno; NO cambiar para no romper OTAs)*
 > **Repo:** `/home/cesar/Escritorio/alo/tvtv` → `CesarHGlez13/inutil-tv` (rama `main`)
-> **Versión base actual:** `3.3.36+85`
+> **Versión base actual:** `3.3.40+89`
 
 ---
 
@@ -60,3 +60,17 @@ bash tool/full_release_pipeline.sh <VERSION> --urgent
 ```
 
 *(Si la TV Box `192.168.100.17` no responde por Ethernet, enrutar por Wi-Fi: `sudo ip route add 192.168.100.17/32 dev wlp6s0 2>/dev/null || true`.)*
+
+---
+
+## Notas de Sincronía Externa (Cambios aplicados desde auditoría Familia Inutix — 2026-11-24)
+
+> **Importante para la conversación de Inutix TV:** estos cambios ya fueron **commiteados, pusheados a `origin/main` y publicados como OTA obligatoria `v3.3.40+89`** (`mandatory: true`, `minSupportedVersion: "3.3.40"`) para resolver de inmediato el bloqueo de sesiones en cuentas autorizadas. La siguiente release de Inutix TV debe partir de `3.3.41+90`.
+
+1. **Corrección de «Sesión bloqueada / Tu cuenta fue eliminada» en cuentas autorizadas:**
+   - Se añadió `FirebaseConfig.directFirestoreBaseUrl` + `InutilFirestoreService.getDocumentDirect()` / `getUserProfileDirect()`.
+   - `InutilAuthService._fetchVerifiedUserProfile()` hace doble verificación directa contra Google Firestore antes de aceptar un `404` proveniente de un relay/respaldo (`api.inutix.com` / `backup.inutix.com`).
+   - `InutilAuthService._reconcileRemoteProfile()` limpia `_kickedOutReason` automáticamente al recuperar un perfil válido (en validación periódica y en el botón **Comprobar Estado**).
+2. **Panel de Control VIP (`inutil_admin_panel.dart` + `firebase_auth_service.dart`):**
+   - Auditado OK: `adminCreateUser`, `adminGrantVigencia`, `adminSetExactExpiration` y `adminToggleUserActive` escriben a `users/{uid}` en `api.inutix.com`, que desde hoy también espeja automáticamente a Google Firestore (`RELAY_USER_PROFILE_MIRROR=1` en el S7 Edge).
+   - Mejora añadida: `adminGrantVigencia` y `adminToggleUserActive(isActive: true)` ahora también actualizan `lastActiveAt: DateTime.now()` para levantar de inmediato cualquier pausa por inactividad al autorizar/reactivar una cuenta VIP.

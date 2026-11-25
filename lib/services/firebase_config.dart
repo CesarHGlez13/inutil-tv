@@ -262,6 +262,11 @@ class FirebaseConfig {
         : 'https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents';
   }
 
+  /// URL directa de Google Firestore sin pasar por relays/respaldo.
+  static String get directFirestoreBaseUrl => useEmulator
+      ? 'http://$emulatorHost:$emulatorFirestorePort/v1/projects/$projectId/databases/(default)/documents'
+      : 'https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents';
+
   /// El emulador de Auth ignora la clave, pero el endpoint exige el parámetro.
   static String get keyParam => useEmulator ? 'key=emulator' : 'key=$apiKey';
 }
