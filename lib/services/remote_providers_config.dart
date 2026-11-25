@@ -27,11 +27,13 @@ class RemoteProvidersConfig {
   /// Base alterna del borde. Se llena desde `app_config/providers` con el nombre
   /// que el proxy de la red SÍ deja pasar: medido desde la empresa el
   /// 2026-11-25, `meta.inutix.com/healthz` responde "Página web bloqueada" (el
-  /// filtro lo categoriza como dominio recién registrado), y ahí la ruta asistida
-  /// se cae si no hay otro nombre. Es la misma ruta `workers.dev` por la que ya
-  /// se usa el relay en la capa de datos.
-  static const String defaultMetaBaseAlt =
-      'https://inutil-edge-gateway.scada-xiaomi-server.workers.dev';
+  /// filtro lo categoriza como dominio recién registrado) y al celular le rompe
+  /// el TLS a `*.workers.dev` (`ERR_CERT_AUTHORITY_INVALID`, certificado que el
+  /// teléfono no confía), así que la ruta asistida se cae si no hay otro nombre.
+  /// `api.inutix.com` es el único nombre de Inutix por el que ese proxy deja
+  /// pasar (medido: el mismo celular abrió su JSON), y el relay que vive ahí ya
+  /// hace de ventanero para `/ak/*` hacia el borde.
+  static const String defaultMetaBaseAlt = 'https://api.inutix.com';
   static const String defaultOtaBaseUrl = 'https://ota.inutix.com';
   static const String defaultSeriesKaoBaseUrl = 'https://serieskao.top';
   static const String defaultJkAnimeBaseUrl = 'https://jkanime.net';

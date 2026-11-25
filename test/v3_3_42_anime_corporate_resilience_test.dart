@@ -414,8 +414,11 @@ void main() {
       // Medido desde la empresa el 2026-11-25 con el navegador del celular:
       // `meta.inutix.com/healthz` responde «Página web bloqueada» — el proxy de la
       // red lo corta por categorizarlo como dominio recién registrado — mientras
-      // `api.inutix.com` (el relay) sí deja pasar. La base alterna, la misma capa
-      // `workers.dev` por la que ya se usa el relay, es la que toma el relevo, y
+      // `api.inutix.com` (el relay) sí deja pasar. `*.workers.dev` tampoco sirve
+      // allá: el mismo celular le obtuvo `ERR_CERT_AUTHORITY_INVALID` (el proxy
+      // descifra el TLS con un certificado que el teléfono no confía). La base
+      // alterna es entonces `api.inutix.com`, y el relay que vive ahí hace de
+      // ventanero para `/ak/*` hacia el borde; es la que toma el relevo, y
       // el sondeo de `ensureEdgeBase()` la pone al frente ANTES de la primera
       // petición para que la búsqueda no se caiga en el primer intento.
       NetworkConfigService.instance.setSystemProxyForTest('proxy.empresa.local:8080');
