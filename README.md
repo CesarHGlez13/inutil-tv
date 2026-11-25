@@ -33,4 +33,13 @@ bash tool/publish_release.sh <versión> --github
   - Doble verificación directa contra Google Firestore (`getUserProfileDirect`) antes de marcar una cuenta como eliminada ante un `404` de relay/respaldo.
   - Limpieza automática de `_kickedOutReason` al recuperar un perfil autorizado en `_validateSession` y `refreshCurrentUserProfile` (**Comprobar Estado**).
   - `adminGrantVigencia` y `adminToggleUserActive(isActive: true)` ahora refrescan `lastActiveAt` para desbloquear inmediatamente cuentas en pausa por inactividad.
-  - **Publicado como OTA obligatoria `v3.3.40+89`** (`mandatory: true`, `minSupportedVersion: "3.3.40"`, commit en `main`, GitHub Release `v3.3.40`, `api.inutix.com`, `backup.inutix.com`, `ota.inutix.com` y Firestore `app_config/tv_release`). La siguiente versión de Inutix TV parte de `3.3.41+90` (ver `README_ACTUALIZACIONES_QWEN_STRATA.md`).
+  - **Publicado como OTA obligatoria `v3.3.40+89`** (`mandatory: true`, `minSupportedVersion: "3.3.40"`, commit en `main`, GitHub Release `v3.3.40`, `api.inutix.com`, `backup.inutix.com`, `ota.inutix.com` y Firestore `app_config/tv_release`). La siguiente versión de Inutix TV parte de `3.3.42+91` (ver `README_ACTUALIZACIONES_QWEN_STRATA.md`).
+
+## Registro de cambios sincronizados (2026-11-25 — Telemetría diaria de uso)
+
+- **Reporte diario de uso al servidor** (`lib/services/tv_daily_usage_service.dart` + contadores en `lib/services/inutil_wrapped_service.dart`, ganchos en `tv_remote_service.dart`, `tv_screen.dart`, `player_screen.dart` y `inutil_auth_gate.dart`):
+  - Contabilidad por día calendario UTC (minutos, sesiones y aperturas), persistida para sobrevivir a los cierres bruscos de Android TV; clave aparte para no cambiar la forma del documento anual.
+  - `POST {BASE}/metrics/<uid>/daily` con cuerpo plano (`tvMinutes`/`tvSessions`/`tvOpens` + `source: "tv"` + `day`), mandando el acumulado del día (no un delta), máximo una escritura por día; reenviar el mismo total es idempotente porque el servidor hace merge por columna.
+  - Sin servidor local no hay endpoint: cuando el prefijo REST resuelve contra Google, el reporte queda pendiente y se manda en el cierre en que el servidor vuelva a estar vivo.
+  - Prueba con fake del layer HTTP (`test/v3_3_41_daily_relay_report_test.dart`, 8/8 verdes): forma exacta del cuerpo, una escritura por día, idempotencia y persistencia tras cierre brusco.
+- **Publicado como OTA obligatoria `v3.3.41+90`** (`mandatory: true`, `minSupportedVersion: "3.3.41"`, commit en `main`, GitHub Release `v3.3.41`, `api.inutix.com`, `backup.inutix.com`, `ota.inutix.com` y Firestore `app_config/tv_release`). La siguiente versión de Inutix TV parte de `3.3.42+91`.

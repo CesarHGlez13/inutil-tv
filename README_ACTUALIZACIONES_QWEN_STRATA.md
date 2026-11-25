@@ -3,7 +3,7 @@
 > **App Oficial:** **Inutix TV** (ecosistema **inutix.com** junto con **Inutix Music** / **Familia Inutix**)
 > **Package ID Android:** `dev.cesar.tubotv` *(namespace interno; NO cambiar para no romper OTAs)*
 > **Repo:** `/home/cesar/Escritorio/alo/tvtv` → `CesarHGlez13/inutil-tv` (rama `main`)
-> **Versión base actual:** `3.3.40+89`
+> **Versión base actual:** `3.3.41+90`
 
 ---
 
@@ -65,7 +65,7 @@ bash tool/full_release_pipeline.sh <VERSION> --urgent
 
 ## Notas de Sincronía Externa (Cambios aplicados desde auditoría Familia Inutix — 2026-11-24)
 
-> **Importante para la conversación de Inutix TV:** estos cambios ya fueron **commiteados, pusheados a `origin/main` y publicados como OTA obligatoria `v3.3.40+89`** (`mandatory: true`, `minSupportedVersion: "3.3.40"`) para resolver de inmediato el bloqueo de sesiones en cuentas autorizadas. La siguiente release de Inutix TV debe partir de `3.3.41+90`.
+> **Importante para la conversación de Inutix TV:** estos cambios ya fueron **commiteados, pusheados a `origin/main` y publicados como OTA obligatoria `v3.3.40+89`** (`mandatory: true`, `minSupportedVersion: "3.3.40"`) para resolver de inmediato el bloqueo de sesiones en cuentas autorizadas. La siguiente release de Inutix TV debe partir de `3.3.42+91`.
 
 1. **Corrección de «Sesión bloqueada / Tu cuenta fue eliminada» en cuentas autorizadas:**
    - Se añadió `FirebaseConfig.directFirestoreBaseUrl` + `InutilFirestoreService.getDocumentDirect()` / `getUserProfileDirect()`.
@@ -74,3 +74,18 @@ bash tool/full_release_pipeline.sh <VERSION> --urgent
 2. **Panel de Control VIP (`inutil_admin_panel.dart` + `firebase_auth_service.dart`):**
    - Auditado OK: `adminCreateUser`, `adminGrantVigencia`, `adminSetExactExpiration` y `adminToggleUserActive` escriben a `users/{uid}` en `api.inutix.com`, que desde hoy también espeja automáticamente a Google Firestore (`RELAY_USER_PROFILE_MIRROR=1` en el S7 Edge).
    - Mejora añadida: `adminGrantVigencia` y `adminToggleUserActive(isActive: true)` ahora también actualizan `lastActiveAt: DateTime.now()` para levantar de inmediato cualquier pausa por inactividad al autorizar/reactivar una cuenta VIP.
+
+---
+
+## Notas de Sincronía Externa (Panel Profesional Familia Inutix — 2026-11-25)
+
+> **Importante para la conversación de Inutix TV:** el reporte diario de uso ya fue **commiteado, pusheado a `origin/main` y publicado como OTA obligatoria `v3.3.41+90`** (`mandatory: true`, `minSupportedVersion: "3.3.41"`). La siguiente release de Inutix TV debe partir de `3.3.42+91`.
+
+1. **Reporte diario de uso al servidor** (`commit fdffa1b`):
+   - Nuevo `lib/services/tv_daily_usage_service.dart`; contadores diarios por día calendario UTC en `lib/services/inutil_wrapped_service.dart` (clave aparte `inutiltv_daily_usage_v1`, retención de 7 días, persistida para sobrevivir cierres bruscos de Android TV).
+   - `postDailyMetrics` en `lib/services/firebase_firestore_service.dart` y el getter `dailyReportEndpointIsRelay` en `lib/services/firebase_config.dart`.
+   - Ganchos en cierres que ya existían: `tv_remote_service.dart` (pause), `tv_screen.dart` (background de En Vivo), `player_screen.dart` (stop del último playback), `inutil_auth_gate.dart`. Los cierres extra son no-ops.
+   - Máximo una escritura por día con el acumulado del día (no un delta); reenviar el mismo total es idempotente porque el servidor hace merge por columna. Si el prefijo REST resuelve contra Google, el reporte queda pendiente hasta que el servidor vuelva a estar vivo.
+   - Prueba nueva `test/v3_3_41_daily_relay_report_test.dart` con fake del layer HTTP (sin red real): 8/8 verdes.
+2. **Backend autoritativo** (`inutil_relay/relay.py` en el S7 Edge `ad09160360308ca38a`, commit `8eddb17`): tablas `daily_usage`/`payments`/`subscriptions`/`coupons`/`audit_log` y endpoints `/admin/overview`, `/admin/users`, `/admin/users/<uid>/360`, `/admin/graphs`, `/admin/policy`, `/admin/payments`, `/admin/coupons`, `/admin/audit`. La política de inactividad **no cambió** (15 días, aviso en el día 11, gracia de 3). El feed diario entra por `POST metrics/<uid>/daily`.
+3. **Consola web `admin.inutix.com` (Fase 2 del plan):** repo `inutil_console/`; consume los endpoints anteriores con `X-Admin-Secret` desde `~/.config/inutil_relay/admin_secret.txt`.

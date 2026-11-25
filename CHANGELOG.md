@@ -1,5 +1,9 @@
 # Changelog — Inutix TV
 
+## 3.3.41 — 2026-11-25
+- **Tu actividad se registra al cerrar la sesión:** La app envía un resumen diario de tu uso (aperturas, sesiones y minutos) una sola vez al día, en segundo plano y sin ventanas nuevas. Con eso el sistema confirma que tu cuenta sigue activa según la política de 15 días.
+- **Sin cambios en tu forma de reproducir:** El registro acompaña los guardados que la app ya hacía al terminar, no consume datos extra ni aparece en pantalla.
+
 ## 3.3.40 — 2026-11-24
 - **Acceso más estable para cuentas activas:** Se corrigieron avisos erróneos de sesión bloqueada que podían aparecer tras cambios de red o intermitencias de conexión.
 - **Recuperación automática de tu sesión:** Si ocurre una interrupción momentánea, la app revalida tu acceso automáticamente y responde de inmediato al pulsar *Comprobar Estado*.
