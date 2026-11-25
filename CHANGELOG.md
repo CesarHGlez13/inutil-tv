@@ -1,8 +1,8 @@
 # Changelog — Inutix TV
 
 ## 3.3.38 — 2026-11-24
-- **PelisFlix vuelve a listar y reproducir:** La app reconoce la forma nueva en que PelisFlix publica sus servidores de video, y si el sitio principal no muestra la lista, usa sus espejos oficiales automáticamente.
-- **Menos caídas cuando un proveedor cambia su página:** La app sigue el camino real que recorre el navegador para llegar al servidor de video, sin obligarte a configurar nada.
+- **Mayor disponibilidad en películas y series:** Mejoras en la búsqueda y carga automática de enlaces de video para encontrar más opciones reproducibles.
+- **Reproducción más estable sin configurar nada:** Se afinó el arranque de video para reducir errores y pantallas sin respuesta cuando una fuente cambia.
 
 ## 3.3.37 — 2026-11-24
 - **Ahora funciona en redes de empresa, hoteles y aeropuertos:** Inutix TV se adapta solo cuando tu red filtra el video: usa el punto de salida que la red ya exige, busca los servidores por un camino cifrado y acepta el certificado de la propia red cuando es ella quien revisa el tráfico. Todo automático, sin VPN.

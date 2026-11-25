@@ -200,6 +200,7 @@ fi
 
 if gh release view "$TAG" --repo "$RELEASE_REPO" >/dev/null 2>&1; then
   gh release upload "$TAG" "${FILES_ARGS[@]}" --clobber --repo "$RELEASE_REPO"
+  gh release edit "$TAG" --title "Inutix TV $TAG" --notes-file "$NOTES_MD" --repo "$RELEASE_REPO"
 else
   gh release create "$TAG" "${FILES_ARGS[@]}" --repo "$RELEASE_REPO" \
     --target "$COMMIT_REF" --title "Inutix TV $TAG" --notes-file "$NOTES_MD"

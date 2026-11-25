@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tubotv/constants/app_info.dart';
 import 'package:tubotv/services/pelisflix_service.dart';
 
 /// Cobertura determinista (sin red) del scraper de PelisFlix de v3.3.38. Los
@@ -57,8 +58,22 @@ void main() {
     expect(PelisflixService.voeHopUrl('<html><body>sin salto</body></html>'), isNull);
   });
 
-  test('la nota de 3.3.38 se lee como la escribió un usuario', () {
+  test('la nota de 3.3.38 y whatsNewHighlights no revelan proveedores ni detalles internos', () {
     const forbiddenTerms = [
+      'pelisflix',
+      'jkanime',
+      'cuevana',
+      'poseidon',
+      'animeflv',
+      'tioanime',
+      'streamwish',
+      'filemoon',
+      'doodstream',
+      'vidhide',
+      'tmdb',
+      'fanart',
+      'proveedor',
+      'espejo',
       'scraper',
       'VOE',
       'Nupload',
@@ -76,9 +91,12 @@ void main() {
     final end = full.indexOf('## 3.3.37', start);
     expect(end, greaterThan(start));
     final entry = full.substring(start, end);
+    final highlights = AppInfo.whatsNewHighlights.join('\n');
     for (final term in forbiddenTerms) {
       expect(entry.toLowerCase(), isNot(contains(term.toLowerCase())),
-          reason: 'la nota de versión no debe exponer $term');
+          reason: 'CHANGELOG 3.3.38 no debe exponer $term');
+      expect(highlights.toLowerCase(), isNot(contains(term.toLowerCase())),
+          reason: 'AppInfo.whatsNewHighlights no debe exponer $term');
     }
   });
 }

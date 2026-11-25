@@ -21,10 +21,10 @@ class AppInfo {
       'Ecosistema inutix.com · Inutix TV & Inutix Music';
 
   static const List<String> whatsNewHighlights = [
-    'PelisFlix vuelve a listar y reproducir: la app reconoce la nueva forma en que el sitio publica sus servidores',
+    'Mayor disponibilidad en películas y series: búsqueda y reproducción automática más estable',
     'Funciona en redes de empresa, hoteles y aeropuertos, incluso cuando tu red exige un punto de salida',
     'Nueva identidad oficial Inutix TV con el logo renovado iX TV en móvil y Android TV',
-    'Detección automática del punto de salida (proxy) de tu red Wi‑Fi, aplicada solo a lo que sale de la app',
+    'Detección automática de la configuración de red de tu Wi‑Fi sin afectar la reproducción local',
     'Reproducción más rápida y estable en películas, series y anime, incluso en conexiones lentas',
     'Control remoto por Wi-Fi más seguro y privado, exclusivo para los dispositivos de tu propia cuenta',
   ];
