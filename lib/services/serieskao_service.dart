@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
 import 'package:pointycastle/export.dart' as pc;
 
 import '../models/models.dart';
@@ -129,14 +128,18 @@ class SeriesKaoService {
     try {
       // La memoria de red decide por dónde sale la petición: directo en una red
       // normal, por el borde propio cuando ya aprendió que el proveedor tropieza.
-      final res = await http
-          .get(
-            AnimeEdgeRoute.instance
-                .routeUri(Uri.parse(url), routeKey: 'seriesKao'),
-            headers: _headers,
-          )
-          .timeout(const Duration(seconds: 9));
-      if (res.statusCode != 200) return [];
+      final res = await AnimeEdgeRoute.instance.getRouted(
+        Uri.parse(url),
+        routeKey: 'seriesKao',
+        headers: _headers,
+        timeout: const Duration(seconds: 9),
+        // v3.3.48 — Si la respuesta no trae ni una tarjeta, es la página de la
+        // red: se da la vuelta por el borde antes de rendirse.
+        hasContent: (r) => parseCatalogCards(r.body,
+                includeAnime: includeAnime, onlyAnime: onlyAnime)
+            .isNotEmpty,
+      );
+      if (res == null || res.statusCode != 200) return [];
       return parseCatalogCards(
         res.body,
         includeAnime: includeAnime,
@@ -240,29 +243,27 @@ class SeriesKaoService {
     }
 
     try {
-      var res = await http
-          .get(
-            AnimeEdgeRoute.instance.routeUri(
-              Uri.parse('$baseUrl/$kind/$slug'),
-              routeKey: 'seriesKao',
-            ),
-            headers: _headers,
-          )
-          .timeout(const Duration(seconds: 9));
+      var res = await AnimeEdgeRoute.instance.getRouted(
+        Uri.parse('$baseUrl/$kind/$slug'),
+        routeKey: 'seriesKao',
+        headers: _headers,
+        timeout: const Duration(seconds: 9),
+        // v3.3.48 — La ficha tiene que traer su tarjeta; si no, es la página de
+        // la red y se prueba por el borde antes de rendirse.
+        hasContent: (r) => r.body.contains('og:image'),
+      );
       var effectiveKind = kind;
-      if (res.statusCode != 200) {
+      if (res == null || res.statusCode != 200) {
         effectiveKind = kind == 'anime' ? 'serie' : 'anime';
-        res = await http
-            .get(
-              AnimeEdgeRoute.instance.routeUri(
-                Uri.parse('$baseUrl/$effectiveKind/$slug'),
-                routeKey: 'seriesKao',
-              ),
-              headers: _headers,
-            )
-            .timeout(const Duration(seconds: 9));
+        res = await AnimeEdgeRoute.instance.getRouted(
+          Uri.parse('$baseUrl/$effectiveKind/$slug'),
+          routeKey: 'seriesKao',
+          headers: _headers,
+          timeout: const Duration(seconds: 9),
+          hasContent: (r) => r.body.contains('og:image'),
+        );
       }
-      if (res.statusCode != 200) return null;
+      if (res == null || res.statusCode != 200) return null;
       final html = res.body;
 
       final ogDesc = RegExp(
@@ -411,18 +412,19 @@ class SeriesKaoService {
       final apiUrl =
           '$baseUrl/api/episodio/$kind/${Uri.encodeComponent(slug)}/${episode.seasonNumber}/${episode.episodeNumber}';
       final referer = '$baseUrl/$kind/$slug';
-      final apiRes = await http.get(
-        AnimeEdgeRoute.instance.routeUri(
-          Uri.parse(apiUrl),
-          routeKey: 'seriesKao',
-        ),
+      final apiRes = await AnimeEdgeRoute.instance.getRouted(
+        Uri.parse(apiUrl),
+        routeKey: 'seriesKao',
         headers: {
           ..._headers,
           'Accept': 'application/json',
           'Referer': referer,
         },
-      ).timeout(const Duration(seconds: 9));
-      if (apiRes.statusCode != 200) return [];
+        timeout: const Duration(seconds: 9),
+        // v3.3.48 — El JSON del episodio tiene que traer el enlace al reproductor.
+        hasContent: (r) => r.body.contains('data-url='),
+      );
+      if (apiRes == null || apiRes.statusCode != 200) return [];
 
       final decoded = jsonDecode(apiRes.body);
       if (decoded is! Map) return [];
@@ -435,17 +437,20 @@ class SeriesKaoService {
 
       final vidUrl = '$baseUrl${vidUrlMatch.group(1)!}';
       onStatus?.call('Preparando señal HD...');
-      final vidRes = await http.get(
-        AnimeEdgeRoute.instance.routeUri(
-          Uri.parse(vidUrl),
-          routeKey: 'seriesKao',
-        ),
+      final vidRes = await AnimeEdgeRoute.instance.getRouted(
+        Uri.parse(vidUrl),
+        routeKey: 'seriesKao',
         headers: {
           ..._headers,
           'Referer': referer,
         },
-      ).timeout(const Duration(seconds: 9));
-      if (vidRes.statusCode != 200) return [];
+        timeout: const Duration(seconds: 9),
+        // v3.3.48 — La página del reproductor tiene que traer embeds; si no, es
+        // la página de la red. Ojo: `/vidurl/` se deja directo por diseño, así
+        // que aquí la vuelta no aplica y la petición es la de siempre.
+        hasContent: (r) => extractDecryptedEmbeds(r.body).isNotEmpty,
+      );
+      if (vidRes == null || vidRes.statusCode != 200) return [];
 
       final embeds = extractDecryptedEmbeds(vidRes.body);
       if (embeds.isEmpty) return [];

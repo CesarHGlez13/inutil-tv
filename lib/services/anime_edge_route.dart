@@ -251,6 +251,7 @@ class AnimeEdgeRoute {
     Object? body,
     required Duration timeout,
     String? routeKey,
+    bool Function(http.Response response)? hasContent,
   }) async {
     final key = keyFor(uri, routeKey: routeKey);
     final primaryBase = RemoteProvidersConfig.instance.metaBaseUrl;
@@ -312,7 +313,12 @@ class AnimeEdgeRoute {
             : await http.get(target, headers: h).timeout(timeout);
         last = res;
         viaEdge = isEdge;
-        if (!_looksBlocked(res)) {
+        // v3.3.48 — En una red que nos avisó que inspecciona, un 200 que llegó
+        // sin contenido tampoco sirve: es la página de la red, no el catálogo.
+        // Se da la vuelta por el borde antes de rendirse. En una red normal la
+        // petición es un solo viaje como siempre y este chequeo no cuesta nada.
+        final vacia = hasContent != null && !hasContent(res);
+        if (!_looksBlocked(res) && !(vacia && _redAvisoQueInspecciona)) {
           if (isEdge && key != null) markEdgePreferred(key);
           return AnimeRouteResult(response: res, viaEdge: isEdge);
         }
@@ -333,6 +339,36 @@ class AnimeEdgeRoute {
       failedAll: last == null || _looksBlocked(last),
     );
   }
+
+  /// v3.3.48 — GET por la ruta que toca, con la misma memoria de red de [send].
+  /// [hasContent] es el criterio del que pide (p. ej. «la lista parseada trae
+  /// algo»): en una red que avisó que inspecciona, si la respuesta directa llegó
+  /// 200 pero vacía, la petición se da una sola vuelta por el borde antes de
+  /// rendirse. En una red normal es un solo viaje, como siempre.
+  Future<http.Response?> getRouted(
+    Uri uri, {
+    String? routeKey,
+    Map<String, String>? headers,
+    required Duration timeout,
+    bool Function(http.Response response)? hasContent,
+  }) async {
+    final r = await send(
+      'GET',
+      uri,
+      headers ?? const <String, String>{},
+      timeout: timeout,
+      routeKey: routeKey,
+      hasContent: hasContent,
+    );
+    return r.response;
+  }
+
+  /// true si la red dio alguna señal de filtrar: el aviso del ajuste «Redes que
+  /// revisan el tráfico» (activado por defecto), un proxy obligatorio, el DNS que
+  /// mintió alguna vez o la inspección TLS ya confirmada.
+  bool get _redAvisoQueInspecciona =>
+      NetworkConfigService.instance.corporateModeActive ||
+      NetworkConfigService.instance.tlsFallbackEnabled;
 
   /// Señales de que la respuesta no es el contenido sino una verificación de la
   /// red: status de filtro o HTML de comprobación.

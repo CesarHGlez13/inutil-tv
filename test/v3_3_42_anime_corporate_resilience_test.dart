@@ -262,7 +262,15 @@ void main() {
         'lib/services/stream_validator.dart',
         'lib/services/hls_stream_proxy.dart',
       ]) {
-        expect(File(f).readAsStringSync(), contains('AnimeEdgeRoute.instance.routeUri('),
+        final src = File(f).readAsStringSync();
+        // v3.3.48 — Los servicios que parsean una lista consultan la memoria con
+        // `getRouted` (que permite avisar «si esto llegó vacío, da la vuelta»);
+        // los que sólo necesitan la URL usan `routeUri`. Los dos son la misma
+        // memoria de red, así que el pin acepta cualquiera de las dos.
+        expect(
+            src.contains('AnimeEdgeRoute.instance.routeUri(') ||
+                src.contains('AnimeEdgeRoute.instance.getRouted('),
+            isTrue,
             reason: '$f debe poder salir por el borde cuando la memoria lo pide');
       }
     });
@@ -469,7 +477,7 @@ void main() {
     });
   });
 
-  group('v3.3.47 — el aviso del usuario pone el relevo al frente', () {
+  group('v3.3.47 y v3.3.48 — el aviso del usuario pone el relevo al frente', () {
     test('el ajuste «Redes que revisan el tráfico» enciende el sondeo y la '
         'alterna responde antes de la primera petición', () async {
       // Medido desde la empresa el 2026-11-25 con la app ya en 3.3.46: el
@@ -516,9 +524,54 @@ void main() {
 
       await altSrv.stop();
     });
+
+    test('la búsqueda que llega vacía desde la red da la vuelta por el borde',
+        () async {
+      // Medido el 2026-11-25: en la oficina la app ya estaba en 3.3.47, el
+      // interrupto ON, y la búsqueda seguía saliendo en cero. La razón en el
+      // código: los servicios de anime hacían UN solo viaje y, si la respuesta
+      // venía 200 pero vacía —la página de la red, que no trae los marcadores de
+      // verificación—, la app la aceptaba como buena y parseaba 0 tarjetas.
+      // Ahora el criterio de «respuesta útil» lo pone el que pide, y en una red
+      // que avisó que inspecciona la petición se da una sola vuelta por el borde.
+      expect(NetworkConfigService.instance.corporateModeActive, isFalse);
+      expect(NetworkConfigService.instance.tlsFallbackEnabled, isTrue);
+
+      RemoteProvidersConfig.instance.applyMap({
+        'metaBaseUrl': 'http://127.0.0.1:9', // base normal: conexión rechazada
+        'metaBaseAlt': srv.base,
+        'tioAnimeBaseUrl': srv.base,
+      });
+      srv.directAnswerIsEmpty = true;
+
+      final hits = await TioAnimeService().search('naruto');
+
+      expect(hits, isNotEmpty,
+          reason: 'la vuelta por el borde tiene que traer la lista');
+      expect(srv.hits['/directorio'] ?? 0, 1,
+          reason: 'el viaje directo se hizo primero, como siempre');
+      expect(srv.hits['/ak/tioanime/directorio'] ?? 0, 1,
+          reason: 'una sola vuelta, no un bucle');
+    });
+
+    test('en casa la petición es la de siempre: un solo viaje', () async {
+      RemoteProvidersConfig.instance.applyMap({
+        'metaBaseUrl': 'http://127.0.0.1:9',
+        'metaBaseAlt': srv.base,
+        'tioAnimeBaseUrl': srv.base,
+      });
+
+      final hits = await TioAnimeService().search('naruto');
+
+      expect(hits, isNotEmpty);
+      expect(srv.hits['/directorio'] ?? 0, 1,
+          reason: 'la red de casa responde con contenido: no se paga la vuelta');
+      expect(srv.hits['/ak/tioanime/directorio'] ?? 0, 0,
+          reason: 'en una red normal no se gasta ningún viaje extra');
+    });
   });
 
-  group('v3.3.47 — Changelog y versión sincronizados', () {
+  group('v3.3.48 — Changelog y versión sincronizados', () {
     const forbiddenTerms = [
       'pelisflix',
       'jkanime',
@@ -551,17 +604,17 @@ void main() {
           RegExp(r'^version:\s*(\d+\.\d+\.\d+)\+(\d+)', multiLine: true)
               .firstMatch(pubspec);
       expect(match, isNotNull);
-      expect(match!.group(1), '3.3.47');
-      expect(match.group(2), '96');
-      expect(AppInfo.appVersion, '3.3.47');
-      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.47'));
+      expect(match!.group(1), '3.3.48');
+      expect(match.group(2), '97');
+      expect(AppInfo.appVersion, '3.3.48');
+      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.48'));
     });
 
-    test('la nota de 3.3.47 no expone proveedores ni detalles internos', () {
+    test('la nota de 3.3.48 no expone proveedores ni detalles internos', () {
       final full = File('CHANGELOG.md').readAsStringSync();
-      final start = full.indexOf('## 3.3.47');
+      final start = full.indexOf('## 3.3.48');
       expect(start, greaterThan(0));
-      final end = full.indexOf('## 3.3.46', start);
+      final end = full.indexOf('## 3.3.47', start);
       expect(end, greaterThan(start));
       final entry = full.substring(start, end).toLowerCase();
 
@@ -593,6 +646,10 @@ class _ToyServer {
   /// v3.3.47 — Pone el juguete en la piel del filtro de la red de la empresa:
   /// `/healthz` contesta 200 con su página de aviso en vez del contrato de salud.
   bool serveFilterPageOnHealthz = false;
+  /// v3.3.48 — Por la ruta directa, el directorio de TioAnime contesta 200 con
+  /// aspecto de contenido pero cero tarjetas (la página de la red, sin los
+  /// marcadores de verificación), que es lo que hace que la app dé la vuelta.
+  bool directAnswerIsEmpty = false;
 
   static Future<_ToyServer> start() async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -668,10 +725,16 @@ class _ToyServer {
     } else if (path.startsWith('/tio/ver/naruto-')) {
       body = '<html><body>var videos = [["yourupload",'
           '"${base}/up/embed/xyz"]];</body></html>';
-    } else if (path == '/tio/directorio') {
-      body = '<html><body><article class="anime">'
-          '<a href="/anime/naruto"><img src="/img/naruto.jpg">'
-          '<h3 class="title">Naruto</h3></a></article></body></html>';
+    } else if (path == '/tio/directorio' || path == '/directorio') {
+      // v3.3.48 — Por la ruta DIRECTA (la que no llega prefijada con `/ak/`) la
+      // bandera hace de página de la red: 200 con aspecto de contenido pero cero
+      // tarjetas, y sin los marcadores de verificación. Por el borde se sirve la
+      // lista completa, que es lo que tiene que salir despues.
+      body = (directAnswerIsEmpty && !arrived.startsWith('/ak/'))
+          ? '<html><body><h1>Página de la red</h1><p>Un momento</p></body></html>'
+          : '<html><body><article class="anime">'
+              '<a href="/anime/naruto"><img src="/img/naruto.jpg">'
+              '<h3 class="title">Naruto</h3></a></article></body></html>';
     } else if (path == '/kao/animes/populares') {
       body = '<html><body><article class="card">'
           '<a href="/anime/naruto"><img src="/img/naruto.jpg" alt="Naruto">'

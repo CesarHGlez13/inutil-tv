@@ -38,14 +38,16 @@ class TioAnimeService {
           : '$baseUrl/directorio?p=$page';
       // La memoria de red decide por dónde sale la petición: directo en una red
       // normal, por el borde propio cuando ya aprendió que el proveedor tropieza.
-      final res = await http
-          .get(
-            AnimeEdgeRoute.instance
-                .routeUri(Uri.parse(url), routeKey: 'tioAnime'),
-            headers: _headers,
-          )
-          .timeout(const Duration(seconds: 9));
-      if (res.statusCode != 200) return [];
+      final res = await AnimeEdgeRoute.instance.getRouted(
+        Uri.parse(url),
+        routeKey: 'tioAnime',
+        headers: _headers,
+        timeout: const Duration(seconds: 9),
+        // v3.3.48 — Si la respuesta no trae ni una tarjeta, es la página de la
+        // red: se da la vuelta por el borde antes de rendirse.
+        hasContent: (r) => parseDirectoryCards(r.body).isNotEmpty,
+      );
+      if (res == null || res.statusCode != 200) return [];
       return parseDirectoryCards(res.body);
     } catch (e) {
       debugPrint('[TioAnimeService] Directory err: $e');
@@ -59,16 +61,16 @@ class TioAnimeService {
     if (clean.isEmpty) return [];
     try {
       final q = Uri.encodeQueryComponent(clean);
-      final res = await http
-          .get(
-            AnimeEdgeRoute.instance.routeUri(
-              Uri.parse('$baseUrl/directorio?q=$q'),
-              routeKey: 'tioAnime',
-            ),
-            headers: _headers,
-          )
-          .timeout(const Duration(seconds: 8));
-      if (res.statusCode != 200) return [];
+      final res = await AnimeEdgeRoute.instance.getRouted(
+        Uri.parse('$baseUrl/directorio?q=$q'),
+        routeKey: 'tioAnime',
+        headers: _headers,
+        timeout: const Duration(seconds: 8),
+        // v3.3.48 — La búsqueda es la que más se ve afectada: si el viaje directo
+        // no trae tarjetas, se prueba por el borde antes de rendirse.
+        hasContent: (r) => parseDirectoryCards(r.body).isNotEmpty,
+      );
+      if (res == null || res.statusCode != 200) return [];
       return parseDirectoryCards(res.body);
     } catch (e) {
       debugPrint('[TioAnimeService] Search err: $e');
@@ -189,14 +191,17 @@ class TioAnimeService {
       if (slug == null) return [];
 
       final epUrl = '$baseUrl/ver/$slug-$episodeNumber';
-      final res = await http
-          .get(
-            AnimeEdgeRoute.instance
-                .routeUri(Uri.parse(epUrl), routeKey: 'tioAnime'),
-            headers: _headers,
-          )
-          .timeout(const Duration(seconds: 8));
-      if (res.statusCode != 200) return [];
+      final res = await AnimeEdgeRoute.instance.getRouted(
+        Uri.parse(epUrl),
+        routeKey: 'tioAnime',
+        headers: _headers,
+        timeout: const Duration(seconds: 8),
+        // v3.3.48 — La lista de reproductores tiene que venir en la respuesta; si
+        // no viene, es la página de la red y se prueba por el borde.
+        hasContent: (r) =>
+            RegExp(r'var\s+videos\s*=\s*(\[.*?\]);').firstMatch(r.body) != null,
+      );
+      if (res == null || res.statusCode != 200) return [];
 
       final vidsMatch =
           RegExp(r'var\s+videos\s*=\s*(\[.*?\]);').firstMatch(res.body);
@@ -244,16 +249,16 @@ class TioAnimeService {
         .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
         .replaceAll(RegExp(r'^-|-$'), '');
     try {
-      final check = await http
-          .get(
-            AnimeEdgeRoute.instance.routeUri(
-              Uri.parse('$baseUrl/anime/$directSlug'),
-              routeKey: 'tioAnime',
-            ),
-            headers: _headers,
-          )
-          .timeout(const Duration(seconds: 6));
-      if (check.statusCode == 200 && check.body.contains('var anime_info')) {
+      final check = await AnimeEdgeRoute.instance.getRouted(
+        Uri.parse('$baseUrl/anime/$directSlug'),
+        routeKey: 'tioAnime',
+        headers: _headers,
+        timeout: const Duration(seconds: 6),
+        hasContent: (r) => r.body.contains('var anime_info'),
+      );
+      if (check != null &&
+          check.statusCode == 200 &&
+          check.body.contains('var anime_info')) {
         return directSlug;
       }
     } catch (_) {}
@@ -261,16 +266,17 @@ class TioAnimeService {
     // 2. Buscar en el directorio de TioAnime
     try {
       final q = Uri.encodeQueryComponent(cleanQuery);
-      final res = await http
-          .get(
-            AnimeEdgeRoute.instance.routeUri(
-              Uri.parse('$baseUrl/directorio?q=$q'),
-              routeKey: 'tioAnime',
-            ),
-            headers: _headers,
-          )
-          .timeout(const Duration(seconds: 8));
-      if (res.statusCode != 200) return null;
+      final res = await AnimeEdgeRoute.instance.getRouted(
+        Uri.parse('$baseUrl/directorio?q=$q'),
+        routeKey: 'tioAnime',
+        headers: _headers,
+        timeout: const Duration(seconds: 8),
+        // v3.3.48 — El slug sale de la lista del directorio: si la respuesta no
+        // trae enlaces, es la página de la red y se prueba por el borde.
+        hasContent: (r) =>
+            RegExp(r'href="/anime/([^"]+)"').firstMatch(r.body) != null,
+      );
+      if (res == null || res.statusCode != 200) return null;
       final m = RegExp(r'href="/anime/([^"]+)"').firstMatch(res.body);
       return m?.group(1);
     } catch (_) {
@@ -280,11 +286,13 @@ class TioAnimeService {
 
   Future<StreamSource?> _extractYourUpload(String embedUrl) async {
     try {
-      final res = await http.get(
-        AnimeEdgeRoute.instance.routeUri(Uri.parse(embedUrl)),
+      final res = await AnimeEdgeRoute.instance.getRouted(
+        Uri.parse(embedUrl),
         headers: {..._headers, 'Referer': '$baseUrl/'},
-      ).timeout(const Duration(seconds: 8));
-      if (res.statusCode != 200) return null;
+        timeout: const Duration(seconds: 8),
+        hasContent: (r) => RegExp(r"file\s*:").firstMatch(r.body) != null,
+      );
+      if (res == null || res.statusCode != 200) return null;
 
       final m = RegExp(r"""file\s*:\s*['"]([^'"]+)['"]""").firstMatch(res.body);
       final rawUrl = m?.group(1);

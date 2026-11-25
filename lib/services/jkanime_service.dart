@@ -53,6 +53,7 @@ class JkAnimeService {
     Object? body,
     Map<String, String>? extra,
     required Duration timeout,
+    bool Function(http.Response response)? hasContent,
   }) async {
     final headers = Map<String, String>.from(_headers);
     if (extra != null) headers.addAll(extra);
@@ -63,6 +64,7 @@ class JkAnimeService {
       body: body,
       timeout: timeout,
       routeKey: _routeKey,
+      hasContent: hasContent,
     );
   }
 
@@ -181,8 +183,14 @@ class JkAnimeService {
         url = '$baseUrl/directorio?p=$page';
       }
 
-      final result =
-          await _send('GET', url, timeout: const Duration(seconds: 10));
+      final result = await _send(
+        'GET',
+        url,
+        timeout: const Duration(seconds: 10),
+        // v3.3.48 — Un 200 que no trae el bloque del catálogo es la página de la
+        // red: se da la vuelta por el borde antes de rendirse.
+        hasContent: (r) => r.body.contains('var animes = '),
+      );
       final res = result.response;
       if (res == null || res.statusCode != 200) return [];
 
@@ -559,6 +567,9 @@ class JkAnimeService {
           'Cookie': _sessionCookie!,
       },
       timeout: const Duration(seconds: 8),
+      // v3.3.48 — Idem: si la respuesta no trae resultados y la red avisó que
+      // inspecciona, la petición se da la vuelta por el borde.
+      hasContent: (r) => _parseAjaxSearch(r.body).isNotEmpty,
     );
     return result.response;
   }
