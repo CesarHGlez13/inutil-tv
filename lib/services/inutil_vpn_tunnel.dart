@@ -5,9 +5,9 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
-import 'anime_edge_route.dart';
 import 'firebase_auth_service.dart';
 import 'network_config_service.dart';
+import 'stream_validator.dart';
 
 /// Resultado de una sonda real a través del túnel VPN cifrado.
 class TunnelProbeResult {
@@ -453,7 +453,7 @@ class InutilVpnTunnel extends ChangeNotifier {
 
   Future<WebSocket> _connectWebSocket(String? token) async {
     final headers = <String, dynamic>{
-      'User-Agent': AnimeEdgeRoute.browserHeaders['User-Agent']!,
+      'User-Agent': StreamValidator.defaultUserAgent,
     };
     if (token != null && token.isNotEmpty) {
       headers['Authorization'] = 'Bearer $token';

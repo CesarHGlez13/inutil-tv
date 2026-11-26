@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'anime_edge_route.dart';
 import 'network_config_service.dart';
 
 /// Resultado granular de la validación de un enlace de video:
@@ -24,6 +23,22 @@ class StreamValidator {
   static const String defaultUserAgent =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
+  /// Cabeceras completas de navegador para proveedores que filtran User-Agent de robot.
+  static const Map<String, String> browserHeaders = <String, String>{
+    'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, '
+            'like Gecko) Chrome/125.0.0.0 Safari/537.36',
+    'Accept': 'application/json,text/html;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'es-MX,es;q=0.9,en;q=0.8',
+    'sec-ch-ua':
+        '"Chromium";v="125", "Not-A.Brand";v="24", "Google Chrome";v="125"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-origin',
+  };
 
   /// Elimina acentos y diacríticos para búsquedas tolerantes (`dragón` -> `dragon`).
   static String stripAccents(String input) {
@@ -257,9 +272,7 @@ class StreamValidator {
     final client = sharedClient ?? _validationClient(timeout);
 
     try {
-      // La memoria de red decide por dónde sale la comprobación: directo en una
-      // red normal, por el borde propio si el host del anime ya mostró que filtra.
-      final uri = AnimeEdgeRoute.instance.routeUri(Uri.parse(url));
+      final uri = Uri.parse(url);
       final req = await client.getUrl(uri).timeout(timeout);
       req.headers.set('User-Agent', headers['User-Agent'] ?? defaultUserAgent);
       headers.forEach((k, v) {
@@ -355,7 +368,7 @@ class StreamValidator {
   }) async {
     try {
       final req = await client
-          .getUrl(AnimeEdgeRoute.instance.routeUri(Uri.parse(segmentUrl)))
+          .getUrl(Uri.parse(segmentUrl))
           .timeout(timeout);
       req.headers.set('User-Agent', headers['User-Agent'] ?? defaultUserAgent);
       headers.forEach((k, v) {

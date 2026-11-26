@@ -5,7 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:tubotv/services/anime_edge_route.dart';
+import 'package:tubotv/constants/app_info.dart';
 import 'package:tubotv/services/inutil_vpn_tunnel.dart';
 import 'package:tubotv/services/network_config_service.dart';
 
@@ -97,14 +97,12 @@ void main() {
     HttpOverrides.global = null;
     SharedPreferences.setMockInitialValues({});
     NetworkConfigService.instance.resetForTest();
-    AnimeEdgeRoute.instance.resetForTest();
     await InutilVpnTunnel.instance.resetForTest();
   });
 
   tearDown(() async {
     await InutilVpnTunnel.instance.resetForTest();
     NetworkConfigService.instance.resetForTest();
-    AnimeEdgeRoute.instance.resetForTest();
     HttpOverrides.global = prevOverrides;
   });
 
@@ -269,11 +267,6 @@ void main() {
       isNull,
     );
 
-    // AnimeEdgeRoute NO desvía al Worker de Cloudflare cuando el Modo VPN está activo
-    expect(AnimeEdgeRoute.instance.shouldUseEdge('tioAnime'), isFalse);
-    expect(AnimeEdgeRoute.instance.shouldUseEdge('seriesKao'), isFalse);
-    expect(AnimeEdgeRoute.instance.shouldUseEdge('jkAnime'), isFalse);
-
     // Al apagar el Modo VPN, se detiene el proxy local y vuelve a DIRECT
     await net.setVpnTunnelEnabled(false);
     expect(net.vpnTunnelActive, isFalse);
@@ -283,5 +276,56 @@ void main() {
       'DIRECT',
     );
     expect(net.mpvProxyUrl, isNull);
+  });
+
+  group('v3.3.52 — Changelog y versión sincronizados', () {
+    const forbiddenTerms = [
+      'pelisflix',
+      'jkanime',
+      'cuevana',
+      'poseidon',
+      'tioanime',
+      'streamwish',
+      'vidhide',
+      'tmdb',
+      'fanart',
+      'proveedor',
+      'espejo',
+      'scraper',
+      'VOE',
+      'base64',
+      'X-Admin-Secret',
+      'firebase_admin',
+      'Panel Admin',
+      'Firestore',
+      'libmpv',
+      'Cloudflare Workers',
+      'SQLite',
+      'app_config/',
+      'EWMA',
+    ];
+
+    test('la versión viva está en los 3 sitios y el changelog es limpio', () {
+      final pubspec = File('pubspec.yaml').readAsStringSync();
+      final match =
+          RegExp(r'^version:\s*(\d+\.\d+\.\d+)\+(\d+)', multiLine: true)
+              .firstMatch(pubspec);
+      expect(match, isNotNull);
+      expect(match!.group(1), '3.3.52');
+      expect(match.group(2), '101');
+      expect(AppInfo.appVersion, '3.3.52');
+
+      final full = File('CHANGELOG.md').readAsStringSync();
+      final start = full.indexOf('## 3.3.52');
+      expect(start, greaterThan(0));
+      final end = full.indexOf('## 3.3.51', start);
+      expect(end, greaterThan(start));
+      final entry = full.substring(start, end).toLowerCase();
+      final highlights = AppInfo.whatsNewHighlights.join('\n').toLowerCase();
+      for (final term in forbiddenTerms) {
+        expect(entry, isNot(contains(term.toLowerCase())));
+        expect(highlights, isNot(contains(term.toLowerCase())));
+      }
+    });
   });
 }

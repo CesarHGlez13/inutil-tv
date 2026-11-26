@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'anime_edge_route.dart';
 import 'firebase_config.dart';
 import 'inutil_vpn_tunnel.dart';
 
@@ -348,7 +347,6 @@ class NetworkConfigService extends ChangeNotifier {
     } else {
       await InutilVpnTunnel.instance.stop();
     }
-    AnimeEdgeRoute.instance.clearMemory();
     notifyListeners();
     return ok;
   }

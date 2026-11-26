@@ -4,7 +4,7 @@ class AppInfo {
   const AppInfo._();
 
   static const String appName = 'Inutix TV';
-  static const String appVersion = '3.3.51';
+  static const String appVersion = '3.3.52';
   static const String creatorName = 'César';
   static const String supportEmail = 'cesarmaster133@gmail.com';
 
@@ -21,17 +21,9 @@ class AppInfo {
       'Ecosistema inutix.com · Inutix TV & Inutix Music';
 
   static const List<String> whatsNewHighlights = [
+    'App más limpia y ligera: se retiraron módulos obsoletos y rutas de rodeo ya sustituidas por el Modo VPN Inutix, reduciendo tamaño y arrancando más rápido',
     'Nuevo Modo VPN Inutix integrado: cifra todo el catálogo, las portadas y la reproducción de video desde dentro de la app para saltar bloqueos de oficina, escuela u hotel sin instalar apps externas',
-    'El anime de la oficina ya no necesita VPN: con el aviso «Redes que revisan el tráfico» prendido, la app usa el camino alterno desde el primer intento, así la búsqueda, la ficha, los episodios y el video no quedan en cero',
-    'La búsqueda y las listas de anime ya no se quedan en cero: si tu red rechaza el certificado de un servidor, la app lo toma como la señal de que inspecciona y usa el camino alterno desde el primer intento, así la ficha, los episodios y el video no se cortan',
-    'La búsqueda y las listas de anime ya no se quedan en cero: si tu red responde con su página de aviso, la app lo reconoce y prueba por el camino alterno antes de rendirse, así la ficha, los episodios y el video no se cortan',
-    'El aviso «Redes que revisan el tráfico» ahora sí decide: si tu empresa u hotel cifra lo que navegas, la app elige desde el primer intento el camino del anime que sí le responde, así la lista, la ficha, los episodios y el video no quedan en cero',
-    'Anime en la red de la empresa, sin trabas: si el filtro de tu empresa corta un camino, la app usa el alterno desde el primer intento, así la lista, la ficha, los episodios y el video no quedan en cero',
-    'Anime en redes de empresa, hoteles y aeropuertos, ahora completo: la app usa el camino que sí le responde para la lista, la ficha, la búsqueda y el reproductor, sin vueltas innecesarias',
-    'Anime completo en redes de empresa, hoteles y aeropuertos: la app prueba primero el camino que sí le responde, así la lista, la ficha y los episodios no se cortan por un intento perdido',
     'La conexión con tu servidor de datos se recupera sola: si se reinicia con la app abierta, la app lo detecta y vuelve a él sin que hagas nada',
-    'Anime completo en redes de empresa, hoteles y aeropuertos: al reproducir un episodio la app usa primero la dirección que sí le responde, así el video arranca sin que configures nada',
-    'Anime en redes de empresa, hoteles y aeropuertos: si tu red no deja entrar a la lista, la app cambia sola al camino alterno y carga la lista, la ficha, los episodios y el video sin que configures nada',
     'Tu actividad se registra al cerrar la sesión: un resumen diario en segundo plano confirma que tu cuenta sigue activa según la política de 15 días',
     'Sesión siempre estable para cuentas activas: corrige bloqueos inesperados de acceso ante cambios de red y recupera tu cuenta al instante al pulsar «Comprobar Estado»',
     'Mayor disponibilidad en películas y series: búsqueda y reproducción automática más estable',

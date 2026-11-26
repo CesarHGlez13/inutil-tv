@@ -14,7 +14,6 @@ import 'screens/search_screen.dart';
 import 'screens/series_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/tv_screen.dart';
-import 'services/anime_edge_route.dart';
 import 'services/app_settings_service.dart';
 import 'services/artwork_cache_service.dart';
 import 'services/firebase_auth_service.dart';
@@ -52,7 +51,6 @@ Future<void> main() async {
         .load()
         .timeout(const Duration(milliseconds: 1500));
   } catch (_) {}
-  unawaited(AnimeEdgeRoute.instance.ensureEdgeBase());
   unawaited(TvModeService.instance.initialize());
   MediaKit.ensureInitialized();
   // Sonda de alcance al relay propio (S7) para que un build horneado con

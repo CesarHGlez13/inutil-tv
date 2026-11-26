@@ -801,7 +801,7 @@ class _TvRemoteSheetState extends State<TvRemoteSheet>
   }
 
   String _spdLabel(double s) =>
-      s == s.truncateToDouble() ? '${s.toInt()}×' : '${s}×';
+      s == s.truncateToDouble() ? '${s.toInt()}×' : '$s×';
 
   // ─── Mode toggle ──────────────────────────────────────────────────────────
   Widget _buildModeToggle(

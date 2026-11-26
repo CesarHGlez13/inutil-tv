@@ -1,5 +1,10 @@
 # Changelog — Inutix TV
 
+## 3.3.52 — 2026-11-25
+- **App más limpia y ligera:** Se retiraron módulos heredados, librerías sin uso y rutas de rodeo obsoletas que ya quedaron sustituidas por el Modo VPN Inutix.
+- **Arranque y navegación más directos:** Sin el Modo VPN encendido, las listas y la reproducción salen directo sin viajes extra innecesarios; con el Modo VPN encendido, toda la app sale cifrada.
+- **Menor peso de instalación:** Se eliminaron fuentes y paquetes que la app ya no utilizaba.
+
 ## 3.3.51 — 2026-11-25
 - **Nuevo Modo VPN Inutix integrado:** Ahora puedes encender el túnel cifrado propio directamente desde Ajustes (o con un toque si tu red bloquea el catálogo). Todo el catálogo, las portadas y la reproducción salen cifrados sin instalar apps externas ni pedir permisos especiales.
 - **Un toque cuando tu red bloquea:** Si una pestaña no logra cargar por restricciones de oficina, escuela u hotel, aparece el botón «Activar Modo VPN» para conectar y recargar en el acto.

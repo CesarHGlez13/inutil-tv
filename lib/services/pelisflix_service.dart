@@ -352,7 +352,7 @@ class PelisflixService {
     }
 
     final optionRe = RegExp(
-      '''<option[^>]*value=["\'](https?://[^"\']+)["\']''',
+      r'''<option[^>]*value=["'](https?://[^"']+)["']''',
       caseSensitive: false,
     );
     for (final m in optionRe.allMatches(html)) {

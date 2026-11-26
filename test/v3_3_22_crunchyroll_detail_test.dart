@@ -54,15 +54,15 @@ void main() {
         isSeries: true,
       );
 
-  group('v3.3.22 a v3.3.51 — pins de versión', () {
-    test('pubspec.yaml en 3.3.51+100', () {
-      expect(_pubspecVersion(), '3.3.51+100');
+  group('v3.3.22 a v3.3.52 — pins de versión', () {
+    test('pubspec.yaml en 3.3.52+101', () {
+      expect(_pubspecVersion(), '3.3.52+101');
     });
 
-    test('lib/constants/app_info.dart en 3.3.51', () {
+    test('lib/constants/app_info.dart en 3.3.52', () {
       expect(File('lib/constants/app_info.dart').readAsStringSync(),
-          contains("static const String appVersion = '3.3.51'"));
-      expect(AppInfo.appVersion, '3.3.51');
+          contains("static const String appVersion = '3.3.52'"));
+      expect(AppInfo.appVersion, '3.3.52');
     });
 
     test('CHANGELOG.md documenta versiones recientes', () {

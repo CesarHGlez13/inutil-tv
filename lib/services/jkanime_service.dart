@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/models.dart';
-import 'anime_edge_route.dart';
 import 'remote_providers_config.dart';
 import 'stream_validator.dart';
 import 'tioanime_service.dart';
@@ -34,42 +33,26 @@ class JkAnimeService {
 
   static String get baseUrl => RemoteProvidersConfig.instance.jkAnimeBaseUrl;
 
-  /// Cabeceras de navegador completo: en una red de empresa puntúan la petición
-  /// antes de dejarla pasar, y con una huella pelada de robot toca verificación.
-  static const Map<String, String> _headers = AnimeEdgeRoute.browserHeaders;
-
-  /// Clave de este proveedor en la memoria de red ([AnimeEdgeRoute]).
-  static const String _routeKey = 'jkAnime';
+  /// Cabeceras de navegador completo para evitar rechazos por User-Agent de robot.
+  static const Map<String, String> _headers = StreamValidator.browserHeaders;
 
   @visibleForTesting
   static Map<String, String> get headersForAssertions => _headers;
 
-  /// Manda la petición por la ruta que toque: directo en una red normal, por el
-  /// borde propio cuando la red ya mostró que filtra. Devuelve la respuesta o
-  /// `null` si ningún camino la trajo.
-  Future<AnimeRouteResult> _send(
+  Future<http.Response?> _send(
     String method,
     String url, {
     Object? body,
     Map<String, String>? extra,
     required Duration timeout,
-    bool Function(http.Response response)? hasContent,
   }) async {
     final headers = Map<String, String>.from(_headers);
     if (extra != null) headers.addAll(extra);
-    return AnimeEdgeRoute.instance.send(
-      method,
-      Uri.parse(url),
-      headers,
-      body: body,
-      timeout: timeout,
-      routeKey: _routeKey,
-      hasContent: hasContent,
-    );
+    final uri = Uri.parse(url);
+    return method == 'POST'
+        ? await http.post(uri, headers: headers, body: body).timeout(timeout)
+        : await http.get(uri, headers: headers).timeout(timeout);
   }
-
-  /// true si la memoria de red ya sabe que este proveedor no responde.
-  bool get _bloqueado => AnimeEdgeRoute.instance.isBlocked(_routeKey);
 
   /// Limpia las cachés del servicio (no la memoria de red, que es del proceso).
   @visibleForTesting
@@ -138,14 +121,9 @@ class JkAnimeService {
     }
 
     try {
-      final result =
+      final res =
           await _send('GET', baseUrl, timeout: const Duration(seconds: 8));
-      final res = result.response;
-      if (res == null) {
-        // Ningún camino trajo la página: la memoria de red ya sabe que este
-        // proveedor no responde y las siguientes peticiones no lo van a molestar.
-        return;
-      }
+      if (res == null) return;
       final rawCookie = res.headers['set-cookie'] ?? '';
       _sessionCookie = _formatCookieHeader(rawCookie);
       final tokenMatch =
@@ -170,7 +148,6 @@ class JkAnimeService {
   }
 
   Future<List<VodItem>> fetchDirectory({int page = 1, String? genre}) async {
-    if (_bloqueado) return []; // la red ya mostró que no deja pasar a este catálogo
     try {
       final String url;
       if (genre != null && genre.startsWith('tipo:')) {
@@ -183,15 +160,11 @@ class JkAnimeService {
         url = '$baseUrl/directorio?p=$page';
       }
 
-      final result = await _send(
+      final res = await _send(
         'GET',
         url,
         timeout: const Duration(seconds: 10),
-        // v3.3.48 — Un 200 que no trae el bloque del catálogo es la página de la
-        // red: se da la vuelta por el borde antes de rendirse.
-        hasContent: (r) => r.body.contains('var animes = '),
       );
-      final res = result.response;
       if (res == null || res.statusCode != 200) return [];
 
       final html = res.body;
@@ -338,13 +311,11 @@ class JkAnimeService {
   Future<String?> _fetchAnimePageHtml(String slug) async {
     final cleanSlug = slug.replaceAll('jk_', '').trim();
     if (cleanSlug.isEmpty) return null;
-    if (_bloqueado) return null; // la red no deja pasar este catálogo
     if (_pageHtmlCache.containsKey(cleanSlug)) return _pageHtmlCache[cleanSlug];
     try {
       final pageUrl = '$baseUrl/$cleanSlug/';
-      final result =
+      final res =
           await _send('GET', pageUrl, timeout: const Duration(seconds: 8));
-      final res = result.response;
       if (res == null || res.statusCode != 200) return null;
       final html = res.body;
       _pageHtmlCache[cleanSlug] = html;
@@ -525,7 +496,6 @@ class JkAnimeService {
   }
 
   Future<List<VodItem>> _performAjaxSearch(String q) async {
-    if (_bloqueado) return []; // ya se sabe que esta red no deja pasar el catálogo
     try {
       await _ensureSession();
       final first = await _ajaxSearchOnce(q);
@@ -550,9 +520,8 @@ class JkAnimeService {
     return [];
   }
 
-  /// Un viaje de `/ajax_search` por la ruta que toque.
-  Future<http.Response?> _ajaxSearchOnce(String q) async {
-    final result = await _send(
+  Future<http.Response?> _ajaxSearchOnce(String q) {
+    return _send(
       'POST',
       '$baseUrl/ajax_search',
       body: {
@@ -567,11 +536,7 @@ class JkAnimeService {
           'Cookie': _sessionCookie!,
       },
       timeout: const Duration(seconds: 8),
-      // v3.3.48 — Idem: si la respuesta no trae resultados y la red avisó que
-      // inspecciona, la petición se da la vuelta por el borde.
-      hasContent: (r) => _parseAjaxSearch(r.body).isNotEmpty,
     );
-    return result.response;
   }
 
   List<VodItem> _parseAjaxSearch(String jsonStr) {
@@ -655,7 +620,7 @@ class JkAnimeService {
           ? '$baseUrl/ajax/episodes/${meta.ajaxId}/'
           : '$baseUrl/ajax/episodes/${meta.ajaxId}/?p=$page';
 
-      final result = await _send(
+      final postRes = await _send(
         'POST',
         url,
         extra: {
@@ -666,7 +631,6 @@ class JkAnimeService {
         },
         timeout: const Duration(seconds: 10),
       );
-      final postRes = result.response;
 
       if (postRes != null && postRes.statusCode == 200) {
         final j = jsonDecode(postRes.body) as Map<String, dynamic>;
@@ -840,18 +804,13 @@ class JkAnimeService {
     try {
       final episodePageUrl = '$baseUrl/$slug/$episodeNumber/';
       String? pageHtml;
-      if (!_bloqueado) {
-        onStatus?.call('Buscando servidores (Ep. $episodeNumber)...');
-        final result = await _send(
-            'GET', episodePageUrl, timeout: const Duration(seconds: 8));
-        final r = result.response;
-        if (r != null && r.statusCode == 200) {
-          pageHtml = r.body;
-        } else {
-          // No la trajo ni por un camino ni por el otro: se pasa al respaldo,
-          // que es lo que la red de la empresa deja pasar.
-          onStatus?.call('Servidor no disponible temporalmente.');
-        }
+      onStatus?.call('Buscando servidores (Ep. $episodeNumber)...');
+      final r = await _send(
+          'GET', episodePageUrl, timeout: const Duration(seconds: 8));
+      if (r != null && r.statusCode == 200) {
+        pageHtml = r.body;
+      } else {
+        onStatus?.call('Servidor no disponible temporalmente.');
       }
 
       final regex = RegExp(
@@ -869,13 +828,12 @@ class JkAnimeService {
         onStatus?.call('Verificando servidor #$idx...');
 
         try {
-          final sent = await _send(
+          final pRes = await _send(
             'GET',
             playerUrl,
             extra: {'Referer': episodePageUrl},
             timeout: const Duration(seconds: 7),
           );
-          final pRes = sent.response;
 
           if (pRes == null || pRes.statusCode != 200) continue;
 

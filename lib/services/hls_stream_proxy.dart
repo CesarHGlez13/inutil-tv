@@ -5,7 +5,6 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
-import 'anime_edge_route.dart';
 import 'network_config_service.dart';
 import 'stream_validator.dart';
 import 'vault_crypto.dart';
@@ -280,10 +279,7 @@ class HlsStreamProxy {
     }
 
     try {
-      // La ruta hacia el origen la decide la memoria de red: lo local (lo que
-      // ve el reproductor) no se toca, solo la URL que sale a la calle.
-      final uri = AnimeEdgeRoute.instance
-          .routeUri(Uri.parse(session.upstreamMasterUrl));
+      final uri = Uri.parse(session.upstreamMasterUrl);
       final req = await _httpClient.getUrl(uri).timeout(_upstreamTimeout);
       _applyUpstreamHeaders(req, session.headers);
       req.headers.set('Range', 'bytes=0-${maxBytes - 1}');
@@ -736,10 +732,7 @@ class HlsStreamProxy {
     // Fuera del prefijo precargado: proxy streaming directo con pool Keep-Alive
     try {
       final upReq = await _httpClient
-          .getUrl(
-            AnimeEdgeRoute.instance
-                .routeUri(Uri.parse(session.upstreamMasterUrl)),
-          )
+          .getUrl(Uri.parse(session.upstreamMasterUrl))
           .timeout(_upstreamTimeout);
       _applyUpstreamHeaders(upReq, session.headers);
       if (rangeHeader != null) {
@@ -1040,7 +1033,7 @@ class HlsStreamProxy {
     _ProxySession session,
     String upstreamUrl,
   ) async {
-    final uri = AnimeEdgeRoute.instance.routeUri(Uri.parse(upstreamUrl));
+    final uri = Uri.parse(upstreamUrl);
     for (var attempt = 0; attempt < 3; attempt++) {
       try {
         final req = await _httpClient.getUrl(uri).timeout(_connectTimeout);
@@ -1187,7 +1180,7 @@ class HlsStreamProxy {
           try {
             final sw = Stopwatch()..start();
             final req = await _httpClient
-                .getUrl(AnimeEdgeRoute.instance.routeUri(Uri.parse(upstream)))
+                .getUrl(Uri.parse(upstream))
                 .timeout(_connectTimeout);
             _applyUpstreamHeaders(req, session.headers);
             final res = await req.close().timeout(_upstreamTimeout);
@@ -1237,7 +1230,7 @@ class HlsStreamProxy {
 
     try {
       final req = await _httpClient
-          .getUrl(AnimeEdgeRoute.instance.routeUri(Uri.parse(upstream)))
+          .getUrl(Uri.parse(upstream))
           .timeout(_upstreamTimeout);
       _applyUpstreamHeaders(req, session.headers);
       final res = await req.close().timeout(_upstreamTimeout);
