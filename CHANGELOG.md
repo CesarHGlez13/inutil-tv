@@ -1,5 +1,10 @@
 # Changelog — Inutix TV
 
+## 3.3.51 — 2026-11-25
+- **Nuevo Modo VPN Inutix integrado:** Ahora puedes encender el túnel cifrado propio directamente desde Ajustes (o con un toque si tu red bloquea el catálogo). Todo el catálogo, las portadas y la reproducción salen cifrados sin instalar apps externas ni pedir permisos especiales.
+- **Un toque cuando tu red bloquea:** Si una pestaña no logra cargar por restricciones de oficina, escuela u hotel, aparece el botón «Activar Modo VPN» para conectar y recargar en el acto.
+- **En casa sigue igual de rápido:** Con el Modo VPN apagado todo va directo como siempre; Cine, Series, Anime y TV en vivo conservan la misma velocidad.
+
 ## 3.3.50 — 2026-11-25
 - **El anime de la oficina ya no necesita VPN:** Con el aviso «Redes que revisan el tráfico» prendido, la app usa el camino alterno desde el primer intento, así la búsqueda, la ficha, los episodios y el video no quedan en cero. Si tu red no revisa nada, apaga el aviso y se vuelve al camino de siempre.
 - **En casa:** el anime ahora da el salto por el relevo cuando el aviso está prendido; con el aviso apagado es un solo viaje, como antes.

@@ -6,9 +6,11 @@ import '../services/app_settings_service.dart';
 import '../services/firebase_auth_service.dart';
 import '../services/inutil_cloud_backup_service.dart';
 import '../services/inutil_update_service.dart';
+import '../services/inutil_vpn_tunnel.dart';
 import '../services/network_config_service.dart';
 import '../services/offline_vault_service.dart';
 import '../services/sleep_timer_service.dart';
+import '../services/vod_catalog_service.dart';
 import '../services/watch_history.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -42,9 +44,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _settings = AppSettingsService.instance;
   final _backup = InutilTvCloudBackupService.instance;
   final _network = NetworkConfigService.instance;
+  final _vpnTunnel = InutilVpnTunnel.instance;
   bool _syncing = false;
   bool _checkingOta = false;
   bool _checkingNetwork = false;
+  bool _togglingVpn = false;
+  TunnelProbeResult? _vpnProbe;
   NetworkReport? _networkReport;
   int _historyCount = 0;
 
@@ -63,6 +68,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
     setState(() => _checkingOta = false);
     await showInutilUpdateDialog(context, release: release);
+  }
+
+  Future<void> _toggleVpnTunnel(bool enabled) async {
+    if (_togglingVpn) return;
+    setState(() {
+      _togglingVpn = true;
+      if (!enabled) _vpnProbe = null;
+    });
+    final ok = await _network.setVpnTunnelEnabled(enabled);
+    VodCatalogService().clearPageCaches();
+    TunnelProbeResult? probe;
+    if (enabled && ok) {
+      probe = await _vpnTunnel.probeTunnel();
+    }
+    if (!mounted) return;
+    setState(() {
+      _togglingVpn = false;
+      _vpnProbe = probe;
+    });
+  }
+
+  String _vpnSubtitle() {
+    if (_togglingVpn) {
+      return 'Conectando túnel cifrado con api.inutix.com...';
+    }
+    if (!_network.vpnTunnelEnabled) {
+      return 'Cifra todo el catálogo y el video por tu servidor para saltar '
+          'bloqueos de empresa, escuela u hotel (sin apps externas)';
+    }
+    final probe = _vpnProbe;
+    if (probe != null) {
+      return probe.ok
+          ? 'Activo · ${probe.millis} ms · todo el tráfico sale cifrado por api.inutix.com'
+          : 'Activo con aviso: ${probe.detail.isEmpty ? "sin respuesta" : probe.detail}';
+    }
+    if (_vpnTunnel.lastError != null && _vpnTunnel.lastError!.isNotEmpty) {
+      return 'Activo · ${_vpnTunnel.lastError}';
+    }
+    if (_vpnTunnel.isRunning) {
+      return 'Activo · todo el catálogo y video salen cifrados por api.inutix.com';
+    }
+    return 'Iniciando túnel cifrado...';
   }
 
   /// Pide el proxy de la red (empresas, hoteles, aeropuertos) y lo guarda.
@@ -442,6 +489,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _settings,
         _backup,
         _network,
+        _vpnTunnel,
         SleepTimerService.instance,
         OfflineVaultService.instance,
       ]),
@@ -971,6 +1019,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: Column(
                   children: [
                     SwitchListTile(
+                      value: _network.vpnTunnelEnabled,
+                      onChanged: _togglingVpn ? null : _toggleVpnTunnel,
+                      activeThumbColor: accent,
+                      secondary: _togglingVpn
+                          ? SizedBox.square(
+                              dimension: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: accent,
+                              ),
+                            )
+                          : Icon(
+                              Icons.vpn_lock_rounded,
+                              size: 22,
+                              color: _network.vpnTunnelActive
+                                  ? accent
+                                  : subColor,
+                            ),
+                      title: Text(
+                        'Modo VPN Inutix',
+                        style: appListCardTitleStyle(context),
+                      ),
+                      subtitle: Text(
+                        _vpnSubtitle(),
+                        style: appListCardSubtitleStyle(context),
+                      ),
+                    ),
+                    Divider(color: AppColors.dividerFor(context), height: 1),
+                    SwitchListTile(
                       value: _network.secureDnsEnabled,
                       onChanged: _network.setSecureDnsEnabled,
                       activeThumbColor: accent,
@@ -1004,11 +1081,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       context,
                       glyph: InutilGlyph.shield,
                       title: 'Salida por proxy',
-                      subtitle: _network.systemProxyDetected
-                          ? 'Detectado en tu red: ${_network.systemProxyHostPort} · se usa solo, sin VPN'
-                          : _network.proxyEnabled
-                              ? '${_network.proxyHostPort} · el video sale por ahí'
-                              : 'Directo (lo normal en casa)',
+                      subtitle: _network.vpnTunnelActive
+                          ? 'Túnel VPN Inutix activo (${_network.externalProxyHostPort.isEmpty ? "directo" : "vía ${_network.externalProxyHostPort}"})'
+                          : _network.systemProxyDetected
+                              ? 'Detectado en tu red: ${_network.systemProxyHostPort} · se usa solo, sin VPN'
+                              : _network.externalProxyHostPort.isNotEmpty
+                                  ? '${_network.externalProxyHostPort} · el video sale por ahí'
+                                  : 'Directo (lo normal en casa)',
                       onTap: _editProxySetting,
                     ),
                     Divider(color: AppColors.dividerFor(context), height: 1),

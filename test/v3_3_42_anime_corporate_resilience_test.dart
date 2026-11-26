@@ -651,7 +651,7 @@ void main() {
     });
   });
 
-  group('v3.3.50 — Changelog y versión sincronizados', () {
+  group('v3.3.51 — Changelog y versión sincronizados', () {
     const forbiddenTerms = [
       'pelisflix',
       'jkanime',
@@ -684,17 +684,17 @@ void main() {
           RegExp(r'^version:\s*(\d+\.\d+\.\d+)\+(\d+)', multiLine: true)
               .firstMatch(pubspec);
       expect(match, isNotNull);
-      expect(match!.group(1), '3.3.50');
-      expect(match.group(2), '99');
-      expect(AppInfo.appVersion, '3.3.50');
-      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.50'));
+      expect(match!.group(1), '3.3.51');
+      expect(match.group(2), '100');
+      expect(AppInfo.appVersion, '3.3.51');
+      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.51'));
     });
 
-    test('la nota de 3.3.50 no expone proveedores ni detalles internos', () {
+    test('la nota de 3.3.51 no expone proveedores ni detalles internos', () {
       final full = File('CHANGELOG.md').readAsStringSync();
-      final start = full.indexOf('## 3.3.50');
+      final start = full.indexOf('## 3.3.51');
       expect(start, greaterThan(0));
-      final end = full.indexOf('## 3.3.49', start);
+      final end = full.indexOf('## 3.3.50', start);
       expect(end, greaterThan(start));
       final entry = full.substring(start, end).toLowerCase();
 

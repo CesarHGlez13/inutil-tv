@@ -629,12 +629,9 @@ class _TvScreenState extends State<TvScreen> with WidgetsBindingObserver {
         'sws-scaler': 'fast_bilinear',
         'audio-buffer': '0.4',
       };
-      // Canales en redes con proxy obligatorio (empresas, hoteles): libmpv no
-      // hereda el proxy del sistema.
-      final proxyUrl = NetworkConfigService.instance.mpvProxyUrl;
-      if (proxyUrl != null) {
-        props['proxy-url'] = proxyUrl;
-      }
+      // Canales en redes con proxy obligatorio o Modo VPN integrado: libmpv no
+      // hereda el proxy del sistema. Se limpia con '' si se apagó el proxy/VPN.
+      props['proxy-url'] = NetworkConfigService.mpvProxyForUrl(src.url) ?? '';
       for (final e in props.entries) {
         try {
           np.setProperty(e.key, e.value);

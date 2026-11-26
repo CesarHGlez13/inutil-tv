@@ -6,7 +6,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'anime_edge_route.dart';
 import 'firebase_config.dart';
+import 'inutil_vpn_tunnel.dart';
 
 /// Bitacora de red opcional, pensada para depurar en escritorio y en la
 /// prueba en vivo (`INUTILTV_REAL_NET=1 INUTILTV_NET_DEBUG=1 flutter test ...`).
@@ -84,6 +86,7 @@ class NetworkConfigService extends ChangeNotifier {
   static const _kSecureDns = 'inutiltv_net_secure_dns_v1';
   static const _kTlsFallback = 'inutiltv_net_tls_fallback_v1';
   static const _kProxy = 'inutiltv_net_proxy_v1';
+  static const _kVpnTunnel = 'inutiltv_net_vpn_tunnel_v1';
 
   /// Entornos DoH públicos (JSON) en orden de preferencia.
   static const List<String> _kDohEndpoints = [
@@ -135,6 +138,7 @@ class NetworkConfigService extends ChangeNotifier {
   bool _loaded = false;
   bool _secureDns = true;
   bool _tlsFallback = true;
+  bool _vpnTunnel = false;
   String _proxy = '';
   String _systemProxy = '';
   // La red de la empresa está filtrando de verdad: el DNS del sistema respondió
@@ -160,17 +164,29 @@ class NetworkConfigService extends ChangeNotifier {
   /// Reintento para redes que inspeccionan TLS (activado por defecto).
   bool get tlsFallbackEnabled => _tlsFallback;
 
+  /// Modo VPN integrado: cifra todo el tráfico externo por `wss://api.inutix.com/v1/tun`.
+  bool get vpnTunnelEnabled => _vpnTunnel;
+
+  /// `true` cuando el Modo VPN está encendido y el proxy local `127.0.0.1` está listo.
+  bool get vpnTunnelActive => _vpnTunnel && InutilVpnTunnel.instance.isRunning;
+
   /// `host:puerto` del proxy manual (vacío = usar proxy del sistema o salida directa).
   String get proxyHostPort => _proxy;
 
   /// `host:puerto` del proxy configurado en los ajustes Wi-Fi del sistema Android.
   String get systemProxyHostPort => _systemProxy;
 
-  /// Proxy efectivo activo: manual si el usuario escribió uno, o el del sistema.
-  String get effectiveProxyHostPort =>
+  /// Proxy externo real (manual o del Wi-Fi corporativo), excluyendo el túnel VPN local.
+  String get externalProxyHostPort =>
       _proxy.isNotEmpty ? _proxy : _systemProxy;
 
-  bool get systemProxyDetected => _proxy.isEmpty && _systemProxy.isNotEmpty;
+  /// Proxy efectivo activo: túnel VPN integrado si está encendido, o proxy externo.
+  String get effectiveProxyHostPort => vpnTunnelActive
+      ? InutilVpnTunnel.instance.localProxyHostPort
+      : externalProxyHostPort;
+
+  bool get systemProxyDetected =>
+      !vpnTunnelActive && _proxy.isEmpty && _systemProxy.isNotEmpty;
 
   /// true cuando la red muestra señales de estar filtrando: proxy obligatorio
   /// (manual o detectado del Wi-Fi), DNS que mintió alguna vez, o inspección TLS
@@ -182,9 +198,9 @@ class NetworkConfigService extends ChangeNotifier {
 
   bool get proxyEnabled => effectiveProxyHostPort.isNotEmpty;
 
-  /// true cuando hay alguna restricción activada (proxy manual/sistema o DNS seguro).
+  /// true cuando hay alguna restricción activada (proxy manual/sistema, VPN o DNS seguro).
   bool get restrictionsActive =>
-      effectiveProxyHostPort.isNotEmpty || _secureDns;
+      effectiveProxyHostPort.isNotEmpty || _secureDns || _vpnTunnel;
 
   /// Valor para la propiedad `proxy-url` de libmpv (null = sin proxy).
   String? get mpvProxyUrl =>
@@ -198,6 +214,10 @@ class NetworkConfigService extends ChangeNotifier {
     final host = Uri.parse(url).host.toLowerCase();
     if (host == 'localhost' || host == '127.0.0.1' || host == '::1') {
       return null;
+    }
+    if (instance.vpnTunnelActive && _bypassesVpnTunnel(host)) {
+      final ext = instance.externalProxyHostPort;
+      return ext.isEmpty ? null : 'http://$ext';
     }
     final effective = instance.effectiveProxyHostPort;
     return effective.isEmpty ? null : 'http://$effective';
@@ -267,6 +287,7 @@ class NetworkConfigService extends ChangeNotifier {
     _lastIssue = NetworkIssue.none;
     _dohEndpointsOverride = null;
     _systemProxy = '';
+    _vpnTunnel = false;
   }
 
   /// `true` dentro de `flutter test`, donde no se toca la red real.
@@ -300,12 +321,36 @@ class NetworkConfigService extends ChangeNotifier {
       final sp = await SharedPreferences.getInstance();
       _secureDns = sp.getBool(_kSecureDns) ?? true;
       _tlsFallback = sp.getBool(_kTlsFallback) ?? true;
+      _vpnTunnel = sp.getBool(_kVpnTunnel) ?? false;
       _proxy = _normalizeProxy(sp.getString(_kProxy) ?? '') ?? '';
     } catch (_) {}
     await refreshSystemProxy();
+    if (_vpnTunnel && !_hermetic) {
+      await InutilVpnTunnel.instance.ensureStarted();
+    }
     _loaded = true;
     installGlobalOverride();
     notifyListeners();
+  }
+
+  /// Activa o desactiva el Modo VPN integrado (`wss://api.inutix.com/v1/tun`).
+  /// Devuelve `true` si el estado final quedó listo.
+  Future<bool> setVpnTunnelEnabled(bool value) async {
+    _vpnTunnel = value;
+    await _persist(_kVpnTunnel, value);
+    var ok = true;
+    if (value) {
+      ok = await InutilVpnTunnel.instance.ensureStarted();
+      if (!ok) {
+        _vpnTunnel = false;
+        await _persist(_kVpnTunnel, false);
+      }
+    } else {
+      await InutilVpnTunnel.instance.stop();
+    }
+    AnimeEdgeRoute.instance.clearMemory();
+    notifyListeners();
+    return ok;
   }
 
   Future<void> setSecureDnsEnabled(bool value) async {
@@ -431,6 +476,29 @@ class NetworkConfigService extends ChangeNotifier {
 
   // ------------------------------------------------------------- resolución
 
+  /// Hosts que nunca entran al túnel VPN local para evitar bucles infinitos
+  /// (el propio servidor del túnel, la LAN local y el refresco de sesión).
+  static bool _bypassesVpnTunnel(String host) {
+    final h = host.toLowerCase();
+    if (h == 'localhost' || h == '127.0.0.1' || h == '::1') return true;
+    if (h == 'api.inutix.com' ||
+        h == 'backup.inutix.com' ||
+        h == 'identitytoolkit.googleapis.com' ||
+        h == 'securetoken.googleapis.com') {
+      return true;
+    }
+    final tunHost = Uri.tryParse(InutilVpnTunnel.instance.endpoint)?.host.toLowerCase();
+    if (tunHost != null && tunHost.isNotEmpty && h == tunHost) return true;
+    // IPs privadas LAN (p. ej. relay S7 192.168.100.27 o mando TV local)
+    if (h.startsWith('192.168.') || h.startsWith('10.')) return true;
+    final m172 = RegExp(r'^172\.(\d{1,2})\.').firstMatch(h);
+    if (m172 != null) {
+      final second = int.tryParse(m172.group(1)!) ?? 0;
+      if (second >= 16 && second <= 31) return true;
+    }
+    return false;
+  }
+
   /// Directiva de proxy (`DIRECT` o `PROXY host:port`) para un [Uri].
   /// Loopback (`localhost`, `127.0.0.1`, `::1`) siempre permanece `DIRECT`.
   @visibleForTesting
@@ -439,7 +507,14 @@ class NetworkConfigService extends ChangeNotifier {
     if (host == 'localhost' || host == '127.0.0.1' || host == '::1') {
       return 'DIRECT';
     }
-    final effective = effectiveProxyHostPort;
+    if (vpnTunnelActive) {
+      if (_bypassesVpnTunnel(host)) {
+        final ext = externalProxyHostPort;
+        return ext.isNotEmpty ? 'PROXY $ext' : 'DIRECT';
+      }
+      return 'PROXY ${InutilVpnTunnel.instance.localProxyHostPort}';
+    }
+    final effective = externalProxyHostPort;
     if (effective.isNotEmpty) return 'PROXY $effective';
     try {
       return HttpClient.findProxyFromEnvironment(uri);
@@ -638,7 +713,8 @@ class NetworkConfigService extends ChangeNotifier {
       rethrow;
     }
 
-    if (proxyHost != null || uri.scheme != 'https') {
+    final isTls = uri.scheme == 'https' || uri.scheme == 'wss';
+    if (proxyHost != null || !isTls) {
       return ConnectionTask.fromSocket(
         Future.value(socket),
         () => socket?.destroy(),
@@ -671,7 +747,7 @@ class NetworkConfigService extends ChangeNotifier {
   }) async {
     final host = uri.host;
     final port = uri.port;
-    final needsTls = uri.scheme == 'https';
+    final needsTls = uri.scheme == 'https' || uri.scheme == 'wss';
     final lower = host.toLowerCase();
     final isLiteralOrLocal = _isLocalOrIpHost(lower);
 
@@ -843,6 +919,15 @@ class NetworkConfigService extends ChangeNotifier {
     _dbg('diagnostico: inicio');
     await refreshSystemProxy();
     final checks = <NetworkCheck>[];
+    if (_vpnTunnel) {
+      final probe = await InutilVpnTunnel.instance.probeTunnel();
+      checks.add(NetworkCheck(
+        label: 'Túnel VPN',
+        ok: probe.ok,
+        millis: probe.millis,
+        detail: probe.detail,
+      ));
+    }
     checks.add(await _probe(
         'Cuenta',
         Uri.parse(

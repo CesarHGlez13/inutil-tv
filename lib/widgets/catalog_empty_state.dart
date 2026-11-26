@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/network_config_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_ui.dart';
 import '../theme/inutil_icons.dart';
@@ -7,8 +8,8 @@ import '../theme/inutil_icons.dart';
 /// Estado vacío honesto de las pestañas de catálogo (Cine, Series y Anime).
 ///
 /// Cuando los servidores no dejaron traer títulos no sirve de nada decir
-/// «prueba con otro término»: se explica lo que pasó y se ofrece reintentar,
-/// que es lo que el usuario puede hacer desde su teléfono.
+/// «prueba con otro término»: se explica lo que pasó y se ofrece reintentar o
+/// activar el Modo VPN integrado con un solo toque.
 class CatalogEmptyState extends StatelessWidget {
   const CatalogEmptyState({
     super.key,
@@ -25,16 +26,24 @@ class CatalogEmptyState extends StatelessWidget {
   final String tituloSinResultados;
   final InutilGlyph icono;
 
+  Future<void> _activarVpnYReintentar() async {
+    await NetworkConfigService.instance.setVpnTunnelEnabled(true);
+    onRetry();
+  }
+
   @override
   Widget build(BuildContext context) {
     final subColor = AppColors.contentSubtitleFor(context);
     final accent = AppColors.accentFor(context);
+    final vpnActivo = NetworkConfigService.instance.vpnTunnelEnabled;
 
     final titulo = fallaRed ? 'No llegó el catálogo' : tituloSinResultados;
     final detalle = fallaRed
-        ? 'Tu red no deja entrar a los servidores del catálogo o están '
-            'saturados. Reintenta en un momento o revisa tu conexión en '
-            'Ajustes.'
+        ? (vpnActivo
+            ? 'El túnel VPN no recibió respuesta de los servidores. Reintenta '
+                'en un momento o revisa tu conexión en Ajustes.'
+            : 'Tu red no deja entrar a los servidores del catálogo. Activa el '
+                'Modo VPN Inutix para salir cifrado o reintenta en un momento.')
         : 'Prueba con otro término o género.';
 
     return Center(
@@ -57,14 +66,38 @@ class CatalogEmptyState extends StatelessWidget {
               style: appListCardSubtitleStyle(context),
             ),
             const SizedBox(height: 18),
-            FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: accent,
-                foregroundColor: AppColors.onAccentFor(context),
-              ),
-              onPressed: onRetry,
-              icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text('Reintentar'),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              alignment: WrapAlignment.center,
+              children: [
+                if (fallaRed && !vpnActivo)
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: accent,
+                      foregroundColor: AppColors.onAccentFor(context),
+                    ),
+                    onPressed: _activarVpnYReintentar,
+                    icon: const Icon(Icons.vpn_lock_rounded, size: 18),
+                    label: const Text('Activar Modo VPN'),
+                  ),
+                if (fallaRed && !vpnActivo)
+                  OutlinedButton.icon(
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: const Text('Reintentar'),
+                  )
+                else
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: accent,
+                      foregroundColor: AppColors.onAccentFor(context),
+                    ),
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: const Text('Reintentar'),
+                  ),
+              ],
             ),
           ],
         ),

@@ -41,13 +41,18 @@ import 'widgets/inutil_update_gate.dart';
 import 'widgets/tv_focusable.dart';
 import 'widgets/tv_remote_sheet.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Red tolerante a restricciones (DNS seguro / proxy de empresa). Debe
-  // instalarse antes de la primera petición, incluida la caché de carátulas.
+  // Red tolerante a restricciones (Modo VPN integrado, DNS seguro y proxy).
+  // Debe quedar lista antes de la primera petición para que el catálogo inicial
+  // ya salga cifrado si el usuario dejó el Modo VPN encendido.
   NetworkConfigService.instance.installGlobalOverride();
-  unawaited(NetworkConfigService.instance.load()
-      .then((_) => AnimeEdgeRoute.instance.ensureEdgeBase()));
+  try {
+    await NetworkConfigService.instance
+        .load()
+        .timeout(const Duration(milliseconds: 1500));
+  } catch (_) {}
+  unawaited(AnimeEdgeRoute.instance.ensureEdgeBase());
   unawaited(TvModeService.instance.initialize());
   MediaKit.ensureInitialized();
   // Sonda de alcance al relay propio (S7) para que un build horneado con

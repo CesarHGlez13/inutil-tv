@@ -189,6 +189,11 @@ class AnimeEdgeRoute {
   /// permite afinar por ruta: hay caminos que el borde no sirve y que la red
   /// propia sí (ver `_noDetourFirstPaths`), y esos se dejan directos.
   bool shouldUseEdge(String routeKey, {String? uriPath}) {
+    // v3.3.51 — Con el Modo VPN integrado encendido, todo el tráfico ya viaja
+    // cifrado por `wss://api.inutix.com/v1/tun` hasta la IP residencial del
+    // servidor propio: no hay bloqueo de red ni hace falta dar la vuelta por el
+    // Worker de Cloudflare (que a jkanime le daba 403).
+    if (NetworkConfigService.instance.vpnTunnelActive) return false;
     if (!prefixByRouteKey.containsKey(routeKey)) return false;
     if (_isNoDetourPath(routeKey, uriPath)) return false;
     if (_edgePreferred.contains(routeKey)) return true;
@@ -288,7 +293,7 @@ class AnimeEdgeRoute {
       baseDeRuta.add(base);
     }
 
-    if (key == null) {
+    if (key == null || NetworkConfigService.instance.vpnTunnelActive) {
       addDirecta();
     } else if (shouldUseEdge(key, uriPath: uri.path)) {
       for (final b in _basesEnOrden()) {
@@ -442,6 +447,7 @@ class AnimeEdgeRoute {
   /// sesión. En casa el sondeo responde sano y el orden queda exactamente como
   /// antes.
   Future<void> ensureEdgeBase() async {
+    if (NetworkConfigService.instance.vpnTunnelActive) return;
     if (!(NetworkConfigService.instance.corporateModeActive ||
         NetworkConfigService.instance.tlsFallbackEnabled)) {
       return;
@@ -466,12 +472,16 @@ class AnimeEdgeRoute {
     }
   }
 
-  @visibleForTesting
-  void resetForTest() {
+  /// Limpia la memoria de red (bloqueos temporales y rutas aprendidas) al
+  /// encender o apagar el Modo VPN integrado.
+  void clearMemory() {
     _blockedUntil.clear();
     _edgePreferred.clear();
     _altPreferred = false;
     _baseChecked = false;
     _inspeccionConfirmada = false;
   }
+
+  @visibleForTesting
+  void resetForTest() => clearMemory();
 }

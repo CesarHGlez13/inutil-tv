@@ -4,7 +4,7 @@ class AppInfo {
   const AppInfo._();
 
   static const String appName = 'Inutix TV';
-  static const String appVersion = '3.3.50';
+  static const String appVersion = '3.3.51';
   static const String creatorName = 'César';
   static const String supportEmail = 'cesarmaster133@gmail.com';
 
@@ -21,6 +21,7 @@ class AppInfo {
       'Ecosistema inutix.com · Inutix TV & Inutix Music';
 
   static const List<String> whatsNewHighlights = [
+    'Nuevo Modo VPN Inutix integrado: cifra todo el catálogo, las portadas y la reproducción de video desde dentro de la app para saltar bloqueos de oficina, escuela u hotel sin instalar apps externas',
     'El anime de la oficina ya no necesita VPN: con el aviso «Redes que revisan el tráfico» prendido, la app usa el camino alterno desde el primer intento, así la búsqueda, la ficha, los episodios y el video no quedan en cero',
     'La búsqueda y las listas de anime ya no se quedan en cero: si tu red rechaza el certificado de un servidor, la app lo toma como la señal de que inspecciona y usa el camino alterno desde el primer intento, así la ficha, los episodios y el video no se cortan',
     'La búsqueda y las listas de anime ya no se quedan en cero: si tu red responde con su página de aviso, la app lo reconoce y prueba por el camino alterno antes de rendirse, así la ficha, los episodios y el video no se cortan',
