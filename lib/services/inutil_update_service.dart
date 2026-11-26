@@ -29,6 +29,7 @@ class InutilTvReleaseInfo {
     required this.publishedAt,
     this.androidDownloads = const <String, String>{},
     this.minSupportedVersion = '',
+    this.checksums = const <String, String>{},
   });
 
   final String currentVersion;
@@ -39,6 +40,7 @@ class InutilTvReleaseInfo {
   final DateTime publishedAt;
   final Map<String, String> androidDownloads;
   final String minSupportedVersion;
+  final Map<String, String> checksums;
 
   bool get belowMinSupported {
     final min = minSupportedVersion.trim();
@@ -77,6 +79,26 @@ class InutilTvReleaseInfo {
     return apkDownloadUrl.trim();
   }
 
+  String apkUrlForSupportedAbis(List<String> abis) {
+    for (final abi in abis) {
+      final key = normalizeAbiKey(abi);
+      if (key.isEmpty) continue;
+      final url = androidDownloads[key]?.trim() ?? '';
+      if (url.isNotEmpty) return url;
+    }
+    return apkUrlForAbi('');
+  }
+
+  String expectedSha256ForUrl(String url) {
+    if (checksums.isEmpty) return '';
+    final uri = Uri.tryParse(url.trim());
+    final fileName = uri != null && uri.pathSegments.isNotEmpty
+        ? uri.pathSegments.last
+        : url.trim().split('/').last;
+    if (fileName.isEmpty) return '';
+    return (checksums[fileName] ?? '').trim();
+  }
+
   Map<String, dynamic> toJson() => {
         'currentVersion': currentVersion,
         'latestVersion': latestVersion,
@@ -86,6 +108,7 @@ class InutilTvReleaseInfo {
         'minSupportedVersion': minSupportedVersion,
         'publishedAt': publishedAt.toUtc().toIso8601String(),
         'androidDownloads': androidDownloads,
+        if (checksums.isNotEmpty) 'checksums': checksums,
       };
 
   factory InutilTvReleaseInfo.fromJson(
@@ -113,6 +136,16 @@ class InutilTvReleaseInfo {
       }
     }
 
+    final rawChecksums = json['checksums'];
+    final parsedChecksums = <String, String>{};
+    if (rawChecksums is Map) {
+      for (final e in rawChecksums.entries) {
+        final k = e.key.toString().trim();
+        final v = e.value?.toString().trim() ?? '';
+        if (k.isNotEmpty && v.isNotEmpty) parsedChecksums[k] = v;
+      }
+    }
+
     return InutilTvReleaseInfo(
       currentVersion: currentVersionOverride ??
           (json['currentVersion'] as String?) ??
@@ -130,6 +163,7 @@ class InutilTvReleaseInfo {
           DateTime.tryParse(json['publishedAt']?.toString() ?? '') ??
               DateTime.now().toUtc(),
       androidDownloads: Map<String, String>.unmodifiable(downloads),
+      checksums: Map<String, String>.unmodifiable(parsedChecksums),
     );
   }
 
@@ -221,6 +255,23 @@ class InutilUpdateService {
     }
   }
 
+  Future<List<String>> supportedAbis() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return const <String>[];
+    }
+    try {
+      final raw = await _channel.invokeMethod<List<Object?>>('supportedAbis');
+      if (raw != null && raw.isNotEmpty) {
+        return raw
+            .map((item) => (item?.toString() ?? '').trim())
+            .where((item) => item.isNotEmpty)
+            .toList(growable: false);
+      }
+    } catch (_) {}
+    final primary = await primaryAbi();
+    return primary.isEmpty ? const <String>[] : <String>[primary];
+  }
+
   Future<bool> canRequestPackageInstalls() async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return true;
     try {
@@ -243,16 +294,28 @@ class InutilUpdateService {
   }
 
   Future<bool> installApk(String path) async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return false;
+    return (await installApkDetailed(path)) == null;
+  }
+
+  /// Devuelve `null` si el instalador se abrió; en caso contrario, el motivo.
+  Future<String?> installApkDetailed(String path) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return 'Instalación automática solo disponible en Android.';
+    }
     try {
-      return (await _channel.invokeMethod<bool>(
+      final ok = (await _channel.invokeMethod<bool>(
             'installPackage',
             {'path': path},
           )) ??
           false;
+      return ok ? null : 'El instalador de Android no respondió.';
+    } on PlatformException catch (e) {
+      debugPrint('[InutilUpdateService] Error lanzando instalador: $e');
+      final msg = e.message?.trim() ?? '';
+      return msg.isNotEmpty ? msg : 'No se pudo abrir el instalador de Android.';
     } catch (e) {
       debugPrint('[InutilUpdateService] Error lanzando instalador: $e');
-      return false;
+      return 'No se pudo abrir el instalador de Android.';
     }
   }
 
@@ -494,8 +557,8 @@ class InutilUpdateService {
     InutilTvReleaseInfo release, {
     required void Function(OtaDownloadProgress progress) onProgress,
   }) async {
-    final abi = await primaryAbi();
-    final url = release.apkUrlForAbi(abi);
+    final abis = await supportedAbis();
+    final url = release.apkUrlForSupportedAbis(abis);
     if (url.isEmpty) {
       throw const OtaDownloadException(
         'No hay enlace de descarga APK configurado para esta versión.',
@@ -506,7 +569,11 @@ class InutilUpdateService {
       RegExp(r'[^A-Za-z0-9._-]'),
       '_',
     );
-    final fileName = 'inutil_tv_v$safeVer.apk';
+    final abiTag = abis.isNotEmpty
+        ? InutilTvReleaseInfo.normalizeAbiKey(abis.first)
+        : 'apk';
+    final fileName = 'inutil_tv_v${safeVer}_$abiTag.apk';
+    final expectedSha256 = release.expectedSha256ForUrl(url);
 
     var activeUrl = url;
     String localPath;
@@ -514,6 +581,7 @@ class InutilUpdateService {
       localPath = await downloadManager.download(
         url: activeUrl,
         fileName: fileName,
+        expectedSha256: expectedSha256,
         onProgress: onProgress,
       );
     } on OtaDownloadException catch (_) {
@@ -526,17 +594,16 @@ class InutilUpdateService {
       localPath = await downloadManager.download(
         url: activeUrl,
         fileName: fileName,
+        expectedSha256: expectedSha256,
         onProgress: onProgress,
       );
     }
 
     if (Platform.isAndroid) {
-      final installed = await installApk(localPath);
-      if (!installed) {
-        await launchUrl(
-          Uri.parse(activeUrl),
-          mode: LaunchMode.externalApplication,
-        );
+      final installError = await installApkDetailed(localPath);
+      if (installError != null) {
+        await downloadManager.clearDownloads();
+        throw OtaDownloadException(installError);
       }
     } else {
       await launchUrl(
@@ -586,6 +653,20 @@ class InutilUpdateService {
       }
     }
 
+    final checksums = <String, String>{};
+    final rawChecksums =
+        ((fields['checksums'] as Map<String, dynamic>?)?['mapValue']
+            as Map<String, dynamic>?)?['fields'];
+    if (rawChecksums is Map) {
+      for (final e in rawChecksums.entries) {
+        final k = e.key.toString().trim();
+        final v = e.value is Map
+            ? (e.value['stringValue']?.toString().trim() ?? '')
+            : '';
+        if (k.isNotEmpty && v.isNotEmpty) checksums[k] = v;
+      }
+    }
+
     final ts =
         (fields['publishedAt'] as Map<String, dynamic>?)?['timestampValue']
                 ?.toString() ??
@@ -601,6 +682,7 @@ class InutilUpdateService {
       minSupportedVersion: str('minSupportedVersion'),
       publishedAt: DateTime.tryParse(ts) ?? DateTime.now().toUtc(),
       androidDownloads: Map<String, String>.unmodifiable(downloads),
+      checksums: Map<String, String>.unmodifiable(checksums),
     );
   }
 

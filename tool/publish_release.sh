@@ -43,6 +43,10 @@ add_artifact() {
   FILES["$1"]="$2"
   ABI_OF_KEY["$1"]="${3:-}"
 }
+add_artifact universal   "$APK_DIR/app-universal-release.apk"   "universal"
+if [ -z "${FILES[universal]:-}" ]; then
+  add_artifact universal "$APK_DIR/app-release.apk"             "universal"
+fi
 add_artifact arm64_v8a   "$APK_DIR/app-arm64-v8a-release.apk"   "arm64_v8a"
 add_artifact armeabi_v7a "$APK_DIR/app-armeabi-v7a-release.apk" "armeabi_v7a"
 add_artifact x86_64      "$APK_DIR/app-x86_64-release.apk"      "x86_64"
@@ -149,10 +153,10 @@ manifest = {
     "minSupportedVersion": min_supported,
     "mandatory": mandatory,
     "publishedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-    "apkDownloadUrl": downloads.get("arm64_v8a") or next(iter(downloads.values()), ""),
+    "apkDownloadUrl": downloads.get("universal") or downloads.get("arm64_v8a") or next(iter(downloads.values()), ""),
     "androidDownloads": downloads,
     "androidDownloadSizes": sizes,
-    "packageSizeBytes": sizes.get("arm64_v8a") or next(iter(sizes.values()), 0),
+    "packageSizeBytes": sizes.get("arm64_v8a") or sizes.get("universal") or next(iter(sizes.values()), 0),
     "releaseNotes": notes,
     "checksums": checksums,
 }

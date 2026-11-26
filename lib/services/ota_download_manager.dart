@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -84,16 +85,58 @@ class OtaDownloadManager {
     Directory? base;
     try {
       if (Platform.isAndroid) {
-        base = await getExternalStorageDirectory();
+        base = await getTemporaryDirectory();
       } else if (Platform.isLinux || Platform.isMacOS || Platform.isWindows) {
         base = await getApplicationSupportDirectory();
       }
     } catch (_) {
       base = null;
     }
+    if (base == null && Platform.isAndroid) {
+      try {
+        base = await getExternalStorageDirectory();
+      } catch (_) {
+        base = null;
+      }
+    }
     base ??= await getApplicationDocumentsDirectory();
     final directory = Directory(p.join(base.path, updatesDirectoryName));
     return directory.create(recursive: true);
+  }
+
+  /// Verifica firma ZIP (`PK\x03\x04`) para `.apk` y SHA-256 si fue publicado.
+  Future<String?> _validateDownloadedFile(
+    File file, {
+    required String fileName,
+    String expectedSha256 = '',
+  }) async {
+    if (!await file.exists()) return 'El archivo descargado no existe.';
+    final size = await file.length();
+    if (size < 4) return 'El archivo descargado está vacío o truncado.';
+    if (fileName.toLowerCase().endsWith('.apk')) {
+      RandomAccessFile? raf;
+      try {
+        raf = await file.open();
+        final header = await raf.read(4);
+        if (header.length < 4 ||
+            header[0] != 0x50 ||
+            header[1] != 0x4B ||
+            header[2] != 0x03 ||
+            header[3] != 0x04) {
+          return 'El archivo descargado no es un paquete APK válido (posible bloqueo de red o portal cautivo).';
+        }
+      } finally {
+        await raf?.close();
+      }
+    }
+    final cleanSha = expectedSha256.trim().toLowerCase();
+    if (cleanSha.isNotEmpty) {
+      final digest = await sha256.bind(file.openRead()).first;
+      if (digest.toString().toLowerCase() != cleanSha) {
+        return 'La verificación de integridad (SHA-256) falló; el paquete se descargó corrupto.';
+      }
+    }
+    return null;
   }
 
   Future<void> cancelActiveDownload() async {
@@ -108,15 +151,23 @@ class OtaDownloadManager {
   Future<String?> existingDownload({
     required String url,
     required String fileName,
+    String expectedSha256 = '',
   }) async {
     try {
       final directory = await updatesDirectory();
       final finalFile = File(p.join(directory.path, fileName));
+      final doneMetaPath = p.join(directory.path, '$fileName.done.meta');
       if (!await finalFile.exists()) return null;
-      final meta = await _readMeta(p.join(directory.path, '$fileName.done.meta'));
+      final meta = await _readMeta(doneMetaPath);
       if (meta != null && meta['url'] == url && meta['complete'] == true) {
-        final size = await finalFile.length();
-        if (size > 0) return finalFile.path;
+        final problem = await _validateDownloadedFile(
+          finalFile,
+          fileName: fileName,
+          expectedSha256: expectedSha256,
+        );
+        if (problem == null) return finalFile.path;
+        await _deleteQuietly(finalFile);
+        await _deleteQuietly(File(doneMetaPath));
       }
     } catch (_) {}
     return null;
@@ -126,6 +177,7 @@ class OtaDownloadManager {
     required String url,
     required String fileName,
     required void Function(OtaDownloadProgress progress) onProgress,
+    String expectedSha256 = '',
   }) async {
     _cancelled = false;
     final uri = Uri.tryParse(url);
@@ -139,7 +191,11 @@ class OtaDownloadManager {
     final doneMetaPath = p.join(directory.path, '$fileName.done.meta');
     final partFile = File(partPath);
 
-    final previous = await existingDownload(url: url, fileName: fileName);
+    final previous = await existingDownload(
+      url: url,
+      fileName: fileName,
+      expectedSha256: expectedSha256,
+    );
     if (previous != null) return previous;
 
     var startOffset = 0;
@@ -291,6 +347,16 @@ class OtaDownloadManager {
               'La descarga se interrumpió ($written / $totalBytes bytes). '
               'Vuelve a intentarlo para reanudar.',
             );
+          }
+          final validationProblem = await _validateDownloadedFile(
+            partFile,
+            fileName: fileName,
+            expectedSha256: expectedSha256,
+          );
+          if (validationProblem != null) {
+            await _deleteQuietly(partFile);
+            await _deleteQuietly(File(metaPath));
+            throw OtaDownloadException(validationProblem);
           }
           final target = File(finalPath);
           if (await target.exists()) {

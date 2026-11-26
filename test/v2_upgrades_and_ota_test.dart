@@ -58,6 +58,18 @@ void main() {
       expect(info.apkUrlForAbi('arm64-v8a'), 'https://example.com/arm64.apk');
       expect(info.apkUrlForAbi('armeabi-v7a'), 'https://example.com/armv7.apk');
       expect(info.apkUrlForAbi('x86_64'), 'https://example.com/universal.apk');
+      expect(
+        info.apkUrlForSupportedAbis(const ['armeabi-v7a', 'armeabi']),
+        'https://example.com/armv7.apk',
+      );
+      expect(
+        info.apkUrlForSupportedAbis(const ['arm64-v8a', 'armeabi-v7a']),
+        'https://example.com/arm64.apk',
+      );
+      expect(
+        info.apkUrlForSupportedAbis(const ['x86']),
+        'https://example.com/universal.apk',
+      );
       expect(InutilUpdateService.releaseRepo, 'CesarHGlez13/inutil-tv');
     });
 

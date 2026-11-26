@@ -17,9 +17,11 @@ android {
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "dev.cesar.tubotv"
-        // media_kit requiere API 21+; la mayoría de listas IPTV usan HTTP.
+        // media_kit requiere API 21+; Flutter 3.50 fija el piso efectivo en API 24 (Android 7.0).
         minSdk = maxOf(21, flutter.minSdkVersion)
-        targetSdk = flutter.targetSdkVersion
+        // Fijado en API 35 (Android 15 estable): compileSdk 36 compila plugins recientes
+        // sin disparar rechazos de PackageInstaller OEM en Android 11-15.
+        targetSdk = 35
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
         // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
@@ -35,6 +37,19 @@ android {
             storePassword = "tubotv2026"
             keyAlias = "tubotv"
             keyPassword = "tubotv2026"
+            // Firmar con v1 + v2 + v3 simultáneamente para máxima compatibilidad
+            // con Android 7-16, Android TV Boxes y gestores/instaladores OEM.
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // Extraer .so al instalar evita fallos de alineación 16 KB en dispositivos
+            // Android 15/16 con páginas de 16 KB y reduce el tamaño del APK.
+            useLegacyPackaging = true
         }
     }
 
