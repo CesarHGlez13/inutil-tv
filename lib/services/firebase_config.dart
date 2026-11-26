@@ -87,12 +87,31 @@ class FirebaseConfig {
   @visibleForTesting
   static String? backupRelayHostOverrideForTest;
 
+  static String Function()? activeSessionTokenProvider;
+
+  static bool get _hasInutixSession {
+    try {
+      final tok = activeSessionTokenProvider?.call() ?? '';
+      return tok.startsWith('inutix_');
+    } catch (_) {
+      return false;
+    }
+  }
+
   static String get _activeRelayHost =>
       (relayHostOverrideForTest ?? relayHost).trim();
-  static String get _activeCloudRelayHost =>
-      (cloudRelayHostOverrideForTest ?? cloudRelayHost).trim();
-  static String get _activeBackupRelayHost =>
-      (backupRelayHostOverrideForTest ?? backupRelayHost).trim();
+  static String get _activeCloudRelayHost {
+    final host = (cloudRelayHostOverrideForTest ?? cloudRelayHost).trim();
+    if (host.isNotEmpty) return host;
+    if (_hasInutixSession) return 'api.inutix.com';
+    return '';
+  }
+  static String get _activeBackupRelayHost {
+    final host = (backupRelayHostOverrideForTest ?? backupRelayHost).trim();
+    if (host.isNotEmpty) return host;
+    if (_hasInutixSession) return 'backup.inutix.com';
+    return '';
+  }
 
   static bool get cloudRelayUsable {
     if (useEmulator || _activeCloudRelayHost.isEmpty) return false;

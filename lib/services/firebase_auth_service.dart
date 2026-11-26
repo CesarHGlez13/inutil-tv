@@ -203,7 +203,9 @@ class InutilUser {
 ///   * Tokens guardados en `flutter_secure_storage` (fallback seguro a prefs).
 ///   * Licencias y roles gobernados por Firestore `users/{uid}` y sus reglas.
 class InutilAuthService extends ChangeNotifier {
-  InutilAuthService._();
+  InutilAuthService._() {
+    FirebaseConfig.activeSessionTokenProvider = () => _currentUser?.idToken ?? '';
+  }
   static final InutilAuthService instance = InutilAuthService._();
 
   static const _storageUserKey = 'inutil_tv_auth_user_v3';
@@ -745,16 +747,42 @@ class InutilAuthService extends ChangeNotifier {
       );
     }
 
-    final postBody = (googleIdToken != null && googleIdToken.isNotEmpty)
-        ? 'id_token=$googleIdToken&providerId=google.com'
-        : 'access_token=$googleAccessToken&providerId=google.com';
+    Map<String, dynamic>? data;
+    // 1. Intento primario: autenticación directa contra Inutix Relay (100% independiente de Firebase Auth)
+    try {
+      final res = await http
+          .post(
+            Uri.parse('https://api.inutix.com/auth/google'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'idToken': googleIdToken,
+              'accessToken': googleAccessToken,
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+        if (decoded['ok'] == true && decoded['idToken'] != null) {
+          data = decoded;
+        }
+      }
+    } catch (e) {
+      debugPrint('Autenticación nativa Inutix falló ($e), usando respaldo Firebase');
+    }
 
-    final data = await _authPost('accounts:signInWithIdp', {
-      'postBody': postBody,
-      'requestUri': 'http://localhost',
-      'returnIdpCredential': true,
-      'returnSecureToken': true,
-    });
+    // 2. Respaldo secundario: intercambio contra Firebase Auth REST
+    if (data == null) {
+      final postBody = (googleIdToken != null && googleIdToken.isNotEmpty)
+          ? 'id_token=$googleIdToken&providerId=google.com'
+          : 'access_token=$googleAccessToken&providerId=google.com';
+
+      data = await _authPost('accounts:signInWithIdp', {
+        'postBody': postBody,
+        'requestUri': 'http://localhost',
+        'returnIdpCredential': true,
+        'returnSecureToken': true,
+      });
+    }
 
     final email =
         (data['email'] as String? ?? account.email).trim().toLowerCase();
@@ -764,12 +792,33 @@ class InutilAuthService extends ChangeNotifier {
             ? account.displayName!
             : email.split('@').first);
 
+    final role = (data['role'] as String?) ??
+        (data['fields']?['role'] as String?) ??
+        (isBootstrapAdminEmail(email) ? 'admin' : 'user');
+    final status = (data['status'] as String?) ??
+        (data['fields']?['status'] as String?) ??
+        (isBootstrapAdminEmail(email) ? 'active' : 'pending');
+    final isActive = (data['isActive'] as bool?) ??
+        (data['fields']?['isActive'] as bool?) ??
+        true;
+    final expiresAtRaw = data['accountExpiresAt'] ??
+        data['fields']?['accountExpiresAt'];
+    final expiresAt = expiresAtRaw != null
+        ? (expiresAtRaw is DateTime
+            ? expiresAtRaw
+            : DateTime.tryParse(expiresAtRaw.toString()))
+        : (isBootstrapAdminEmail(email) ? DateTime(2099, 12, 31) : null);
+
     final user = InutilUser(
-      uid: data['localId'] as String,
+      uid: (data['localId'] ?? data['uid']) as String,
       email: email,
       displayName: displayName,
       idToken: data['idToken'] as String? ?? '',
       refreshToken: data['refreshToken'] as String? ?? '',
+      role: role,
+      status: status,
+      isActive: isActive,
+      accountExpiresAt: expiresAt,
       createdAt: DateTime.now(),
       lastLoginAt: DateTime.now(),
     );
