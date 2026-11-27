@@ -724,12 +724,16 @@ class HlsStreamProxy {
     if (bytes == null) {
       bytes = await _fetchSegmentBytes(session, idx, storeInCache: false);
     } else {
-      // Una vez consumido un segmento precargado muy atrás, podemos mantener
-      // una ventana deslizante pequeña para permitir seek rápido atrás.
-      if (session.cachedSegments.length > 26) {
+      // Ventana deslizante compacta en Smart TV (2 GB RAM): libera segmentos ya
+      // entregados para evitar presión de GC y swap, manteniendo 2 atrás para -10s.
+      final maxKeep = TvModeService.instance.isTv ? 6 : 24;
+      final behindKeep = TvModeService.instance.isTv ? 2 : 4;
+      while (session.cachedSegments.length > maxKeep) {
         final oldest = session.cachedSegments.keys.first;
-        if (oldest < idx - 4) {
+        if (oldest < idx - behindKeep) {
           session.removeCachedSegment(oldest);
+        } else {
+          break;
         }
       }
     }
@@ -749,13 +753,16 @@ class HlsStreamProxy {
 
   void _triggerLookahead(_ProxySession session, int currentIdx,
       {int? maxAhead}) {
-    final ahead = maxAhead ?? adaptiveLookaheadForThroughput(_ewmaBytesPerSec);
+    final isTv = TvModeService.instance.isTv;
+    var ahead = maxAhead ?? adaptiveLookaheadForThroughput(_ewmaBytesPerSec);
+    if (isTv && ahead > 2) ahead = 2;
+    final maxSessionBytes = isTv ? 14 * 1024 * 1024 : 28 * 1024 * 1024;
     for (var offset = 1; offset <= ahead; offset++) {
       final nextIdx = currentIdx + offset;
       if (!session.segments.containsKey(nextIdx)) continue;
       if (session.cachedSegments.containsKey(nextIdx)) continue;
       if (session.inFlightSegments.containsKey(nextIdx)) continue;
-      if (session.totalCachedBytes > 28 * 1024 * 1024) break;
+      if (session.totalCachedBytes > maxSessionBytes) break;
       unawaited(_fetchSegmentBytes(session, nextIdx, storeInCache: true));
     }
   }

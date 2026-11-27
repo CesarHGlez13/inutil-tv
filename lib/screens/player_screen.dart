@@ -352,8 +352,10 @@ class _PlayerScreenState extends State<PlayerScreen>
       _player,
       configuration: VideoControllerConfiguration(
         // En Smart TV / TV Box usa decodificación y renderizado directo en
-        // hardware (`vo=mediacodec_embed` + `hwdec=mediacodec`, zero-copy)
-        // para eliminar el cuello de botella de CPU de `mediacodec-copy`.
+        // hardware (`vo=mediacodec_embed` + `hwdec=mediacodec`, zero-copy sobre
+        // SurfaceTexture OpenGLES en MainActivity) para mantener 1080p/4K a
+        // ~5% CPU sin los bloqueos de ImageReader/Vulkan ni el cuello de CPU
+        // de `mediacodec-copy` (~91% CPU en ARMv7).
         // En celular mantiene `vo=gpu` + `hwdec=auto-safe`.
         vo: useZeroCopyTv ? 'mediacodec_embed' : 'gpu',
         hwdec: useZeroCopyTv
@@ -477,15 +479,14 @@ class _PlayerScreenState extends State<PlayerScreen>
       'framedrop': 'vo',
       'video-sync': 'audio',
       'hwdec-codecs': 'h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1',
-      'vd-lavc-fast': 'yes',
-      'vd-lavc-threads': '0',
+      'vd-lavc-threads': isTv ? '2' : '0',
       'interpolation': 'no',
       'deband': 'no',
       'dither-depth': 'no',
       'scale': 'bilinear',
       'cscale': 'bilinear',
       'dscale': 'bilinear',
-      'sws-scaler': 'fast_bilinear',
+      'sws-scaler': 'fast-bilinear',
       'audio-buffer': '0.4',
       'hr-seek': isTv ? 'no' : 'yes',
     };
@@ -650,6 +651,18 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (!mounted || _resolving) return;
       if (_benignError(msg)) return;
       _failoverOrShowError('Error de transmisión');
+    }));
+
+    _subs.add(_player.stream.log.listen((entry) {
+      if (entry.level == 'error' ||
+          entry.level == 'fatal' ||
+          (entry.level == 'warn' &&
+              (entry.prefix.contains('vo') ||
+                  entry.prefix.contains('vd') ||
+                  entry.prefix.contains('ffmpeg') ||
+                  entry.prefix.contains('cplayer')))) {
+        debugPrint('[mpv/${entry.prefix}/${entry.level}] ${entry.text}');
+      }
     }));
   }
 

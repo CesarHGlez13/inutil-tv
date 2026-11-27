@@ -1,5 +1,9 @@
 # Changelog — Inutix TV
 
+## 3.3.56 — 2026-11-27
+- **Video sin congelamientos en Smart TV y Google TV:** Corrige pausas momentáneas de la imagen durante películas y series mientras el audio continuaba reproduciéndose normalmente.
+- **Reproducción más ligera en TV Box:** Menor uso de memoria y mayor fluidez sostenida en sesiones largas de reproducción.
+
 ## 3.3.55 — 2026-11-27
 - **Reproducción más rápida y fluida:** Inicio más ágil de películas, series y anime, y cambio automático sin perder el minuto exacto si algún servidor se pausa.
 - **Mejor rendimiento en Smart TV y Google TV:** Búsqueda más ligera con teclado nativo del sistema (y opción QWERTY integrada), menor consumo de memoria y navegación más suave.

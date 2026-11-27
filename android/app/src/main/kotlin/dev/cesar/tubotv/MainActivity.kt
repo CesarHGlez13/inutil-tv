@@ -15,6 +15,7 @@ import android.view.WindowManager
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.renderer.FlutterRenderer
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
@@ -29,6 +30,15 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        if (detectAndroidTv()) {
+            // En Android TV / TV Box (ej. Onn 4K Amlogic + Mali-G31 MP2),
+            // ImageReaderSurfaceProducer (MAX_IMAGES=7 + SyncFence.awaitForever)
+            // choca con MediaCodec zero-copy (10-11 buffers) y congela el video
+            // mientras el audio sigue. SurfaceTexture sobre Impeller OpenGLES
+            // entrega video hardware zero-copy fluido (~5% CPU) sin bloqueos.
+            FlutterRenderer.debugForceSurfaceProducerGlTextures = true
+            Log.i(TAG, "Android TV detected: SurfaceTexture zero-copy enabled for MediaCodec")
+        }
         super.configureFlutterEngine(flutterEngine)
 
         InutixAppIntegrityPlugin.register(

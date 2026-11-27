@@ -653,15 +653,14 @@ class _TvScreenState extends State<TvScreen> with WidgetsBindingObserver {
         'framedrop': 'vo',
         'video-sync': 'audio',
         'hwdec-codecs': 'h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1',
-        'vd-lavc-fast': 'yes',
-        'vd-lavc-threads': '0',
+        'vd-lavc-threads': isTv ? '2' : '0',
         'interpolation': 'no',
         'deband': 'no',
         'dither-depth': 'no',
         'scale': 'bilinear',
         'cscale': 'bilinear',
         'dscale': 'bilinear',
-        'sws-scaler': 'fast_bilinear',
+        'sws-scaler': 'fast-bilinear',
         'audio-buffer': '0.4',
       };
       // Canales en redes con proxy obligatorio o Modo VPN integrado: libmpv no

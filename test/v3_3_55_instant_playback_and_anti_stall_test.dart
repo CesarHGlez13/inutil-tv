@@ -220,4 +220,27 @@ void main() {
       }
     });
   });
+
+  group('v3.3.56 — Video sin congelamientos en Smart TV (SurfaceTexture + mpv)', () {
+    test('MainActivity activa SurfaceTexture zero-copy solo en Android TV y mpv usa opciones válidas', () {
+      final mainActivity = File(
+        'android/app/src/main/kotlin/dev/cesar/tubotv/MainActivity.kt',
+      ).readAsStringSync();
+      expect(
+        mainActivity,
+        contains('FlutterRenderer.debugForceSurfaceProducerGlTextures = true'),
+      );
+      expect(mainActivity, contains('if (detectAndroidTv())'));
+
+      for (final path in [
+        'lib/screens/player_screen.dart',
+        'lib/screens/tv_screen.dart',
+      ]) {
+        final src = File(path).readAsStringSync();
+        expect(src, contains("'sws-scaler': 'fast-bilinear'"), reason: path);
+        expect(src, isNot(contains('fast_bilinear')), reason: path);
+        expect(src, isNot(contains("'vd-lavc-fast': 'yes'")), reason: path);
+      }
+    });
+  });
 }
