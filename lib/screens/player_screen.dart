@@ -10,6 +10,7 @@ import '../models/models.dart';
 import '../services/app_settings_service.dart';
 import '../services/artwork_cache_service.dart';
 import '../services/device_control_service.dart';
+import '../services/firebase_auth_service.dart';
 import '../services/fullscreen_playback_coordinator.dart';
 import '../services/hls_stream_proxy.dart';
 import '../services/inutil_wrapped_service.dart';
@@ -811,17 +812,38 @@ class _PlayerScreenState extends State<PlayerScreen>
     return true;
   }
 
+  bool _enforcePlaybackLicenseGuard({bool isOfflineLocal = false}) {
+    final auth = InutilAuthService.instance;
+    if (auth.isOnlineValidationDisabled) return true;
+    final allowed = isOfflineLocal ? auth.canPlay : auth.canStreamOnline;
+    if (allowed) return true;
+    final reason = auth.blockedReason.isNotEmpty
+        ? auth.blockedReason
+        : 'Tu licencia no está autorizada para reproducir en este dispositivo.';
+    if (mounted) {
+      setState(() {
+        _resolving = false;
+        _buffering = false;
+        _hasVideo = false;
+        _error = reason;
+      });
+    }
+    return false;
+  }
+
   Future<void> _play(
     int index, {
     String? preloadedSessionId,
     String? preloadedLocalUrl,
   }) async {
     if (index < 0 || index >= _activePlayables.length) return;
-    _stallTimer?.cancel();
-    _tried.add(index);
-
     final playable = _activePlayables[index];
     final publicLabel = PlayerScreen.publicServerLabel(index, playable.label);
+    final isOfflineLocal =
+        preloadedLocalUrl != null && publicLabel == 'Sin conexión';
+    if (!_enforcePlaybackLicenseGuard(isOfflineLocal: isOfflineLocal)) return;
+    _stallTimer?.cancel();
+    _tried.add(index);
     setState(() {
       _current = index;
       _resolving = false;
@@ -928,6 +950,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       return;
     }
     if (!mounted) return;
+    if (!_enforcePlaybackLicenseGuard(isOfflineLocal: false)) return;
     setState(() {
       _resolving = true;
       _buffering = true;
@@ -1000,6 +1023,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       }
       if (!mounted) return;
     }
+    if (!_enforcePlaybackLicenseGuard(isOfflineLocal: false)) return;
 
     // 1. ¿Ya está PRECARGADO en segundo plano? ¡Salto instantáneo <300 ms!
     if (item != null) {

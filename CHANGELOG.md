@@ -1,5 +1,9 @@
 # Changelog — Inutix TV
 
+## 3.3.54 — 2026-11-27
+- **Mejoras de estabilidad y cuenta:** Sincronización de sesión más confiable al cambiar de red o reanudar la app en móvil y Smart TV.
+- **Mejor continuidad de reproducción:** Ajustes internos para una experiencia más fluida en películas, series, anime y canales en vivo.
+
 ## 3.3.53 — 2026-11-26
 - **Inicio, Novedades y Series más dinámicos:** Las secciones principales ahora se adaptan mejor a tus gustos y rotan para mostrarte siempre contenido fresco.
 - **Tu progreso siempre a salvo:** Si cambias de equipo o reinstalas la app, al iniciar sesión recuperas dónde te quedaste, tu lista, tus canales favoritos y tus preferencias.

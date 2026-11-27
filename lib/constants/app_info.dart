@@ -4,7 +4,7 @@ class AppInfo {
   const AppInfo._();
 
   static const String appName = 'Inutix TV';
-  static const String appVersion = '3.3.53';
+  static const String appVersion = '3.3.54';
   static const String creatorName = 'César';
   static const String supportEmail = 'cesarmaster133@gmail.com';
 
@@ -21,6 +21,7 @@ class AppInfo {
       'Ecosistema inutix.com · Inutix TV & Inutix Music';
 
   static const List<String> whatsNewHighlights = [
+    'Mejoras internas de estabilidad y verificación de sesión para mantener tu cuenta y reproducción siempre sincronizadas',
     'Inicio, Novedades y Series más dinámicos: las secciones principales ahora se adaptan mejor a tus gustos y rotan con contenido fresco',
     'Tu progreso siempre a salvo: al reinstalar o cambiar de equipo recuperas dónde te quedaste, tu lista, tus canales favoritos y tus preferencias',
     'Mejor escritura con control remoto: nuevo teclado integrado para buscar y escribir más fácil en Smart TV y TV Box',

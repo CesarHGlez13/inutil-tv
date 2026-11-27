@@ -12,6 +12,7 @@ import 'package:uuid/uuid.dart';
 import '../constants/app_info.dart';
 import 'firebase_config.dart';
 import 'firebase_firestore_service.dart';
+import 'inutix_license_ticket_service.dart';
 import 'tv_mode_service.dart';
 
 /// Modelo de usuario unificado de la familia INÚTIL (Inútil Music + InútilTV).
@@ -160,6 +161,7 @@ class InutilUser {
     String? idToken,
     String? refreshToken,
     DateTime? accountExpiresAt,
+    bool clearAccountExpiresAt = false,
     bool? isActive,
     String? role,
     int? accountDurationDays,
@@ -178,7 +180,9 @@ class InutilUser {
       displayName: displayName ?? this.displayName,
       idToken: idToken ?? this.idToken,
       refreshToken: refreshToken ?? this.refreshToken,
-      accountExpiresAt: accountExpiresAt ?? this.accountExpiresAt,
+      accountExpiresAt: clearAccountExpiresAt
+          ? null
+          : (accountExpiresAt ?? this.accountExpiresAt),
       isActive: isActive ?? this.isActive,
       role: role ?? this.role,
       accountDurationDays: accountDurationDays ?? this.accountDurationDays,
@@ -303,21 +307,42 @@ class InutilAuthService extends ChangeNotifier {
   String get deviceName => _deviceName ?? 'Inutix TV Client';
   String get devicePlatform => _devicePlatform ?? 'generic';
 
+  /// Acceso al servicio de pases de licencia firmados por servidor (Nivel 2).
+  InutixLicenseTicketService get licenseTicket =>
+      InutixLicenseTicketService.instance;
+
   /// Control estricto de acceso (Gatekeeper):
-  /// sesión válida + sin expulsión + sin pausa de inactividad + (admin O licencia vigente).
+  /// sesión válida + sin expulsión + sin pausa de inactividad + sin rechazo
+  /// explícito del servidor + (admin O licencia vigente).
   bool get isAccessAllowed =>
       _currentUser != null &&
       _kickedOutReason.isEmpty &&
       !_inactivityPaused &&
+      !InutixLicenseTicketService.instance.hasServerRejection &&
       (_currentUser!.isAdmin || _currentUser!.licenseValid);
 
-  /// `true` si además la validación remota está dentro de la ventana de 72 h.
+  /// `true` si además la validación remota (y el pase Nivel 2 offline) están vigentes.
   bool get canPlay => _currentUser != null && _licenseFresh();
+
+  /// `true` solo si la cuenta y el pase criptográfico ES256 firmado por el
+  /// servidor autorizan streaming en línea (ventana de 24 h en modo estricto).
+  bool get canStreamOnline {
+    final user = _currentUser;
+    if (user == null || !_licenseFresh()) return false;
+    if (testSkipOnlineValidation) return true;
+    return InutixLicenseTicketService.instance.isOnlineStreamingAuthorized(
+      uid: user.uid,
+      deviceId: deviceId,
+    );
+  }
 
   /// Explicación legible del estado de bloqueo.
   String get blockedReason {
     final user = _currentUser;
     if (user == null) return 'Inicia sesión para ver Inutix TV.';
+    if (InutixLicenseTicketService.instance.hasServerRejection) {
+      return InutixLicenseTicketService.instance.lastServerRejectionMessage;
+    }
     if (_kickedOutReason.isNotEmpty) return _kickedOutReason;
     if (!user.isAdmin && user.status == 'pending') {
       return 'Tu cuenta está registrada pero pendiente de aprobación. '
@@ -337,6 +362,14 @@ class InutilAuthService extends ChangeNotifier {
               'Tu cuenta incluye 1 celular y 1 Smart TV a la vez.';
     }
     if (!_licenseFresh()) {
+      if (!testSkipOnlineValidation &&
+          InutixLicenseTicketService.instance.isStrictEnforcementActive &&
+          !InutixLicenseTicketService.instance.isOfflinePlaybackAuthorized(
+            uid: user.uid,
+            deviceId: deviceId,
+          )) {
+        return 'Conéctate a internet para validar tu licencia oficial en el servidor.';
+      }
       return 'Necesitas conexión a internet para validar tu licencia '
           '(última validación hace más de 72 horas).';
     }
@@ -361,6 +394,15 @@ class InutilAuthService extends ChangeNotifier {
     if (!user.licenseValid) return false;
     if (_inactivityPaused) return false;
     if (!_tvSessionOk(user)) return false;
+    if (InutixLicenseTicketService.instance.hasServerRejection) return false;
+    if (!testSkipOnlineValidation &&
+        InutixLicenseTicketService.instance.isStrictEnforcementActive &&
+        !InutixLicenseTicketService.instance.isOfflinePlaybackAuthorized(
+          uid: user.uid,
+          deviceId: deviceId,
+        )) {
+      return false;
+    }
     if (user.isAdmin) return true;
     final validated = _lastValidatedAt;
     if (validated == null) return false;
@@ -401,6 +443,8 @@ class InutilAuthService extends ChangeNotifier {
     if (savedValidated != null) {
       _lastValidatedAt = DateTime.tryParse(savedValidated);
     }
+
+    await InutixLicenseTicketService.instance.initialize();
 
     // 2. Restaurar sesión desde almacenamiento seguro (o fallback prefs)
     final sessionJson = await _readSecure(prefs, _storageSessionKey);
@@ -502,6 +546,7 @@ class InutilAuthService extends ChangeNotifier {
     await _deleteSecure(prefs, _storageSessionKey);
     await prefs.remove(_storageUserKey);
     await prefs.remove(_storageLastValidatedKey);
+    await InutixLicenseTicketService.instance.clear();
     _currentUser = null;
     _lastValidatedAt = null;
     notifyListeners();
@@ -687,6 +732,10 @@ class InutilAuthService extends ChangeNotifier {
               : trimmedEmail.split('@').first,
       idToken: data['idToken'] as String? ?? '',
       refreshToken: data['refreshToken'] as String? ?? '',
+      accountExpiresAt: null,
+      isActive: false,
+      status: 'pending',
+      accountDurationDays: 0,
       createdAt: DateTime.now(),
       lastLoginAt: DateTime.now(),
     );
@@ -792,22 +841,32 @@ class InutilAuthService extends ChangeNotifier {
             ? account.displayName!
             : email.split('@').first);
 
-    final role = (data['role'] as String?) ??
+    final rawRole = (data['role'] as String?) ??
         (data['fields']?['role'] as String?) ??
         (isBootstrapAdminEmail(email) ? 'admin' : 'user');
-    final status = (data['status'] as String?) ??
+    final isAdminAccount =
+        rawRole == 'admin' || isBootstrapAdminEmail(email);
+    final role = isAdminAccount ? 'admin' : rawRole;
+    final rawStatus = (data['status'] as String?) ??
         (data['fields']?['status'] as String?) ??
-        (isBootstrapAdminEmail(email) ? 'active' : 'pending');
-    final isActive = (data['isActive'] as bool?) ??
-        (data['fields']?['isActive'] as bool?) ??
-        true;
+        (isAdminAccount ? 'active' : 'pending');
+    final status = isAdminAccount ? 'active' : rawStatus;
+    final rawIsActive = (data['isActive'] as bool?) ??
+        (data['fields']?['isActive'] as bool?);
+    // Nivel 1: nunca dejar isActive=true ni accountExpiresAt!=null cuando
+    // status != 'active' y role != 'admin'.
+    final isActive =
+        isAdminAccount || (status == 'active' && rawIsActive != false);
     final expiresAtRaw = data['accountExpiresAt'] ??
         data['fields']?['accountExpiresAt'];
-    final expiresAt = expiresAtRaw != null
+    final parsedExpiresAt = expiresAtRaw != null
         ? (expiresAtRaw is DateTime
             ? expiresAtRaw
             : DateTime.tryParse(expiresAtRaw.toString()))
-        : (isBootstrapAdminEmail(email) ? DateTime(2099, 12, 31) : null);
+        : null;
+    final expiresAt = isAdminAccount
+        ? (parsedExpiresAt ?? DateTime(2099, 12, 31))
+        : (status == 'active' ? parsedExpiresAt : null);
 
     final user = InutilUser(
       uid: (data['localId'] ?? data['uid']) as String,
@@ -819,6 +878,7 @@ class InutilAuthService extends ChangeNotifier {
       status: status,
       isActive: isActive,
       accountExpiresAt: expiresAt,
+      accountDurationDays: isAdminAccount ? 9999 : (status == 'active' ? 30 : 0),
       createdAt: DateTime.now(),
       lastLoginAt: DateTime.now(),
     );
@@ -947,10 +1007,12 @@ class InutilAuthService extends ChangeNotifier {
             status: isAdminSeed ? 'active' : 'pending',
             isActive: isAdminSeed,
             accountExpiresAt: isAdminSeed ? DateTime(2099, 12, 31) : null,
+            clearAccountExpiresAt: !isAdminSeed,
             currentTvDeviceId: _isSmartTvSlot ? '' : deviceId,
             currentSmartTvDeviceId: _isSmartTvSlot ? deviceId : '',
           );
           await _saveSession();
+          await _syncServerLicenseTicket(force: true);
         }
         return;
       }
@@ -986,10 +1048,91 @@ class InutilAuthService extends ChangeNotifier {
       if (_currentUser?.licenseValid == true) {
         await _enforceInactivityPolicy(remote);
       }
+      await _syncServerLicenseTicket(force: true);
     } catch (e) {
       debugPrint('[InutilAuth] Bootstrap de sesión sin respuesta remota: $e');
     }
   }
+
+  /// Solicita/renueva el pase criptográfico de licencia (Nivel 2) desde
+  /// `api.inutix.com` y aplica inmediatamente cualquier rechazo explícito (`403`).
+  Future<void> _syncServerLicenseTicket({bool force = false}) async {
+    final user = _currentUser;
+    if (user == null || user.uid.isEmpty || user.idToken.isEmpty) return;
+    if (testSkipOnlineValidation) return;
+    final res = await InutixLicenseTicketService.instance.refreshFromServer(
+      idToken: user.idToken,
+      uid: user.uid,
+      deviceId: deviceId,
+      appVersion: AppInfo.appVersion,
+      force: force,
+    );
+    await _applyTicketRefreshResult(res);
+  }
+
+  Future<void> _applyTicketRefreshResult(LicenseTicketRefreshResult res) async {
+    final user = _currentUser;
+    if (user == null) return;
+    if (res.status == LicenseTicketRefreshStatus.rejectedByServer) {
+      switch (res.rejectionCode) {
+        case 'LICENSE_PENDING':
+          _currentUser = user.copyWith(
+            status: 'pending',
+            isActive: false,
+            clearAccountExpiresAt: true,
+          );
+          _kickedOutReason = '';
+          await _saveSession();
+          notifyListeners();
+          return;
+        case 'LICENSE_EXPIRED':
+          _currentUser = user.copyWith(
+            isActive: false,
+            accountExpiresAt: DateTime.fromMillisecondsSinceEpoch(0),
+          );
+          _kickedOutReason = '';
+          await _saveSession();
+          notifyListeners();
+          return;
+        case 'LICENSE_BLOCKED':
+          _currentUser = user.copyWith(
+            status: 'blocked',
+            isActive: false,
+            clearAccountExpiresAt: true,
+          );
+          _kickedOutReason = res.rejectionMessage;
+          await _saveSession();
+          notifyListeners();
+          return;
+        case 'INACTIVITY_PAUSED':
+          _inactivityPaused = true;
+          notifyListeners();
+          return;
+        case 'INVALID_APP_SIGNATURE':
+        case 'DEVICE_CONFLICT':
+        case 'PHONE_CONFLICT':
+        default:
+          _kickedOutReason = res.rejectionMessage.isNotEmpty
+              ? res.rejectionMessage
+              : 'Tu licencia no está autorizada por el servidor.';
+          notifyListeners();
+          return;
+      }
+    }
+    if (res.status == LicenseTicketRefreshStatus.ok) {
+      notifyListeners();
+    }
+  }
+
+  @visibleForTesting
+  Future<void> applyRemoteDocForTest(Map<String, dynamic> remote) =>
+      _applyRemoteDoc(remote);
+
+  @visibleForTesting
+  Future<void> applyTicketRefreshResultForTest(
+    LicenseTicketRefreshResult res,
+  ) =>
+      _applyTicketRefreshResult(res);
 
   Future<void> _applyRemoteDoc(Map<String, dynamic> remote) async {
     final user = _currentUser;
@@ -997,15 +1140,25 @@ class InutilAuthService extends ChangeNotifier {
     final rawExpiry = remote['accountExpiresAt'];
     final expiresAt = rawExpiry is DateTime
         ? rawExpiry
-        : (rawExpiry != null ? DateTime.tryParse(rawExpiry.toString()) : null);
+        : (rawExpiry != null
+            ? DateTime.tryParse(rawExpiry.toString())
+            : user.accountExpiresAt);
     final role = remote['role'] as String? ?? user.role;
     final status = remote['status'] as String? ??
         ((remote['isActive'] as bool?) == false ? 'blocked' : user.status);
-    final isActive = (remote['isActive'] as bool?) ?? user.isActive;
+    final remoteActive = (remote['isActive'] as bool?) ?? user.isActive;
+    // Nivel 1: si status != 'active' y role != 'admin', nunca dejar isActive=true
+    // ni arrastrar un accountExpiresAt anterior.
+    final effectiveIsActive =
+        role == 'admin' || (status == 'active' && remoteActive);
+    final clearExpiry = (role != 'admin' && status != 'active') ||
+        (remote.containsKey('accountExpiresAt') &&
+            remote['accountExpiresAt'] == null);
 
     _currentUser = user.copyWith(
-      accountExpiresAt: expiresAt,
-      isActive: isActive,
+      accountExpiresAt: clearExpiry ? null : expiresAt,
+      clearAccountExpiresAt: clearExpiry,
+      isActive: effectiveIsActive,
       role: role,
       status: status,
       displayName: (remote['displayName'] as String?)?.isNotEmpty == true
@@ -1240,6 +1393,7 @@ class InutilAuthService extends ChangeNotifier {
         return;
       }
       await _reconcileRemoteProfile(remote);
+      await _syncServerLicenseTicket(force: reason == 'reanudada');
     } catch (e) {
       debugPrint('[InutilAuth] Validación ($reason) sin conexión: $e');
     } finally {
@@ -1256,6 +1410,7 @@ class InutilAuthService extends ChangeNotifier {
       final remoteDoc = await _fetchVerifiedUserProfile(_currentUser!.uid);
       if (remoteDoc != null && remoteDoc.isNotEmpty) {
         await _reconcileRemoteProfile(remoteDoc, allowClaimEmptySlot: true);
+        await _syncServerLicenseTicket(force: true);
       } else if (remoteDoc == null) {
         if (_kickedOutReason.isEmpty) {
           _kickedOutReason = _accountDeletedReason;

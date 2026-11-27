@@ -9,6 +9,7 @@ import '../models/models.dart';
 import '../services/app_settings_service.dart';
 import '../services/artwork_cache_service.dart';
 import '../services/device_control_service.dart';
+import '../services/firebase_auth_service.dart';
 import '../services/fullscreen_playback_coordinator.dart';
 import '../services/inutil_cloud_backup_service.dart';
 import '../services/network_config_service.dart';
@@ -604,6 +605,11 @@ class _TvScreenState extends State<TvScreen> with WidgetsBindingObserver {
 
   void _switchChannel(Channel ch, {int sourceIndex = 0}) {
     if (ch.sources.isEmpty) return;
+    final auth = InutilAuthService.instance;
+    if (!auth.isOnlineValidationDisabled && !auth.canStreamOnline) {
+      unawaited(_player?.stop());
+      return;
+    }
     _needsRetune = false;
     final idx = sourceIndex.clamp(0, ch.sources.length - 1);
     final src = ch.sources[idx];

@@ -31,6 +31,11 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        InutixAppIntegrityPlugin.register(
+            flutterEngine.dartExecutor.binaryMessenger,
+            applicationContext,
+        )
+
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             APP_UPDATE_CHANNEL,
