@@ -419,5 +419,91 @@ void main() {
       );
       InutilAuthService.testSkipOnlineValidation = true;
     });
+
+    test('getIntegrityInfo nunca cachea empty, reintenta 1 vez y solo cachea certificado válido',
+        () async {
+      var calls = 0;
+      final service = InutixLicenseTicketService(
+        integrityRetryDelay: const Duration(milliseconds: 5),
+        integrityLoader: () async {
+          calls++;
+          if (calls <= 2) return InutixAppIntegrityInfo.empty;
+          return const InutixAppIntegrityInfo(
+            packageName: _tvPackageName,
+            apkCertSha256: _tvCertSha256,
+          );
+        },
+      );
+
+      // Primera llamada: intento inicial + 1 reintento -> ambos vacíos -> NO cachea.
+      final first = await service.getIntegrityInfo();
+      expect(calls, 2);
+      expect(first.hasCertificate, isFalse);
+
+      // Siguiente llamada vuelve a consultar (no estaba cacheado) y ahora sí cachea.
+      final second = await service.getIntegrityInfo();
+      expect(calls, 3);
+      expect(second.packageName, _tvPackageName);
+      expect(second.apkCertSha256, _tvCertSha256);
+
+      // Llamadas posteriores reutilizan caché sin volver al canal nativo.
+      final third = await service.getIntegrityInfo();
+      expect(calls, 3);
+      expect(third.apkCertSha256, _tvCertSha256);
+    });
+
+    test('getIntegrityInfo se recupera en el reintento tras carrera de arranque',
+        () async {
+      var calls = 0;
+      final service = InutixLicenseTicketService(
+        integrityRetryDelay: const Duration(milliseconds: 5),
+        integrityLoader: () async {
+          calls++;
+          if (calls == 1) return InutixAppIntegrityInfo.empty;
+          return const InutixAppIntegrityInfo(
+            packageName: _tvPackageName,
+            apkCertSha256: _tvCertSha256,
+          );
+        },
+      );
+
+      final info = await service.getIntegrityInfo();
+      expect(calls, 2);
+      expect(info.packageName, _tvPackageName);
+      expect(info.hasCertificate, isTrue);
+    });
+
+    test('LicenseTicketRefreshStatus.ok limpia _kickedOutReason tras rechazo transitorio',
+        () async {
+      await _seedAuthSession(
+        uid: 'u_recover',
+        email: 'sergio@ejemplo.com',
+        status: 'active',
+        isActive: true,
+        expiresAt: DateTime.now().add(const Duration(days: 30)),
+      );
+      final auth = InutilAuthService.instance;
+
+      // 1. Rechazo transitorio (ej. INVALID_APP_SIGNATURE) traba la sesión
+      await auth.applyTicketRefreshResultForTest(
+        const LicenseTicketRefreshResult(
+          status: LicenseTicketRefreshStatus.rejectedByServer,
+          rejectionCode: 'INVALID_APP_SIGNATURE',
+          rejectionMessage: 'Versión no oficial de la aplicación.',
+        ),
+      );
+      expect(auth.isKickedOut, isTrue);
+      expect(auth.isAccessAllowed, isFalse);
+
+      // 2. Al reintentar ("Comprobar Estado") y recibir ok, debe destrabar
+      await auth.applyTicketRefreshResultForTest(
+        const LicenseTicketRefreshResult(
+          status: LicenseTicketRefreshStatus.ok,
+        ),
+      );
+      expect(auth.isKickedOut, isFalse);
+      expect(auth.kickedOutReason, isEmpty);
+      expect(auth.isAccessAllowed, isTrue);
+    });
   });
 }

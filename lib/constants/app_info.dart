@@ -4,7 +4,7 @@ class AppInfo {
   const AppInfo._();
 
   static const String appName = 'Inutix TV';
-  static const String appVersion = '3.3.56';
+  static const String appVersion = '3.3.57';
   static const String creatorName = 'César';
   static const String supportEmail = 'cesarmaster133@gmail.com';
 
@@ -21,6 +21,8 @@ class AppInfo {
       'Ecosistema inutix.com · Inutix TV & Inutix Music';
 
   static const List<String> whatsNewHighlights = [
+    'Reproducción continua sin pausas ni congelamientos de imagen durante películas y series en Smart TV, Google TV y móvil',
+    'Verificación de cuenta más confiable al abrir la app y al pulsar «Comprobar Estado», evitando bloqueos falsos en Android recientes',
     'Video continuo y fluido en Smart TV y Google TV: corrige pausas momentáneas de imagen mientras el audio seguía sonando',
     'Reproducción más rápida y estable: arranque ágil de películas y series con cambio automático cuando un servidor se pausa',
     'Búsqueda y navegación más fluidas en Google TV y Smart TV, con teclado nativo por defecto y mejor respuesta del control remoto',

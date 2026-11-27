@@ -1120,6 +1120,9 @@ class InutilAuthService extends ChangeNotifier {
       }
     }
     if (res.status == LicenseTicketRefreshStatus.ok) {
+      if (_kickedOutReason.isNotEmpty && _tvSessionOk(user)) {
+        _kickedOutReason = '';
+      }
       notifyListeners();
     }
   }

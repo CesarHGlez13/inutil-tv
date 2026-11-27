@@ -1156,6 +1156,28 @@ class VodCatalogService {
     return out;
   }
 
+  static final RegExp _reFinalSeason = RegExp(r'\b(?:the\s+)?final\s+season\b');
+  static final RegExp _reOrdSeason = RegExp(r'\b(\d+)(?:st|nd|rd|th)\s+season\b');
+  static final RegExp _reExplicitSeason =
+      RegExp(r'\b(?:t|temporada|temp|season|s)\s*(\d+)\b');
+  static final RegExp _rePartSeason = RegExp(r'\b(?:part|parte|cour)\s*(\d+)$');
+  static final RegExp _reRomanSeason = RegExp(r'\s+(ii|iii|iv|v|vi)$');
+  static final RegExp _reTrailingDigitSeason = RegExp(r'^(.+\s+\S+)\s+([2-9])$');
+
+  static final RegExp _reCanonPrefix =
+      RegExp(r'^(?:t|temporada|temp|season|serie|series?)\s+\d+\s+');
+  static final RegExp _reCanonFinal = RegExp(
+      r'\s+(?:the\s+)?final\s+season(?:\s+(?:part|parte|cour)\s*\d+)?$');
+  static final RegExp _reCanonOrd = RegExp(
+      r'\s+\d+(?:st|nd|rd|th)\s+season(?:\s+(?:part|parte|cour)\s*\d+)?$');
+  static final RegExp _reCanonExplicit = RegExp(
+      r'\s+(?:t|temporada|temp|season|s)\s*\d+(?:\s+(?:part|parte|cour)\s*\d+)?$');
+  static final RegExp _reCanonPart = RegExp(r'\s+(?:part|parte|cour)\s*\d+$');
+  static final RegExp _reCanonTv = RegExp(r'\s+tv$');
+  static final RegExp _reCanonSpaces = RegExp(r'\s+');
+  static final RegExp _reCanonRoman = RegExp(r'^(.{3,}?)\s+(?:ii|iii|iv|v|vi)$');
+  static final RegExp _reCanonDigit = RegExp(r'^(\S+\s+.+?)\s+[2-9]$');
+
   /// Extrae el número de temporada implícito en un título de serie o anime
   /// ("2nd Season" -> 2, "Temporada 3" -> 3, "T4" -> 4, "Final Season" -> 99,
   ///  "Overlord III" -> 3, base sin sufijo -> 1).
@@ -1163,19 +1185,18 @@ class VodCatalogService {
     final norm = StreamValidator.normalizeTitle(title);
     if (norm.isEmpty) return 1;
 
-    if (RegExp(r'\b(?:the\s+)?final\s+season\b').hasMatch(norm)) return 99;
+    if (_reFinalSeason.hasMatch(norm)) return 99;
 
-    final ord = RegExp(r'\b(\d+)(?:st|nd|rd|th)\s+season\b').firstMatch(norm);
+    final ord = _reOrdSeason.firstMatch(norm);
     if (ord != null) return int.tryParse(ord.group(1)!) ?? 1;
 
-    final explicit =
-        RegExp(r'\b(?:t|temporada|temp|season|s)\s*(\d+)\b').firstMatch(norm);
+    final explicit = _reExplicitSeason.firstMatch(norm);
     if (explicit != null) return int.tryParse(explicit.group(1)!) ?? 1;
 
-    final part = RegExp(r'\b(?:part|parte|cour)\s*(\d+)$').firstMatch(norm);
+    final part = _rePartSeason.firstMatch(norm);
     if (part != null) return int.tryParse(part.group(1)!) ?? 1;
 
-    final roman = RegExp(r'\s+(ii|iii|iv|v|vi)$').firstMatch(norm);
+    final roman = _reRomanSeason.firstMatch(norm);
     if (roman != null && norm.length > roman.group(1)!.length + 3) {
       return switch (roman.group(1)) {
         'ii' => 2,
@@ -1187,7 +1208,7 @@ class VodCatalogService {
       };
     }
 
-    final trailingDigit = RegExp(r'^(.+\s+\S+)\s+([2-9])$').firstMatch(norm);
+    final trailingDigit = _reTrailingDigitSeason.firstMatch(norm);
     if (trailingDigit != null) {
       return int.tryParse(trailingDigit.group(2)!) ?? 1;
     }
@@ -1212,40 +1233,25 @@ class VodCatalogService {
     for (var i = 0; i < 2; i++) {
       final before = norm;
       norm = norm
-          .replaceFirst(
-            RegExp(r'^(?:t|temporada|temp|season|serie|series?)\s+\d+\s+'),
-            ' ',
-          )
-          .replaceFirst(
-            RegExp(r'\s+(?:the\s+)?final\s+season(?:\s+(?:part|parte|cour)\s*\d+)?$'),
-            ' ',
-          )
-          .replaceFirst(
-            RegExp(r'\s+\d+(?:st|nd|rd|th)\s+season(?:\s+(?:part|parte|cour)\s*\d+)?$'),
-            ' ',
-          )
-          .replaceFirst(
-            RegExp(r'\s+(?:t|temporada|temp|season|s)\s*\d+(?:\s+(?:part|parte|cour)\s*\d+)?$'),
-            ' ',
-          )
-          .replaceFirst(
-            RegExp(r'\s+(?:part|parte|cour)\s*\d+$'),
-            ' ',
-          )
-          .replaceFirst(RegExp(r'\s+tv$'), ' ')
-          .replaceAll(RegExp(r'\s+'), ' ')
+          .replaceFirst(_reCanonPrefix, ' ')
+          .replaceFirst(_reCanonFinal, ' ')
+          .replaceFirst(_reCanonOrd, ' ')
+          .replaceFirst(_reCanonExplicit, ' ')
+          .replaceFirst(_reCanonPart, ' ')
+          .replaceFirst(_reCanonTv, ' ')
+          .replaceAll(_reCanonSpaces, ' ')
           .trim();
       if (norm == before) break;
     }
 
     // Numerales romanos de temporada al final (II, III, IV, V, VI) si hay base >= 3 chars
-    final romanMatch = RegExp(r'^(.{3,}?)\s+(?:ii|iii|iv|v|vi)$').firstMatch(norm);
+    final romanMatch = _reCanonRoman.firstMatch(norm);
     if (romanMatch != null) {
       norm = romanMatch.group(1)!.trim();
     }
 
     // Dígito final de temporada (2..9) solo en títulos de >=2 palabras (ej. "5 toubun no hanayome 2")
-    final digitMatch = RegExp(r'^(\S+\s+.+?)\s+[2-9]$').firstMatch(norm);
+    final digitMatch = _reCanonDigit.firstMatch(norm);
     if (digitMatch != null) {
       norm = digitMatch.group(1)!.trim();
     }

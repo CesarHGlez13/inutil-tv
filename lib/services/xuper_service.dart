@@ -7,6 +7,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import '../models/models.dart';
 import 'artwork_cache_service.dart';
 import 'cuevana_poseidon_service.dart';
+import 'fullscreen_playback_coordinator.dart';
 import 'jkanime_service.dart';
 import 'live_tv_sync_service.dart';
 import 'my_list_service.dart';
@@ -58,9 +59,11 @@ class XuperService extends ChangeNotifier {
   bool _initialized = false;
   bool _liveCatalogLoaded = false;
   bool _tasteListenersAttached = false;
+  bool _pendingTasteRecompute = false;
   Future<void>? _initFuture;
   Timer? _recomputeDebounce;
   String _lastFetchedTasteSignature = '';
+  final Map<int, List<VodItem>> _featuredCache = {};
 
   List<Channel> _allChannels = [];
   List<VodItem> _liveMovies = [];
@@ -85,12 +88,35 @@ class XuperService extends ChangeNotifier {
     WatchHistory().addListener(_onUserTasteSignalChanged);
     MyListService.instance.addListener(_onUserTasteSignalChanged);
     TvTasteProfileService.instance.addListener(_onUserTasteSignalChanged);
+    FullscreenPlaybackCoordinator.instance.isActive
+        .addListener(_onFullscreenPlaybackChanged);
+  }
+
+  void _onFullscreenPlaybackChanged() {
+    if (!FullscreenPlaybackCoordinator.instance.isActive.value &&
+        _pendingTasteRecompute) {
+      _pendingTasteRecompute = false;
+      _onUserTasteSignalChanged();
+    }
   }
 
   void _onUserTasteSignalChanged() {
+    _featuredCache.clear();
     if (!_initialized) return;
+    // Durante reproducción en pantalla completa, posponer el re-ranking del
+    // catálogo oculto hasta salir del reproductor para jamás congelar el hilo
+    // UI/video en mitad de una película o episodio.
+    if (FullscreenPlaybackCoordinator.instance.isActive.value) {
+      _recomputeDebounce?.cancel();
+      _pendingTasteRecompute = true;
+      return;
+    }
     _recomputeDebounce?.cancel();
     _recomputeDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (FullscreenPlaybackCoordinator.instance.isActive.value) {
+        _pendingTasteRecompute = true;
+        return;
+      }
       _updateCategories(recordImpressions: false);
       notifyListeners();
       // Si el top de géneros cambió, traer catálogo fresco de esos géneros en fondo
@@ -212,10 +238,13 @@ class XuperService extends ChangeNotifier {
     bool forceShuffle = false,
     bool recordImpressions = false,
   }) {
+    _featuredCache.clear();
     final map = <String, List<VodItem>>{};
     final taste = TvTasteProfileService.instance;
     final summary = taste.computeSummary();
     final history = WatchHistory().items;
+    final completedIds = taste.completedIdSet(history: history);
+    final genreCache = <String, List<String>>{};
     final myList = MyListService.instance.items;
     final sessionSeed = taste.sessionCounter +
         (forceShuffle ? (DateTime.now().millisecondsSinceEpoch % 997) : 0);
@@ -251,6 +280,8 @@ class XuperService extends ChangeNotifier {
       novedadesPool,
       summary: summary,
       history: history,
+      completedIds: completedIds,
+      genreCache: genreCache,
       excludeCompletedOrAbandoned: true,
       seed: sessionSeed + 17,
       shuffleTopBand: forceShuffle,
@@ -279,11 +310,16 @@ class XuperService extends ChangeNotifier {
 
       for (final anchor in anchors) {
         final anchorVod = anchor.toVodItem();
-        final targetGenres = taste.resolveGenresForItem(anchorVod).toSet();
+        final targetGenres =
+            taste.resolveGenresForItem(anchorVod, cache: genreCache).toSet();
 
         final candidates = uniquePool.where((item) {
           if (item.id == anchor.id) return false;
-          if (taste.shouldExcludeFromDiscovery(item, history: history)) {
+          if (taste.shouldExcludeFromDiscovery(
+            item,
+            history: history,
+            completedIds: completedIds,
+          )) {
             return false;
           }
           if (anchor.isAnime && !item.isAnime) return false;
@@ -291,7 +327,8 @@ class XuperService extends ChangeNotifier {
             return item.isSeries == anchor.isSeries &&
                 item.isAnime == anchor.isAnime;
           }
-          final itemGenres = taste.resolveGenresForItem(item).toSet();
+          final itemGenres =
+              taste.resolveGenresForItem(item, cache: genreCache).toSet();
           if (itemGenres.intersection(targetGenres).isNotEmpty) return true;
           // Fallback suave mismo formato si pocos títulos comparten género exacto
           return item.isSeries == anchor.isSeries &&
@@ -302,6 +339,8 @@ class XuperService extends ChangeNotifier {
           candidates,
           summary: summary,
           history: history,
+          completedIds: completedIds,
+          genreCache: genreCache,
           excludeCompletedOrAbandoned: true,
           seed: sessionSeed + anchor.id.hashCode,
           shuffleTopBand: forceShuffle,
@@ -326,6 +365,8 @@ class XuperService extends ChangeNotifier {
     final recommended = _buildPersonalizedRecommendations(
       pool: uniquePool,
       history: history,
+      completedIds: completedIds,
+      genreCache: genreCache,
       myList: myList,
       summary: summary,
       excludeIds: usedInTopRails,
@@ -341,12 +382,18 @@ class XuperService extends ChangeNotifier {
     final discoveryCandidates = uniquePool
         .where((it) =>
             !usedInTopRails.contains(it.id) &&
-            !taste.shouldExcludeFromDiscovery(it, history: history))
+            !taste.shouldExcludeFromDiscovery(
+              it,
+              history: history,
+              completedIds: completedIds,
+            ))
         .toList();
     final discoveries = _rankItems(
       discoveryCandidates.isNotEmpty ? discoveryCandidates : uniquePool,
       summary: summary,
       history: history,
+      completedIds: completedIds,
+      genreCache: genreCache,
       excludeCompletedOrAbandoned: false,
       seed: sessionSeed + DateTime.now().hour * 31,
       shuffleTopBand: true,
@@ -362,6 +409,8 @@ class XuperService extends ChangeNotifier {
       trendingSource,
       summary: summary,
       history: history,
+      completedIds: completedIds,
+      genreCache: genreCache,
       excludeCompletedOrAbandoned: false,
       seed: sessionSeed + 71,
       shuffleTopBand: forceShuffle,
@@ -371,6 +420,8 @@ class XuperService extends ChangeNotifier {
       _liveMovies,
       summary: summary,
       history: history,
+      completedIds: completedIds,
+      genreCache: genreCache,
       excludeCompletedOrAbandoned: false,
       seed: sessionSeed + 83,
       shuffleTopBand: forceShuffle,
@@ -385,6 +436,8 @@ class XuperService extends ChangeNotifier {
       seriesPool.isNotEmpty ? seriesPool : _liveSeries,
       summary: summary,
       history: history,
+      completedIds: completedIds,
+      genreCache: genreCache,
       excludeCompletedOrAbandoned: false,
       seed: sessionSeed + 97,
       shuffleTopBand: forceShuffle,
@@ -398,6 +451,8 @@ class XuperService extends ChangeNotifier {
       animePool.isNotEmpty ? animePool : _liveAnime,
       summary: summary,
       history: history,
+      completedIds: completedIds,
+      genreCache: genreCache,
       excludeCompletedOrAbandoned: false,
       seed: sessionSeed + 113,
       shuffleTopBand: forceShuffle,
@@ -433,6 +488,8 @@ class XuperService extends ChangeNotifier {
         _classicMovies,
         summary: summary,
         history: history,
+        completedIds: completedIds,
+        genreCache: genreCache,
         excludeCompletedOrAbandoned: false,
         seed: sessionSeed + 131,
         shuffleTopBand: forceShuffle,
@@ -471,13 +528,20 @@ class XuperService extends ChangeNotifier {
     required bool excludeCompletedOrAbandoned,
     required int seed,
     required bool shuffleTopBand,
+    Set<String>? completedIds,
+    Map<String, List<String>>? genreCache,
     Set<String> boostGenres = const {},
   }) {
     if (source.isEmpty) return const [];
     final taste = TvTasteProfileService.instance;
+    final compIds = completedIds ?? taste.completedIdSet(history: history);
     final filtered = excludeCompletedOrAbandoned
         ? source
-            .where((it) => !taste.shouldExcludeFromDiscovery(it, history: history))
+            .where((it) => !taste.shouldExcludeFromDiscovery(
+                  it,
+                  history: history,
+                  completedIds: compIds,
+                ))
             .toList()
         : List<VodItem>.from(source);
 
@@ -491,10 +555,13 @@ class XuperService extends ChangeNotifier {
         item,
         summary: summary,
         history: history,
+        completedIds: compIds,
+        genreCache: genreCache,
         applyImpressionPenalty: true,
       );
       if (boostGenres.isNotEmpty) {
-        final itemGenres = taste.resolveGenresForItem(item).toSet();
+        final itemGenres =
+            taste.resolveGenresForItem(item, cache: genreCache).toSet();
         final overlap = itemGenres.intersection(boostGenres).length;
         s += overlap * 2.4;
       }
@@ -515,17 +582,28 @@ class XuperService extends ChangeNotifier {
     required Set<String> excludeIds,
     required int seed,
     required bool shuffle,
+    Set<String>? completedIds,
+    Map<String, List<String>>? genreCache,
   }) {
     final taste = TvTasteProfileService.instance;
+    final compIds = completedIds ?? taste.completedIdSet(history: history);
     final candidates = pool.where((item) {
       if (excludeIds.contains(item.id)) return false;
-      return !taste.shouldExcludeFromDiscovery(item, history: history);
+      return !taste.shouldExcludeFromDiscovery(
+        item,
+        history: history,
+        completedIds: compIds,
+      );
     }).toList();
 
     final working = candidates.length >= 6
         ? candidates
         : pool
-            .where((item) => !taste.shouldExcludeFromDiscovery(item, history: history))
+            .where((item) => !taste.shouldExcludeFromDiscovery(
+                  item,
+                  history: history,
+                  completedIds: compIds,
+                ))
             .toList();
 
     final listToRank = working.isNotEmpty ? working : pool;
@@ -533,13 +611,16 @@ class XuperService extends ChangeNotifier {
 
     // Extra boost suave para afinidad con géneros de Mi Lista si aún hay pocos eventos
     final myListGenres = <String>{
-      for (final m in myList) ...taste.resolveGenresForItem(m),
+      for (final m in myList)
+        ...taste.resolveGenresForItem(m, cache: genreCache),
     };
 
     return _rankItems(
       listToRank,
       summary: summary,
       history: history,
+      completedIds: compIds,
+      genreCache: genreCache,
       excludeCompletedOrAbandoned: false,
       seed: seed,
       shuffleTopBand: shuffle,
@@ -551,9 +632,14 @@ class XuperService extends ChangeNotifier {
   /// adaptados al perfil de gustos, excluyendo vistos/abandonados y con
   /// rotación anti-repetición mediante [seed] y sesión actual.
   List<VodItem> getFeaturedVod({int seed = 0}) {
+    final cached = _featuredCache[seed];
+    if (cached != null) return cached;
+
     final taste = TvTasteProfileService.instance;
     final summary = taste.computeSummary();
     final history = WatchHistory().items;
+    final completedIds = taste.completedIdSet(history: history);
+    final genreCache = <String, List<String>>{};
 
     final rawPool = VodCatalogService.groupByShowStateless([
       ..._tasteBonusItems,
@@ -565,19 +651,27 @@ class XuperService extends ChangeNotifier {
     ].where((v) => v.backdrop.isNotEmpty || v.poster.isNotEmpty).toList());
 
     if (rawPool.isEmpty) return const [];
-    if (rawPool.length <= 6) return rawPool;
+    if (rawPool.length <= 6) {
+      _featuredCache[seed] = rawPool;
+      return rawPool;
+    }
 
     final activeSeed = seed != 0 ? seed : (taste.sessionCounter * 97 + 13);
     final ranked = _rankItems(
       rawPool,
       summary: summary,
       history: history,
+      completedIds: completedIds,
+      genreCache: genreCache,
       excludeCompletedOrAbandoned: true,
       seed: activeSeed,
       shuffleTopBand: seed != 0,
     );
 
-    if (ranked.length <= 6) return ranked;
+    if (ranked.length <= 6) {
+      _featuredCache[seed] = ranked;
+      return ranked;
+    }
 
     // Distribuir 6 slots del Hero respetando proporción real Película/Serie/Anime
     final movies = ranked.where((v) => !v.isSeries && !v.isAnime).toList();
@@ -636,7 +730,9 @@ class XuperService extends ChangeNotifier {
       if (selected.length >= 6) break;
       if (seen.add(it.id)) selected.add(it);
     }
-    return selected.take(6).toList();
+    final result = selected.take(6).toList();
+    _featuredCache[seed] = result;
+    return result;
   }
 
   Future<void> _syncLiveTvInBackground({bool forceRefresh = false}) async {

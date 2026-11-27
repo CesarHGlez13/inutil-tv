@@ -257,8 +257,10 @@ class InutixLicenseTicketService extends ChangeNotifier {
     DateTime Function()? clock,
     Map<String, String>? pinnedPublicKeysHex,
     String? endpointUrl,
+    this.integrityRetryDelay = const Duration(milliseconds: 300),
   })  : _http = httpClient ?? http.Client(),
         _integrityLoader = integrityLoader ?? _readPlatformIntegrityInfo,
+        _hasCustomIntegrityLoader = integrityLoader != null,
         _clock = clock ?? DateTime.now,
         _pinnedPublicKeysHex = Map<String, String>.unmodifiable(
           pinnedPublicKeysHex ?? _defaultPinnedPublicKeys(),
@@ -312,6 +314,8 @@ class InutixLicenseTicketService extends ChangeNotifier {
 
   final http.Client _http;
   final Future<InutixAppIntegrityInfo> Function() _integrityLoader;
+  final bool _hasCustomIntegrityLoader;
+  final Duration integrityRetryDelay;
   final DateTime Function() _clock;
   final Map<String, String> _pinnedPublicKeysHex;
   final String _endpointUrl;
@@ -335,10 +339,32 @@ class InutixLicenseTicketService extends ChangeNotifier {
   Map<String, String> get dynamicProfileVersions =>
       _verifiedPayload?.profileVersions ?? const <String, String>{};
 
+  static bool _isIntegrityComplete(InutixAppIntegrityInfo info) =>
+      info.packageName.isNotEmpty && info.hasCertificate;
+
   Future<InutixAppIntegrityInfo> getIntegrityInfo() async {
-    if (_cachedIntegrity != null) return _cachedIntegrity!;
-    final info = await _integrityLoader();
-    _cachedIntegrity = info;
+    final cached = _cachedIntegrity;
+    if (cached != null && _isIntegrityComplete(cached)) {
+      return cached;
+    }
+    var info = await _integrityLoader();
+    if (_isIntegrityComplete(info)) {
+      _cachedIntegrity = info;
+      return info;
+    }
+    // Cold-start race: Dart can invoke the MethodChannel milliseconds before
+    // configureFlutterEngine registers InutixAppIntegrityPlugin. Never cache an
+    // empty/incomplete snapshot; retry once after ~300 ms.
+    final shouldRetry =
+        _hasCustomIntegrityLoader || (!kIsWeb && Platform.isAndroid);
+    if (shouldRetry) {
+      await Future<void>.delayed(integrityRetryDelay);
+      info = await _integrityLoader();
+      if (_isIntegrityComplete(info)) {
+        _cachedIntegrity = info;
+        return info;
+      }
+    }
     return info;
   }
 

@@ -55,12 +55,12 @@ class InutixAppIntegrityPlugin(
         val certBytes: ByteArray? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val info = pm.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES)
             val signingInfo = info.signingInfo
-            val signatures = when {
-                signingInfo == null -> null
-                signingInfo.hasMultipleSigners() -> signingInfo.apkContentsSigners
-                else -> signingInfo.signingCertificateHistory
-            }
+            val signatures =
+                signingInfo?.apkContentsSigners?.takeIf { it.isNotEmpty() }
+                    ?: signingInfo?.signingCertificateHistory?.takeIf { it.isNotEmpty() }
             signatures?.firstOrNull()?.toByteArray()
+                ?: pm.getPackageInfo(packageName, PackageManager.GET_SIGNATURES)
+                    .signatures?.firstOrNull()?.toByteArray()
         } else {
             val info = pm.getPackageInfo(packageName, PackageManager.GET_SIGNATURES)
             info.signatures?.firstOrNull()?.toByteArray()

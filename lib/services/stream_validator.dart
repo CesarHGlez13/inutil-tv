@@ -279,11 +279,14 @@ class StreamValidator {
   }
 
   /// Normaliza un título para deduplicación estricta entre catálogos.
+  static final RegExp _reNormalizeParens = RegExp(r'\([^)]*\)|\[[^\]]*\]');
+  static final RegExp _reNormalizeNonAlnum = RegExp(r'[^a-z0-9]+');
+
   static String normalizeTitle(String title) {
     return stripAccents(title)
         .toLowerCase()
-        .replaceAll(RegExp(r'\([^)]*\)|\[[^\]]*\]'), ' ')
-        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .replaceAll(_reNormalizeParens, ' ')
+        .replaceAll(_reNormalizeNonAlnum, ' ')
         .trim();
   }
 

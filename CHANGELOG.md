@@ -1,5 +1,10 @@
 # Changelog — Inutix TV
 
+## 3.3.57 — 2026-11-27
+- **Reproducción 100 % fluida sin congelamientos:** Elimina las pausas periódicas de imagen que ocurrían durante películas y series mientras el audio seguía sonando, manteniendo tu progreso guardado sin interrumpir el video.
+- **Verificación de cuenta más confiable:** Corrige bloqueos falsos de «Sesión bloqueada» al iniciar la app en equipos Android recientes (incluyendo Samsung) y permite destrabar tu sesión de inmediato al pulsar «Comprobar Estado».
+- **Inicio y catálogo más ágiles:** Menor trabajo en segundo plano al navegar por tus recomendaciones y secciones principales.
+
 ## 3.3.56 — 2026-11-27
 - **Video sin congelamientos en Smart TV y Google TV:** Corrige pausas momentáneas de la imagen durante películas y series mientras el audio continuaba reproduciéndose normalmente.
 - **Reproducción más ligera en TV Box:** Menor uso de memoria y mayor fluidez sostenida en sesiones largas de reproducción.

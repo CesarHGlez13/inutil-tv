@@ -602,9 +602,25 @@ class TvTasteProfileService extends ChangeNotifier {
     return summary;
   }
 
+  /// Construye un conjunto O(1) de IDs completados para reutilizar en bucles
+  /// de ranking sin escanear `history` en cada ítem.
+  Set<String> completedIdSet({Iterable<WatchProgress>? history}) {
+    final out = <String>{..._completedIds.keys};
+    final hist = history ?? WatchHistory().items;
+    for (final h in hist) {
+      if (!h.isSeries && h.finished) out.add(h.id);
+    }
+    return out;
+  }
+
   /// Indica si un título ya fue completado por el usuario (película terminada o
   /// marcado en `_completedIds`).
-  bool isCompleted(VodItem item, {Iterable<WatchProgress>? history}) {
+  bool isCompleted(
+    VodItem item, {
+    Iterable<WatchProgress>? history,
+    Set<String>? completedIds,
+  }) {
+    if (completedIds != null) return completedIds.contains(item.id);
     if (_completedIds.containsKey(item.id)) return true;
     final hist = history ?? WatchHistory().items;
     for (final h in hist) {
@@ -627,9 +643,10 @@ class TvTasteProfileService extends ChangeNotifier {
   bool shouldExcludeFromDiscovery(
     VodItem item, {
     Iterable<WatchProgress>? history,
+    Set<String>? completedIds,
     DateTime? now,
   }) {
-    return isCompleted(item, history: history) ||
+    return isCompleted(item, history: history, completedIds: completedIds) ||
         isRecentlyAbandoned(item, now: now);
   }
 
@@ -639,6 +656,8 @@ class TvTasteProfileService extends ChangeNotifier {
     VodItem item, {
     TvTasteSummary? summary,
     Iterable<WatchProgress>? history,
+    Set<String>? completedIds,
+    Map<String, List<String>>? genreCache,
     bool applyImpressionPenalty = true,
     DateTime? now,
   }) {
@@ -646,7 +665,7 @@ class TvTasteProfileService extends ChangeNotifier {
     double score = 0.0;
 
     // 1. Afinidad por géneros canónicos
-    final genres = resolveGenresForItem(item);
+    final genres = resolveGenresForItem(item, cache: genreCache);
     if (genres.isNotEmpty && s.genreWeights.isNotEmpty) {
       var genreScore = 0.0;
       var matches = 0;
@@ -703,7 +722,7 @@ class TvTasteProfileService extends ChangeNotifier {
     }
 
     // 7. Penalizaciones: ya terminado / abandonado rápido / anti-repetición
-    if (isCompleted(item, history: history)) {
+    if (isCompleted(item, history: history, completedIds: completedIds)) {
       score -= 10.0;
     }
     if (isRecentlyAbandoned(item, now: now)) {
@@ -728,7 +747,14 @@ class TvTasteProfileService extends ChangeNotifier {
 
   /// Devuelve los géneros canónicos de un `VodItem`, combinando caché
   /// enriquecida + texto del ítem.
-  List<String> resolveGenresForItem(VodItem item) {
+  List<String> resolveGenresForItem(
+    VodItem item, {
+    Map<String, List<String>>? cache,
+  }) {
+    if (cache != null) {
+      final memo = cache[item.id];
+      if (memo != null) return memo;
+    }
     final cached = _enrichedGenres[item.id];
     final extracted = extractCanonicalGenres(
       genre: item.genre,
@@ -736,9 +762,18 @@ class TvTasteProfileService extends ChangeNotifier {
       title: item.title,
       isAnime: item.isAnime,
     );
-    if (cached == null || cached.isEmpty) return extracted;
-    if (extracted.isEmpty) return cached;
-    return {...cached, ...extracted}.toList();
+    final List<String> resolved;
+    if (cached == null || cached.isEmpty) {
+      resolved = extracted;
+    } else if (extracted.isEmpty) {
+      resolved = cached;
+    } else {
+      resolved = {...cached, ...extracted}.toList();
+    }
+    if (cache != null && item.id.isNotEmpty) {
+      cache[item.id] = resolved;
+    }
+    return resolved;
   }
 
   /// Exporta todo el perfil de gustos como JSON compacto para respaldo en nube.
@@ -819,13 +854,16 @@ class TvTasteProfileService extends ChangeNotifier {
     return 'noche';
   }
 
+  static final RegExp _reSubWord = RegExp(r'\bsub\b');
+  static final RegExp _reWhitespace = RegExp(r'\s+');
+
   static String normalizeAudioLang(String raw) {
     final l = _normalizeToken(raw);
     if (l.isEmpty) return '';
     if (l.contains('latino') || l.contains('lat ')) return 'latino';
     if (l.contains('subtitul') ||
         l.contains('sub espanol') ||
-        RegExp(r'\bsub\b').hasMatch(l) ||
+        _reSubWord.hasMatch(l) ||
         l.contains('vose') ||
         l.contains('ingles')) {
       return 'sub';
@@ -984,7 +1022,7 @@ class TvTasteProfileService extends ChangeNotifier {
       'ñ': 'n',
     };
     reps.forEach((k, v) => s = s.replaceAll(k, v));
-    return s.replaceAll(RegExp(r'\s+'), ' ');
+    return s.replaceAll(_reWhitespace, ' ');
   }
 
   void _appendEvent(TvTasteEvent event) {

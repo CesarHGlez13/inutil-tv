@@ -402,7 +402,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     _progressSaveTimer = Timer.periodic(
       const Duration(seconds: 15),
       (_) {
-        _saveCurrentProgress();
+        // Guardado silencioso durante reproducción: persiste en disco sin
+        // disparar rebuilds de HomeTab ni re-ranking síncrono de XuperService
+        // (que congelaban el hilo UI/video ~3s cada 15s en Smart TV).
+        unawaited(_saveCurrentProgress(notifyListeners: false));
         if (TvModeService.instance.isTv) {
           unawaited(_syncRemoteTvState());
         }
@@ -551,6 +554,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       setState(() => _isPlaying = p);
       if (!p) {
         _rebufferTimer?.cancel();
+        if (_hasVideo) {
+          unawaited(_saveCurrentProgress(notifyListeners: true));
+        }
       } else if (_hasVideo && _buffering && !_resolving && _error == null) {
         _armMidPlaybackRebufferWatchdog();
       }
@@ -1453,7 +1459,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
-  Future<void> _saveCurrentProgress({bool forceCompleted = false}) async {
+  Future<void> _saveCurrentProgress({
+    bool forceCompleted = false,
+    bool notifyListeners = true,
+  }) async {
     final item = widget.vodItem;
     if (item == null) return;
     final pos = _player.state.position.inSeconds.toDouble();
@@ -1468,6 +1477,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       episodeTitle: ep?.title ?? '',
       positionSec: forceCompleted && dur > 0 ? dur : pos,
       durationSec: dur > 0 ? dur : (pos + 60),
+      notify: notifyListeners,
     );
     if (forceCompleted) {
       _flushTasteSession(completed: true);

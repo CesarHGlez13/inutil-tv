@@ -194,6 +194,13 @@ class WatchHistory extends ChangeNotifier {
   }
 
   /// Registra/actualiza el progreso exacto de un título VOD.
+  ///
+  /// Cuando [notify] es `false` (guardado silencioso periódico durante
+  /// reproducción a pantalla completa), actualiza memoria y disco para no
+  /// perder el avance si la TV se apaga, pero evita despertar a pantallas
+  /// ocultas (`HomeTab`, `VodDetailModal`, `XuperService`) en mitad de un
+  /// fotograma de video. Al pausar, completar o cerrar el reproductor se llama
+  /// con `notify: true`.
   Future<void> record(
     VodItem item, {
     double positionSec = 0,
@@ -201,6 +208,7 @@ class WatchHistory extends ChangeNotifier {
     int seasonNumber = 1,
     int episodeNumber = 1,
     String episodeTitle = '',
+    bool notify = true,
   }) async {
     await load();
     if (item.id.isEmpty || item.title.isEmpty) return;
@@ -213,8 +221,9 @@ class WatchHistory extends ChangeNotifier {
 
     if (item.isSeries && durationSec > 0 && (positionSec / durationSec) >= 0.85) {
       final set = _watchedEpisodes.putIfAbsent(item.id, () => <String>{});
-      set.add('${seasonNumber}x$episodeNumber');
-      await _persistWatchedEpisodes();
+      if (set.add('${seasonNumber}x$episodeNumber')) {
+        await _persistWatchedEpisodes(triggerBackup: notify);
+      }
     }
 
     final entry = WatchProgress(
@@ -239,8 +248,10 @@ class WatchHistory extends ChangeNotifier {
     _cache.removeWhere((p) => p.id == item.id);
     _cache.insert(0, entry);
     if (_cache.length > _maxEntries) _cache = _cache.take(_maxEntries).toList();
-    notifyListeners();
-    await _persist();
+    if (notify) {
+      notifyListeners();
+    }
+    await _persist(triggerBackup: notify);
   }
 
   Future<void> remove(String id) async {
@@ -263,23 +274,27 @@ class WatchHistory extends ChangeNotifier {
     await load();
   }
 
-  Future<void> _persist() async {
+  Future<void> _persist({bool triggerBackup = true}) async {
     try {
       final sp = await SharedPreferences.getInstance();
       await sp.setString(
         _key,
         jsonEncode(_cache.map((p) => p.toJson()).toList()),
       );
-      InutilTvCloudBackupService.instance.schedulePush();
+      if (triggerBackup) {
+        InutilTvCloudBackupService.instance.schedulePush();
+      }
     } catch (_) {}
   }
 
-  Future<void> _persistWatchedEpisodes() async {
+  Future<void> _persistWatchedEpisodes({bool triggerBackup = true}) async {
     try {
       final sp = await SharedPreferences.getInstance();
       final encoded = _watchedEpisodes.map((k, v) => MapEntry(k, v.toList()));
       await sp.setString(_watchedEpsKey, jsonEncode(encoded));
-      InutilTvCloudBackupService.instance.schedulePush();
+      if (triggerBackup) {
+        InutilTvCloudBackupService.instance.schedulePush();
+      }
     } catch (_) {}
   }
 }
