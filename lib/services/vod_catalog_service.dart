@@ -6,6 +6,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/models.dart';
+import 'audio_language_priority.dart';
 import 'cuevana_poseidon_service.dart';
 import 'jkanime_service.dart';
 import 'pelisflix_service.dart';
@@ -806,12 +807,32 @@ class VodCatalogService {
   /// - Series: `SeriesKao` <-> `PoseidonHD2` <-> `PelisFlix`
   /// - Películas: `PoseidonHD2` <-> `PelisFlix`
   /// - Anime: `JKAnime` <-> `TioAnime`
+  static List<StreamSource> _mergePrioritizedSources(
+    List<StreamSource> primary,
+    List<StreamSource> secondary, {
+    required String desiredLang,
+  }) {
+    final seen = <String>{};
+    final merged = <StreamSource>[];
+    for (final s in [...primary, ...secondary]) {
+      if (seen.add(s.url)) merged.add(s);
+    }
+    return AudioLanguagePriority.prioritizeSources(
+      merged,
+      desiredLang: desiredLang,
+    );
+  }
+
   Future<List<StreamSource>> resolveAllPlaybackSources(
     VodItem item, [
     VodEpisode? episode,
     void Function(String status)? onStatus,
+    String? preferredAudioLang,
   ]) async {
     final sw = Stopwatch()..start();
+    final desired = AudioLanguagePriority.resolveDesiredAudioLang(
+      activeSessionLang: preferredAudioLang,
+    );
 
     // 1. Fuentes directas precargadas (clásicos / direct MP4)
     if (episode != null && episode.sources.isNotEmpty) {
@@ -819,7 +840,10 @@ class VodCatalogService {
           episode.sources.where((s) => !s.url.contains('pluto.tv')).toList();
       if (valid.isNotEmpty) {
         onStatus?.call('Enlace directo verificado...');
-        return valid;
+        return AudioLanguagePriority.prioritizeSources(
+          valid,
+          desiredLang: desired,
+        );
       }
     }
     if (episode == null && item.sources.isNotEmpty) {
@@ -827,7 +851,10 @@ class VodCatalogService {
           item.sources.where((s) => !s.url.contains('pluto.tv')).toList();
       if (valid.isNotEmpty) {
         onStatus?.call('Enlace directo verificado...');
-        return valid;
+        return AudioLanguagePriority.prioritizeSources(
+          valid,
+          desiredLang: desired,
+        );
       }
     }
 
@@ -846,8 +873,14 @@ class VodCatalogService {
           item,
           episode,
           onStatus: onStatus,
+          preferredAudioLang: desired,
         );
-        if (skSources.isNotEmpty) return skSources;
+        if (skSources.isNotEmpty) {
+          return AudioLanguagePriority.prioritizeSources(
+            skSources,
+            desiredLang: desired,
+          );
+        }
       }
 
       // 2b. Episodio específico de TioAnime -> probar TioAnime primero
@@ -892,6 +925,7 @@ class VodCatalogService {
     }
 
     // 2.5. Si el episodio fue completado desde un proveedor alterno, respetarlo primero
+    // (y si solo entregó un idioma distinto al deseado, rescatar Latino del otro proveedor).
     if (episode != null &&
         episode.provider == 'poseidon' &&
         item.provider != 'poseidon') {
@@ -902,8 +936,31 @@ class VodCatalogService {
           match,
           episode: episode,
           onStatus: onStatus,
+          preferredAudioLang: desired,
         );
-        if (cpSources.isNotEmpty) return cpSources;
+        if (cpSources.isNotEmpty) {
+          if (AudioLanguagePriority.hasDesiredLanguage(
+            cpSources,
+            desiredLang: desired,
+          )) {
+            return AudioLanguagePriority.prioritizeSources(
+              cpSources,
+              desiredLang: desired,
+            );
+          }
+          final skRescue = await _serieskao.resolveByTitleAndEpisode(
+            item.title,
+            episode.seasonNumber,
+            episode.episodeNumber,
+            onStatus: onStatus,
+            preferredAudioLang: desired,
+          );
+          return _mergePrioritizedSources(
+            skRescue,
+            cpSources,
+            desiredLang: desired,
+          );
+        }
       }
     } else if (episode != null &&
         episode.provider == 'serieskao' &&
@@ -913,8 +970,40 @@ class VodCatalogService {
         episode.seasonNumber,
         episode.episodeNumber,
         onStatus: onStatus,
+        preferredAudioLang: desired,
       );
-      if (skSources.isNotEmpty) return skSources;
+      if (skSources.isNotEmpty) {
+        if (AudioLanguagePriority.hasDesiredLanguage(
+          skSources,
+          desiredLang: desired,
+        )) {
+          return AudioLanguagePriority.prioritizeSources(
+            skSources,
+            desiredLang: desired,
+          );
+        }
+        final cpHits = await _poseidon.search(item.title);
+        final match = _pickBestMatch(cpHits, item.title, isSeries: true);
+        if (match != null) {
+          final cpRescue = await _poseidon.resolveAllStreamSources(
+            match,
+            episode: episode,
+            onStatus: onStatus,
+            preferredAudioLang: desired,
+          );
+          if (cpRescue.isNotEmpty) {
+            return _mergePrioritizedSources(
+              cpRescue,
+              skSources,
+              desiredLang: desired,
+            );
+          }
+        }
+        return AudioLanguagePriority.prioritizeSources(
+          skSources,
+          desiredLang: desired,
+        );
+      }
     }
 
     // 3. SeriesKao (Primario de Series) -> failover automático por episodio a PoseidonHD2!
@@ -923,15 +1012,26 @@ class VodCatalogService {
         item,
         episode,
         onStatus: onStatus,
+        preferredAudioLang: desired,
       );
-      if (skSources.isNotEmpty) {
+      if (skSources.isNotEmpty &&
+          AudioLanguagePriority.hasDesiredLanguage(
+            skSources,
+            desiredLang: desired,
+          )) {
         _health.recordSuccess(item.title, latencyMs: sw.elapsedMilliseconds);
-        return skSources;
+        return AudioLanguagePriority.prioritizeSources(
+          skSources,
+          desiredLang: desired,
+        );
       }
 
-      // Cross-provider failover hacia PoseidonHD2 para este episodio exacto
+      // Cross-provider failover / rescate de idioma (p. ej. si SeriesKao solo
+      // tuvo Subtitulado para este capítulo, buscar Latino en PoseidonHD2).
       onStatus?.call(
-        'Probando servidor alterno para "${item.title}" T${episode.seasonNumber}·E${episode.episodeNumber}...',
+        skSources.isEmpty
+            ? 'Probando servidor alterno para "${item.title}" T${episode.seasonNumber}·E${episode.episodeNumber}...'
+            : 'Buscando audio preferido para T${episode.seasonNumber}·E${episode.episodeNumber}...',
       );
       final cpHits = await _poseidon.search(item.title);
       final match = _pickBestMatch(cpHits, item.title, isSeries: true);
@@ -940,11 +1040,24 @@ class VodCatalogService {
           match,
           episode: episode,
           onStatus: onStatus,
+          preferredAudioLang: desired,
         );
         if (cpSources.isNotEmpty) {
           _health.recordSuccess(item.title, latencyMs: sw.elapsedMilliseconds);
-          return cpSources;
+          return _mergePrioritizedSources(
+            cpSources,
+            skSources,
+            desiredLang: desired,
+          );
         }
+      }
+
+      if (skSources.isNotEmpty) {
+        _health.recordSuccess(item.title, latencyMs: sw.elapsedMilliseconds);
+        return AudioLanguagePriority.prioritizeSources(
+          skSources,
+          desiredLang: desired,
+        );
       }
 
       _health.recordFailure(item.title);
@@ -957,12 +1070,41 @@ class VodCatalogService {
         item,
         episode: episode,
         onStatus: onStatus,
+        preferredAudioLang: desired,
       );
       if (cpSources.isNotEmpty) {
-        if (item.isSeries) {
-          _health.recordSuccess(item.title, latencyMs: sw.elapsedMilliseconds);
+        final hasPreferred = AudioLanguagePriority.hasDesiredLanguage(
+          cpSources,
+          desiredLang: desired,
+        );
+        if (hasPreferred || !item.isSeries || episode == null) {
+          if (item.isSeries) {
+            _health.recordSuccess(item.title, latencyMs: sw.elapsedMilliseconds);
+          }
+          return AudioLanguagePriority.prioritizeSources(
+            cpSources,
+            desiredLang: desired,
+          );
         }
-        return cpSources;
+
+        // Poseidon solo encontró otro idioma (ej. Subtitulado): rescatar el
+        // idioma preferido desde SeriesKao antes de caer a inglés.
+        onStatus?.call(
+          'Buscando audio preferido para T${episode.seasonNumber}·E${episode.episodeNumber}...',
+        );
+        final skRescue = await _serieskao.resolveByTitleAndEpisode(
+          item.title,
+          episode.seasonNumber,
+          episode.episodeNumber,
+          onStatus: onStatus,
+          preferredAudioLang: desired,
+        );
+        _health.recordSuccess(item.title, latencyMs: sw.elapsedMilliseconds);
+        return _mergePrioritizedSources(
+          skRescue,
+          cpSources,
+          desiredLang: desired,
+        );
       }
 
       // Cross-provider failover para SERIES (Ep 1, 2, 3...) -> SeriesKao!
@@ -972,10 +1114,14 @@ class VodCatalogService {
           episode.seasonNumber,
           episode.episodeNumber,
           onStatus: onStatus,
+          preferredAudioLang: desired,
         );
         if (skBackup.isNotEmpty) {
           _health.recordSuccess(item.title, latencyMs: sw.elapsedMilliseconds);
-          return skBackup;
+          return AudioLanguagePriority.prioritizeSources(
+            skBackup,
+            desiredLang: desired,
+          );
         }
         _health.recordFailure(item.title);
         return [];
@@ -991,7 +1137,12 @@ class VodCatalogService {
             match.slug,
             onStatus: onStatus,
           );
-          if (pfSources.isNotEmpty) return pfSources;
+          if (pfSources.isNotEmpty) {
+            return AudioLanguagePriority.prioritizeSources(
+              pfSources,
+              desiredLang: desired,
+            );
+          }
         }
       }
       return [];
@@ -1014,7 +1165,10 @@ class VodCatalogService {
       if (item.isSeries) {
         _health.recordSuccess(item.title, latencyMs: sw.elapsedMilliseconds);
       }
-      return pfSources;
+      return AudioLanguagePriority.prioritizeSources(
+        pfSources,
+        desiredLang: desired,
+      );
     }
 
     if (item.isSeries && episode != null) {
@@ -1023,10 +1177,14 @@ class VodCatalogService {
         episode.seasonNumber,
         episode.episodeNumber,
         onStatus: onStatus,
+        preferredAudioLang: desired,
       );
       if (skBackup.isNotEmpty) {
         _health.recordSuccess(item.title, latencyMs: sw.elapsedMilliseconds);
-        return skBackup;
+        return AudioLanguagePriority.prioritizeSources(
+          skBackup,
+          desiredLang: desired,
+        );
       }
     }
 
@@ -1038,11 +1196,15 @@ class VodCatalogService {
         match,
         episode: episode,
         onStatus: onStatus,
+        preferredAudioLang: desired,
       );
       if (cpRes.isNotEmpty && item.isSeries) {
         _health.recordSuccess(item.title, latencyMs: sw.elapsedMilliseconds);
       }
-      return cpRes;
+      return AudioLanguagePriority.prioritizeSources(
+        cpRes,
+        desiredLang: desired,
+      );
     }
 
     if (item.isSeries) _health.recordFailure(item.title);
@@ -1063,7 +1225,11 @@ class VodCatalogService {
     VodItem item, [
     VodEpisode? episode,
     void Function(String status)? onStatus,
+    String? preferredAudioLang,
   ]) async {
+    final desired = AudioLanguagePriority.resolveDesiredAudioLang(
+      activeSessionLang: preferredAudioLang,
+    );
     try {
       if (item.isAnime) {
         final epNum = episode?.episodeNumber ?? 1;
@@ -1083,8 +1249,14 @@ class VodCatalogService {
             match,
             episode: episode,
             onStatus: onStatus,
+            preferredAudioLang: desired,
           );
-          if (cpRes.isNotEmpty) return cpRes;
+          if (cpRes.isNotEmpty) {
+            return AudioLanguagePriority.prioritizeSources(
+              cpRes,
+              desiredLang: desired,
+            );
+          }
         }
         return const [];
       }
@@ -1096,8 +1268,14 @@ class VodCatalogService {
             episode.seasonNumber,
             episode.episodeNumber,
             onStatus: onStatus,
+            preferredAudioLang: desired,
           );
-          if (sk.isNotEmpty) return sk;
+          if (sk.isNotEmpty) {
+            return AudioLanguagePriority.prioritizeSources(
+              sk,
+              desiredLang: desired,
+            );
+          }
         } else {
           final cpHits = await _poseidon.search(item.title);
           final match = _pickBestMatch(cpHits, item.title, isSeries: true);
@@ -1106,8 +1284,14 @@ class VodCatalogService {
               match,
               episode: episode,
               onStatus: onStatus,
+              preferredAudioLang: desired,
             );
-            if (cpRes.isNotEmpty) return cpRes;
+            if (cpRes.isNotEmpty) {
+              return AudioLanguagePriority.prioritizeSources(
+                cpRes,
+                desiredLang: desired,
+              );
+            }
           }
         }
         return const [];
@@ -1122,7 +1306,12 @@ class VodCatalogService {
             match.slug,
             onStatus: onStatus,
           );
-          if (pfRes.isNotEmpty) return pfRes;
+          if (pfRes.isNotEmpty) {
+            return AudioLanguagePriority.prioritizeSources(
+              pfRes,
+              desiredLang: desired,
+            );
+          }
         }
       } else {
         final cpHits = await _poseidon.search(item.title);
@@ -1131,8 +1320,14 @@ class VodCatalogService {
           final cpRes = await _poseidon.resolveAllStreamSources(
             match,
             onStatus: onStatus,
+            preferredAudioLang: desired,
           );
-          if (cpRes.isNotEmpty) return cpRes;
+          if (cpRes.isNotEmpty) {
+            return AudioLanguagePriority.prioritizeSources(
+              cpRes,
+              desiredLang: desired,
+            );
+          }
         }
       }
     } catch (e) {

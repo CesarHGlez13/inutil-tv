@@ -81,7 +81,9 @@ class _TvRemoteSheetState extends State<TvRemoteSheet>
 
   // ── Trackpad gestual ──────────────────────────────────────────────────────
   Offset? _panStart;
-  static const double _swipeThreshold = 22.0;
+  DateTime? _lastTrackpadEmit;
+  static const double _swipeThreshold = 44.0;
+  static const Duration _trackpadCooldown = Duration(milliseconds: 120);
 
   // ── Keyboard Bridge ───────────────────────────────────────────────────────
   bool _keyboardMode = false;
@@ -276,16 +278,27 @@ class _TvRemoteSheetState extends State<TvRemoteSheet>
 
   void _onPanEnd(DragEndDetails _) => _panStart = null;
 
+  void _onPanCancel() => _panStart = null;
+
   void _onPanUpdate(DragUpdateDetails d) {
     if (_panStart == null) return;
     final delta = d.globalPosition - _panStart!;
     if (delta.distance < _swipeThreshold) return;
-    _panStart = d.globalPosition;
+    final now = DateTime.now();
+    if (_lastTrackpadEmit != null &&
+        now.difference(_lastTrackpadEmit!) < _trackpadCooldown) {
+      return;
+    }
     final dx = delta.dx.abs();
     final dy = delta.dy.abs();
-    if (dx > dy) {
+    // Exigir dirección claramente dominante para evitar disparos diagonales accidentales
+    if (dx >= dy * 1.35) {
+      _panStart = d.globalPosition;
+      _lastTrackpadEmit = now;
       _sendDpad(delta.dx > 0 ? 'right' : 'left');
-    } else {
+    } else if (dy >= dx * 1.35) {
+      _panStart = d.globalPosition;
+      _lastTrackpadEmit = now;
       _sendDpad(delta.dy > 0 ? 'down' : 'up');
     }
   }
@@ -561,7 +574,17 @@ class _TvRemoteSheetState extends State<TvRemoteSheet>
         IconButton(
           tooltip: 'Actualizar estado',
           icon: Icon(Icons.refresh_rounded, color: sub, size: 20),
-          onPressed: () => TvRemoteService.instance.refreshTvStateNow(),
+          onPressed: () {
+            if (TvRemoteService.instance.targetTvLanHost == null) {
+              unawaited(
+                TvRemoteService.instance
+                    .discoverTvLan()
+                    .then((_) => TvRemoteService.instance.refreshTvStateNow()),
+              );
+            } else {
+              unawaited(TvRemoteService.instance.refreshTvStateNow());
+            }
+          },
         ),
       ],
     );
@@ -908,6 +931,7 @@ class _TvRemoteSheetState extends State<TvRemoteSheet>
             onPanStart: _onPanStart,
             onPanUpdate: _onPanUpdate,
             onPanEnd: _onPanEnd,
+            onPanCancel: _onPanCancel,
             onTap: () => _sendDpad('center'),
             child: Center(
               child: Column(

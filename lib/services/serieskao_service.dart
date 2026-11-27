@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:pointycastle/export.dart' as pc;
 
 import '../models/models.dart';
+import 'audio_language_priority.dart';
 import 'cuevana_poseidon_service.dart';
 import 'remote_providers_config.dart';
 import 'stream_validator.dart';
@@ -373,15 +374,23 @@ class SeriesKaoService {
     VodItem item,
     VodEpisode episode, {
     void Function(String status)? onStatus,
+    String? preferredAudioLang,
   }) async {
     final slug = _cleanSlug(item);
     if (slug.isEmpty) return [];
 
-    final cacheKey = '${slug}_${episode.seasonNumber}x${episode.episodeNumber}';
+    final desired = AudioLanguagePriority.resolveDesiredAudioLang(
+      activeSessionLang: preferredAudioLang,
+    );
+    final cacheKey =
+        '${slug}_${episode.seasonNumber}x${episode.episodeNumber}_$desired';
     final cached = _streamCache[cacheKey];
     if (cached != null && DateTime.now().isBefore(cached.expiresAt)) {
       onStatus?.call('Preparando reproducción...');
-      return cached.sources;
+      return AudioLanguagePriority.prioritizeSources(
+        cached.sources,
+        desiredLang: desired,
+      );
     }
 
     try {
@@ -429,109 +438,123 @@ class SeriesKaoService {
       final embeds = extractDecryptedEmbeds(vidRes.body);
       if (embeds.isEmpty) return [];
 
-      // Ordenar: LAT primero -> ESP -> SUB; servidores sanos y más rápidos primero
-      embeds.sort((a, b) {
-        final langCmp =
-            _langPriority(a.language).compareTo(_langPriority(b.language));
-        if (langCmp != 0) return langCmp;
-        final pa = StreamHostHealth.instance.hostOrderPenalty(a.server);
-        final pb = StreamHostHealth.instance.hostOrderPenalty(b.server);
-        if (pa != pb) return pa.compareTo(pb);
-        return _hostPriority(a.server).compareTo(_hostPriority(b.server));
-      });
+      // Agrupar estrictamente por idioma (p. ej. LAT primero -> ESP -> SUB)
+      // para que un servidor en inglés/subtitulado JAMÁS compita en el mismo
+      // lote ni le gane por velocidad a uno en Latino.
+      final languageTiers = groupEmbedsByLanguageTier(
+        embeds,
+        desiredLang: desired,
+      );
 
       final cp = CuevanaPoseidonService();
-      final verifiedScored = <({StreamSource source, double score})>[];
+      final verifiedScored =
+          <({StreamSource source, double score, int langRank})>[];
       final timeoutFallbacks = <StreamSource>[];
       final seenUrls = <String>{};
 
-      // Carrera en lotes paralelos de 3 hosts con sonda real de velocidad (48 KB)
+      // Carrera en lotes paralelos de 3 hosts DENTRO del mismo idioma con
+      // sonda real de velocidad (48 KB). Solo baja al siguiente idioma si el
+      // idioma preferido no entregó ningún servidor sano.
       const batchSize = 3;
-      for (var i = 0; i < embeds.length && verifiedScored.isEmpty; i += batchSize) {
-        final batch = embeds.skip(i).take(batchSize).toList();
-        onStatus?.call(
-          'Verificando servidor (${batch.first.langLabel})...',
-        );
+      for (final tier in languageTiers) {
+        if (verifiedScored.isNotEmpty) break;
+        for (var i = 0; i < tier.length && verifiedScored.isEmpty; i += batchSize) {
+          final batch = tier.skip(i).take(batchSize).toList();
+          onStatus?.call(
+            'Verificando servidor (${batch.first.langLabel})...',
+          );
 
-        final probeScores = <String, double>{};
-        final batchResults =
-            await CuevanaPoseidonService.collectBatchWithFastWin(
-          batch.map((e) async {
-            List<StreamSource> extracted = const [];
-            if (e.server == 'vidhide') {
-              extracted = await cp.extractVidHideCandidates(
-                e.url,
-                label: 'HD · ${e.langLabel}',
-              );
-            } else if (e.server == 'streamwish') {
-              extracted = await cp.extractStreamWishCandidates(
-                e.url,
-                label: 'HD · ${e.langLabel}',
-              );
-            } else if (e.server == 'vidara') {
-              final s = await cp.extractVidara(
-                e.url,
-                label: 'HD · ${e.langLabel}',
-              );
-              if (s != null) extracted = [s];
-            }
-            if (extracted.isEmpty) {
-              return (null as StreamSource?, StreamValidationStatus.invalid);
-            }
-
-            StreamSource? timedOutCandidate;
-            for (final src in extracted) {
-              final probe = await StreamValidator.probeUrl(
-                src.url,
-                headers: src.headers,
-                timeout: const Duration(seconds: 7),
-                server: src.server,
-              );
-              if (probe.isValid) {
-                probeScores[src.url] = StreamHostHealth.instance.scoreFor(
-                  url: src.url,
-                  server: src.server,
-                  probeBytesPerSec: probe.bytesPerSec,
-                  latencyMs: probe.latencyMs,
+          final probeScores = <String, double>{};
+          final batchResults =
+              await CuevanaPoseidonService.collectBatchWithFastWin(
+            batch.map((e) async {
+              List<StreamSource> extracted = const [];
+              if (e.server == 'vidhide') {
+                extracted = await cp.extractVidHideCandidates(
+                  e.url,
+                  label: 'HD · ${e.langLabel}',
                 );
-                return (src, probe.status);
+              } else if (e.server == 'streamwish') {
+                extracted = await cp.extractStreamWishCandidates(
+                  e.url,
+                  label: 'HD · ${e.langLabel}',
+                );
+              } else if (e.server == 'vidara') {
+                final s = await cp.extractVidara(
+                  e.url,
+                  label: 'HD · ${e.langLabel}',
+                );
+                if (s != null) extracted = [s];
               }
-              if (probe.status == StreamValidationStatus.timeout &&
-                  timedOutCandidate == null) {
-                timedOutCandidate = src;
+              if (extracted.isEmpty) {
+                return (null as StreamSource?, StreamValidationStatus.invalid);
               }
-            }
-            if (timedOutCandidate != null) {
-              return (timedOutCandidate, StreamValidationStatus.timeout);
-            }
-            return (null as StreamSource?, StreamValidationStatus.invalid);
-          }).toList(growable: false),
-          graceWindow: const Duration(milliseconds: 900),
-        );
 
-        for (final (s, status) in batchResults) {
-          if (s == null || !seenUrls.add(s.url)) continue;
-          if (status == StreamValidationStatus.valid) {
-            verifiedScored.add((
-              source: s,
-              score: probeScores[s.url] ??
-                  StreamHostHealth.instance.scoreFor(
-                    url: s.url,
-                    server: s.server,
-                  ),
-            ));
-          } else if (status == StreamValidationStatus.timeout) {
-            timeoutFallbacks.add(s);
+              StreamSource? timedOutCandidate;
+              for (final src in extracted) {
+                final probe = await StreamValidator.probeUrl(
+                  src.url,
+                  headers: src.headers,
+                  timeout: const Duration(seconds: 7),
+                  server: src.server,
+                );
+                if (probe.isValid) {
+                  probeScores[src.url] = StreamHostHealth.instance.scoreFor(
+                    url: src.url,
+                    server: src.server,
+                    probeBytesPerSec: probe.bytesPerSec,
+                    latencyMs: probe.latencyMs,
+                  );
+                  return (src, probe.status);
+                }
+                if (probe.status == StreamValidationStatus.timeout &&
+                    timedOutCandidate == null) {
+                  timedOutCandidate = src;
+                }
+              }
+              if (timedOutCandidate != null) {
+                return (timedOutCandidate, StreamValidationStatus.timeout);
+              }
+              return (null as StreamSource?, StreamValidationStatus.invalid);
+            }).toList(growable: false),
+            graceWindow: const Duration(milliseconds: 900),
+          );
+
+          for (final (s, status) in batchResults) {
+            if (s == null || !seenUrls.add(s.url)) continue;
+            if (status == StreamValidationStatus.valid) {
+              verifiedScored.add((
+                source: s,
+                score: probeScores[s.url] ??
+                    StreamHostHealth.instance.scoreFor(
+                      url: s.url,
+                      server: s.server,
+                    ),
+                langRank: AudioLanguagePriority.rankForLabel(
+                  s.quality,
+                  desiredLang: desired,
+                ),
+              ));
+            } else if (status == StreamValidationStatus.timeout) {
+              timeoutFallbacks.add(s);
+            }
           }
         }
       }
 
-      verifiedScored.sort((a, b) => b.score.compareTo(a.score));
+      verifiedScored.sort((a, b) {
+        if (a.langRank != b.langRank) return a.langRank.compareTo(b.langRank);
+        return b.score.compareTo(a.score);
+      });
       final verified = verifiedScored.map((e) => e.source).toList();
+      final orderedFallbacks = AudioLanguagePriority.prioritizeSources(
+        timeoutFallbacks,
+        desiredLang: desired,
+      );
 
       final resolved = <StreamSource>[
         ...verified,
-        if (verified.length < 2) ...timeoutFallbacks,
+        if (verified.length < 2) ...orderedFallbacks,
       ];
 
       if (verified.isNotEmpty) {
@@ -554,6 +577,7 @@ class SeriesKaoService {
     int seasonNumber,
     int episodeNumber, {
     void Function(String status)? onStatus,
+    String? preferredAudioLang,
   }) async {
     onStatus
         ?.call('Buscando servidor alterno (T$seasonNumber·E$episodeNumber)...');
@@ -586,6 +610,7 @@ class SeriesKaoService {
         provider: 'serieskao',
       ),
       onStatus: onStatus,
+      preferredAudioLang: preferredAudioLang,
     );
   }
 
@@ -681,12 +706,42 @@ class SeriesKaoService {
     }
   }
 
-  static int _langPriority(String lang) => switch (lang.toUpperCase()) {
-        'LAT' => 0,
-        'ESP' => 1,
-        'SUB' => 2,
-        _ => 3,
-      };
+  /// Agrupa los embeds en niveles estrictos por idioma (sin mezclar nunca
+  /// Latino y Subtitulado en el mismo lote de carrera).
+  @visibleForTesting
+  static List<List<DecryptedEmbed>> groupEmbedsByLanguageTier(
+    List<DecryptedEmbed> embeds, {
+    String? desiredLang,
+  }) {
+    final order = AudioLanguagePriority.languageTierOrder(
+      desiredLang: desiredLang,
+    );
+    final buckets = <String, List<DecryptedEmbed>>{
+      for (final lang in order) lang: <DecryptedEmbed>[],
+      '': <DecryptedEmbed>[],
+    };
+
+    for (final e in embeds) {
+      final norm = AudioLanguagePriority.normalizeLanguage(e.language);
+      (buckets[norm] ?? buckets['']!).add(e);
+    }
+
+    int compareHost(DecryptedEmbed a, DecryptedEmbed b) {
+      final pa = StreamHostHealth.instance.hostOrderPenalty(a.server);
+      final pb = StreamHostHealth.instance.hostOrderPenalty(b.server);
+      if (pa != pb) return pa.compareTo(pb);
+      return _hostPriority(a.server).compareTo(_hostPriority(b.server));
+    }
+
+    final result = <List<DecryptedEmbed>>[];
+    for (final key in [...order, '']) {
+      final list = buckets[key]!;
+      if (list.isEmpty) continue;
+      list.sort(compareHost);
+      result.add(list);
+    }
+    return result;
+  }
 
   static int _hostPriority(String host) => switch (host) {
         'vidhide' => 0,
@@ -726,10 +781,11 @@ class DecryptedEmbed {
     required this.url,
   });
 
-  String get langLabel => switch (language.toUpperCase()) {
-        'LAT' => 'Latino',
-        'ESP' => 'Español',
-        'SUB' => 'Subtitulado',
+  String get langLabel =>
+      switch (AudioLanguagePriority.normalizeLanguage(language)) {
+        'latino' => 'Latino',
+        'espanol' => 'Español',
+        'sub' => 'Subtitulado',
         _ => language,
       };
 }

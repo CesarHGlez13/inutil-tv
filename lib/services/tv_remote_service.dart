@@ -170,7 +170,7 @@ class TvRemoteCommand {
   });
 
   bool get isFresh =>
-      DateTime.now().difference(createdAt).inSeconds.abs() <= 600;
+      DateTime.now().difference(createdAt).inSeconds.abs() <= 45;
 
   Map<String, dynamic> toFirestore() => {
         'commandId': commandId,
@@ -277,15 +277,138 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
   bool _pollingCommand = false;
   bool _pollingState = false;
   bool _discoveringLan = false;
-  String _lastHandledCommandId = '';
+  static const int _maxHandledCommandIds = 128;
+  final Set<String> _handledCommandIds = <String>{};
+  String _lastCloudCommandId = '';
+  DateTime _tvReceiverStartedAt = DateTime.fromMillisecondsSinceEpoch(0);
+  int _consecutiveLanFailures = 0;
   bool _started = false;
   String? _activeUid;
 
   HttpServer? _lanHttpServer;
   RawDatagramSocket? _lanUdpSocket;
+  HttpClient? _lanClient;
   DateTime? _lastFirestore429Time;
   String? _localTvIp;
   String? get localTvIp => _localTvIp;
+
+  /// Cliente HTTP dedicado al enlace LAN directo (keep-alive + siempre DIRECT,
+  /// jamás interceptado por proxy del sistema ni VPN).
+  HttpClient get _lanHttpClient {
+    final existing = _lanClient;
+    if (existing != null) return existing;
+    final c = HttpClient()
+      ..idleTimeout = const Duration(seconds: 30)
+      ..maxConnectionsPerHost = 4;
+    c.findProxy = (_) => 'DIRECT';
+    _lanClient = c;
+    return c;
+  }
+
+  void _resetLanHttpClient() {
+    final c = _lanClient;
+    _lanClient = null;
+    try {
+      c?.close(force: true);
+    } catch (_) {}
+  }
+
+  /// Determina si un comando recibido por la TV debe ejecutarse, evitando
+  /// cualquier re-ejecución fantasma entre LAN y Firestore.
+  @visibleForTesting
+  bool tryAcceptCommand(TvRemoteCommand cmd, {required bool fromCloud}) {
+    if (cmd.commandId.isEmpty || cmd.action.isEmpty) return false;
+    if (_handledCommandIds.contains(cmd.commandId)) {
+      if (fromCloud) _lastCloudCommandId = cmd.commandId;
+      return false;
+    }
+    if (fromCloud) {
+      if (cmd.commandId == _lastCloudCommandId) return false;
+      if (!cmd.isFresh) {
+        _lastCloudCommandId = cmd.commandId;
+        _rememberHandledCommand(cmd.commandId);
+        return false;
+      }
+      if (_tvReceiverStartedAt.millisecondsSinceEpoch > 0 &&
+          cmd.createdAt.isBefore(
+            _tvReceiverStartedAt.subtract(const Duration(seconds: 5)),
+          )) {
+        _lastCloudCommandId = cmd.commandId;
+        _rememberHandledCommand(cmd.commandId);
+        return false;
+      }
+      _lastCloudCommandId = cmd.commandId;
+    }
+    _rememberHandledCommand(cmd.commandId);
+    return true;
+  }
+
+  void _rememberHandledCommand(String commandId) {
+    _handledCommandIds.add(commandId);
+    while (_handledCommandIds.length > _maxHandledCommandIds) {
+      _handledCommandIds.remove(_handledCommandIds.first);
+    }
+  }
+
+  @visibleForTesting
+  void resetCommandDedupeForTest({DateTime? startedAt}) {
+    _handledCommandIds.clear();
+    _lastCloudCommandId = '';
+    _tvReceiverStartedAt =
+        startedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+  }
+
+  /// Elige la mejor IPv4 LAN privada (priorizando Wi-Fi / Ethernet sobre
+  /// interfaces virtuales, túneles VPN o datos móviles).
+  @visibleForTesting
+  static String? pickBestLanIpv4(
+    List<({String name, String address})> candidates,
+  ) {
+    String? best;
+    var bestScore = -1;
+    for (final c in candidates) {
+      final ip = c.address.trim();
+      if (ip.isEmpty || ip.startsWith('127.') || ip.startsWith('169.254.')) {
+        continue;
+      }
+      final iface = c.name.toLowerCase();
+      if (iface.startsWith('tun') ||
+          iface.startsWith('tap') ||
+          iface.startsWith('ppp') ||
+          iface.startsWith('rmnet') ||
+          iface.startsWith('v4-rmnet') ||
+          iface.startsWith('ccmni') ||
+          iface.startsWith('p2p') ||
+          iface.startsWith('dummy') ||
+          iface.startsWith('docker') ||
+          iface.startsWith('virbr') ||
+          iface.startsWith('lo')) {
+        continue;
+      }
+      final parts = ip.split('.');
+      if (parts.length != 4) continue;
+      final a = int.tryParse(parts[0]) ?? -1;
+      final b = int.tryParse(parts[1]) ?? -1;
+      final isPrivate192 = a == 192 && b == 168;
+      final isPrivate10 = a == 10;
+      final isPrivate172 = a == 172 && b >= 16 && b <= 31;
+      if (!isPrivate192 && !isPrivate10 && !isPrivate172) continue;
+
+      var score = isPrivate192 ? 30 : (isPrivate10 ? 20 : 10);
+      if (iface.startsWith('wlan') ||
+          iface.startsWith('wifi') ||
+          iface.startsWith('en0')) {
+        score += 100;
+      } else if (iface.startsWith('eth') || iface.startsWith('en')) {
+        score += 90;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = ip;
+      }
+    }
+    return best;
+  }
 
   String? _targetTvLanHost;
   String? get targetTvLanHost => _targetTvLanHost;
@@ -331,6 +454,7 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
   // Callbacks registrados por la Smart TV
   void Function(TvRemoteCommand cmd)? _launchHandler;
   void Function(TvRemoteCommand cmd)? _activePlayerHandler;
+  bool _activePlayerExclusiveDpad = false;
   void Function(TvRemoteCommand cmd)? _systemNavigationHandler;
 
   @visibleForTesting
@@ -374,8 +498,11 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void registerActivePlayerHandler(
-      void Function(TvRemoteCommand cmd)? handler) {
+    void Function(TvRemoteCommand cmd)? handler, {
+    bool exclusiveDpad = false,
+  }) {
     _activePlayerHandler = handler;
+    _activePlayerExclusiveDpad = handler != null && exclusiveDpad;
   }
 
   /// Quita el handler del reproductor **solo** si sigue siendo el de [handler].
@@ -391,6 +518,7 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
   ) {
     if (identical(_activePlayerHandler, handler)) {
       _activePlayerHandler = null;
+      _activePlayerExclusiveDpad = false;
     }
   }
 
@@ -454,6 +582,7 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
       _lanUdpSocket?.close();
     } catch (_) {}
     _lanUdpSocket = null;
+    _resetLanHttpClient();
     _tvState = _tvState.copyWith(
       online: false,
       isPlaying: false,
@@ -488,6 +617,7 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
       _lanUdpSocket?.close();
     } catch (_) {}
     _lanUdpSocket = null;
+    _resetLanHttpClient();
     final previousUid = _uid;
     if (TvModeService.instance.isTv &&
         previousUid != null &&
@@ -514,39 +644,71 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
   // 1. ROL SMART TV (servidor LAN local + publica presencia y ejecuta comandos)
   // ---------------------------------------------------------------------------
   void _startTvReceiver() {
+    _tvReceiverStartedAt = DateTime.now();
     _tvState = TvPlaybackState(
       online: true,
       tvDeviceId: InutilAuthService.instance.deviceId,
       tvName: 'Smart TV',
+      lanHost: _localTvIp ?? '',
       updatedAt: DateTime.now(),
     );
-    unawaited(_startLanServer());
-    unawaited(_publishTvState(_tvState));
+    // Inicia servidor LAN y publica inmediatamente con el lanHost real detectado
+    // para que cualquier celular en cualquier router doméstico conecte <5ms.
+    unawaited(_startLanServerAndPublish());
 
     _tvHeartbeatTimer?.cancel();
     _tvHeartbeatTimer = Timer.periodic(const Duration(seconds: 18), (_) {
-      unawaited(_publishTvState(_tvState));
+      unawaited(_publishTvHeartbeat());
     });
 
     _tvCommandPollTimer?.cancel();
     _tvPollTickCount = 0;
     _tvCommandPollTimer =
-        Timer.periodic(const Duration(milliseconds: 1500), (_) {
+        Timer.periodic(const Duration(milliseconds: 700), (_) {
       _maybeReprobeRelay();
       _tvPollTickCount++;
-      // Polling adaptativo: 1.5 s cuando hubo actividad de un celular en los
-      // últimos 2 min; en reposo sondea cada 6 s (ahorra ~75 % de red/CPU
-      // mientras los comandos LAN siguen entrando en <10 ms al instante).
-      final recentlyControlled = _lastRemoteActivityAt != null &&
-          DateTime.now().difference(_lastRemoteActivityAt!) <
-              const Duration(minutes: 2);
-      if (recentlyControlled || _tvPollTickCount % 4 == 0) {
+      final now = DateTime.now();
+      final lanActive = _lastLanActivityAt != null &&
+          now.difference(_lastLanActivityAt!) < const Duration(seconds: 20);
+      final cloudActive = _lastCloudActivityAt != null &&
+          now.difference(_lastCloudActivityAt!) < const Duration(seconds: 45);
+      // Si el túnel LAN está activo, sondear nube solo cada ~7s (ahorra cuota
+      // y evita interferir con LAN). Si el usuario controla vía nube (fuera de
+      // casa o AP Isolation), sondear cada 700ms para respuesta ágil.
+      final shouldPollCloud = lanActive
+          ? (_tvPollTickCount % 10 == 0)
+          : (cloudActive ? true : (_tvPollTickCount % 6 == 0));
+      if (shouldPollCloud) {
         unawaited(_pollIncomingCommand());
       }
     });
   }
 
-  DateTime? _lastRemoteActivityAt;
+  Future<void> _startLanServerAndPublish() async {
+    await _startLanServer();
+    if (_localTvIp != null && _localTvIp!.isNotEmpty) {
+      _tvState = _tvState.copyWith(
+        lanHost: _localTvIp!,
+        updatedAt: DateTime.now(),
+      );
+    }
+    await _publishTvState(_tvState);
+  }
+
+  Future<void> _publishTvHeartbeat() async {
+    if (_localTvIp == null || _localTvIp!.isEmpty) {
+      await _detectLocalTvIp();
+    }
+    if (_localTvIp != null &&
+        _localTvIp!.isNotEmpty &&
+        _tvState.lanHost != _localTvIp) {
+      _tvState = _tvState.copyWith(lanHost: _localTvIp!);
+    }
+    await _publishTvState(_tvState.copyWith(updatedAt: DateTime.now()));
+  }
+
+  DateTime? _lastLanActivityAt;
+  DateTime? _lastCloudActivityAt;
   int _tvPollTickCount = 0;
 
   /// Re-sonda del relay, colgada del tick de 1.5 s que ya existe.
@@ -597,15 +759,13 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
         type: InternetAddressType.IPv4,
         includeLinkLocal: false,
       );
-      for (final iface in interfaces) {
-        for (final addr in iface.addresses) {
-          if (!addr.isLoopback && !addr.address.startsWith('127.')) {
-            _localTvIp = addr.address;
-            break;
-          }
-        }
-        if (_localTvIp != null) break;
-      }
+      final candidates = <({String name, String address})>[
+        for (final iface in interfaces)
+          for (final addr in iface.addresses)
+            if (!addr.isLoopback) (name: iface.name, address: addr.address),
+      ];
+      _localTvIp = pickBestLanIpv4(candidates) ??
+          (candidates.isNotEmpty ? candidates.first.address : null);
       debugPrint(
           '📍 [TvRemoteService] IP LAN de Smart TV detectada: $_localTvIp');
     } catch (_) {}
@@ -731,7 +891,7 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
       }
       req.response.headers.contentType = ContentType.json;
       final map = _tvState.toFirestore();
-      _lastRemoteActivityAt = DateTime.now();
+      _lastLanActivityAt = DateTime.now();
       map['updatedAt'] =
           (_tvState.updatedAt ?? DateTime.now()).toIso8601String();
       req.response.write(jsonEncode({
@@ -760,17 +920,18 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
         final cmdId = json['commandId']?.toString() ?? _uuid.v4();
 
         if (action.isNotEmpty) {
-          _lastRemoteActivityAt = DateTime.now();
+          _lastLanActivityAt = DateTime.now();
           final cmd = TvRemoteCommand(
             commandId: cmdId,
             action: action,
             payload: payload,
             createdAt: DateTime.now(),
           );
-          _lastHandledCommandId = cmd.commandId;
-          debugPrint(
-              '⚡ [TvRemoteService] Comando LAN recibido en TV: $action (id: $cmdId)');
-          dispatchCommandLocally(cmd);
+          if (tryAcceptCommand(cmd, fromCloud: false)) {
+            debugPrint(
+                '⚡ [TvRemoteService] Comando LAN recibido en TV: $action (id: $cmdId)');
+            dispatchCommandLocally(cmd);
+          }
         }
 
         req.response.headers.contentType = ContentType.json;
@@ -882,15 +1043,10 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
       if (doc == null) return;
       final cmd = TvRemoteCommand.fromFirestore(doc);
       if (cmd == null) return;
-      if (cmd.commandId == _lastHandledCommandId) return;
-      if (!cmd.isFresh) {
-        _lastHandledCommandId = cmd.commandId;
-        return;
-      }
-      _lastHandledCommandId = cmd.commandId;
-      _lastRemoteActivityAt = DateTime.now();
+      if (!tryAcceptCommand(cmd, fromCloud: true)) return;
+      _lastCloudActivityAt = DateTime.now();
       debugPrint(
-          '📺 [TvRemoteService] Comando recibido en TV: ${cmd.action} (id: ${cmd.commandId})');
+          '📺 [TvRemoteService] Comando cloud recibido en TV: ${cmd.action} (id: ${cmd.commandId})');
       dispatchCommandLocally(cmd);
     } catch (e) {
       final err = e.toString();
@@ -919,20 +1075,32 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
     'stop',
   };
 
+  static const _playerNavActions = {
+    'dpad_up',
+    'dpad_down',
+    'dpad_left',
+    'dpad_right',
+    'dpad_center',
+    'select',
+    'back',
+  };
+
   /// Despacha un comando recibido hacia el handler de lanzamiento, reproductor o navegación.
   @visibleForTesting
   void dispatchCommandLocally(TvRemoteCommand cmd) {
     if (cmd.action == 'play_vod' || cmd.action == 'play_channel') {
       _launchHandler?.call(cmd);
     } else if (_activePlayerHandler != null &&
-        _playerActions.contains(cmd.action)) {
-      _activePlayerHandler?.call(cmd);
-    } else if (_activePlayerHandler != null &&
-        (cmd.action == 'back' || cmd.action == 'stop')) {
+        (_playerActions.contains(cmd.action) ||
+            cmd.action == 'back' ||
+            cmd.action == 'stop' ||
+            (_activePlayerExclusiveDpad &&
+                _playerNavActions.contains(cmd.action)))) {
       _activePlayerHandler?.call(cmd);
     } else {
-      // Si hay reproductor activo, también le notificamos por si puede reaccionar (ej. dpad)
-      _activePlayerHandler?.call(cmd);
+      if (!_activePlayerExclusiveDpad) {
+        _activePlayerHandler?.call(cmd);
+      }
       _systemNavigationHandler?.call(cmd);
     }
   }
@@ -965,6 +1133,27 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
     } catch (_) {}
   }
 
+  Future<bool> _tryPromoteLanHost(
+    String host, {
+    required String uid,
+    required String token,
+    int timeoutMs = 1200,
+  }) async {
+    final clean = host.trim();
+    if (clean.isEmpty) return false;
+    if (!await _pingLanHost(clean, accountToken: token, timeoutMs: timeoutMs)) {
+      return false;
+    }
+    _targetTvLanHost = clean;
+    _consecutiveLanFailures = 0;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_lanHostPrefKeyFor(uid), clean);
+    } catch (_) {}
+    notifyListeners();
+    return true;
+  }
+
   Future<void> discoverTvLan() async {
     if (disableLanDiscoveryForTest) return;
     if (_discoveringLan) return;
@@ -985,20 +1174,48 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
       // 1. Host en memoria o SharedPreferences (aislado por UID)
       final cachedHost = _targetTvLanHost ?? prefs.getString(prefKey);
       if (cachedHost != null && cachedHost.isNotEmpty) {
-        if (await _pingLanHost(cachedHost, accountToken: token)) {
-          _targetTvLanHost = cachedHost;
-          await prefs.setString(prefKey, cachedHost);
-          _discoveringLan = false;
-          notifyListeners();
+        if (await _tryPromoteLanHost(
+          cachedHost,
+          uid: uid,
+          token: token,
+          timeoutMs: 1100,
+        )) {
           return;
         } else {
-          // El host en caché ya no pertenece a esta cuenta o está fuera de línea
+          // El host en caché ya no pertenece a esta cuenta o cambió de IP DHCP
           _targetTvLanHost = null;
           await prefs.remove(prefKey);
         }
       }
 
-      // 2. Descubrimiento por broadcast UDP autenticado por cuenta
+      // 2. Host LAN publicado por la propia Smart TV en Firestore/Relay
+      //    (funciona en CUALQUIER router doméstico y CUALQUIER IP DHCP sin depender
+      //    de UDP broadcast ni IPs fijas).
+      var cloudHost = _tvState.lanHost.trim();
+      if (cloudHost.isEmpty) {
+        try {
+          final doc = await InutilFirestoreService.instance
+              .getDocument('users/$uid/tv_remote/state');
+          if (doc != null) {
+            final next = TvPlaybackState.fromFirestore(doc);
+            cloudHost = next.lanHost.trim();
+          }
+        } catch (_) {}
+      }
+      if (cloudHost.isNotEmpty && cloudHost != cachedHost) {
+        if (await _tryPromoteLanHost(
+          cloudHost,
+          uid: uid,
+          token: token,
+          timeoutMs: 1300,
+        )) {
+          debugPrint(
+              '🎯 [TvRemoteService] TV descubierta vía lanHost publicado: $cloudHost');
+          return;
+        }
+      }
+
+      // 3. Descubrimiento por broadcast UDP autenticado por cuenta (3 ráfagas)
       try {
         final socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
         socket.broadcastEnabled = true;
@@ -1021,90 +1238,94 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
         });
 
         final probeMsg = utf8.encode('INUTIL_TV_DISCOVER|$token');
+        final bcastTargets = <InternetAddress>{
+          InternetAddress('255.255.255.255'),
+        };
         try {
-          socket.send(probeMsg, InternetAddress('255.255.255.255'), lanUdpPort);
-        } catch (_) {}
-        try {
-          final interfaces =
-              await NetworkInterface.list(type: InternetAddressType.IPv4);
-          for (final iface in interfaces) {
-            for (final addr in iface.addresses) {
-              if (addr.address.startsWith('127.')) continue;
-              final parts = addr.address.split('.');
-              if (parts.length == 4) {
-                final bcast = '${parts[0]}.${parts[1]}.${parts[2]}.255';
-                socket.send(probeMsg, InternetAddress(bcast), lanUdpPort);
-              }
+          final interfaces = await NetworkInterface.list(
+            type: InternetAddressType.IPv4,
+            includeLinkLocal: false,
+          );
+          final localIp = pickBestLanIpv4([
+            for (final iface in interfaces)
+              for (final addr in iface.addresses)
+                if (!addr.isLoopback) (name: iface.name, address: addr.address),
+          ]);
+          if (localIp != null) {
+            final parts = localIp.split('.');
+            if (parts.length == 4) {
+              bcastTargets.add(
+                InternetAddress('${parts[0]}.${parts[1]}.${parts[2]}.255'),
+              );
             }
           }
         } catch (_) {}
 
+        void sendBurst() {
+          for (final dst in bcastTargets) {
+            try {
+              socket.send(probeMsg, dst, lanUdpPort);
+            } catch (_) {}
+          }
+        }
+
+        sendBurst();
+        final retry1 = Timer(const Duration(milliseconds: 250), () {
+          if (!completer.isCompleted) sendBurst();
+        });
+        final retry2 = Timer(const Duration(milliseconds: 550), () {
+          if (!completer.isCompleted) sendBurst();
+        });
+
         final foundHost = await completer.future.timeout(
-          const Duration(milliseconds: 1000),
+          const Duration(milliseconds: 1100),
           onTimeout: () => null,
         );
+        retry1.cancel();
+        retry2.cancel();
         socket.close();
 
         if (foundHost != null &&
-            await _pingLanHost(foundHost, accountToken: token)) {
-          _targetTvLanHost = foundHost;
-          await prefs.setString(prefKey, foundHost);
+            await _tryPromoteLanHost(
+              foundHost,
+              uid: uid,
+              token: token,
+              timeoutMs: 1100,
+            )) {
           debugPrint(
               '🎯 [TvRemoteService] TV de la misma cuenta descubierta vía UDP: $foundHost');
-          _discoveringLan = false;
-          notifyListeners();
           return;
         }
       } catch (e) {
         debugPrint('⚠️ [TvRemoteService] Error en broadcast UDP: $e');
       }
 
-      // 3. Barrido autenticado de IPs vecinas probables (solo acepta TV con el mismo token de cuenta)
+      // 4. Barrido completo rápido de la subred LAN /24 (1..254) por TCP connect
+      //    en lotes paralelos: encuentra la TV sin importar qué IP DHCP le dio el
+      //    router doméstico aunque el router bloquee UDP broadcast.
       try {
         final interfaces = await NetworkInterface.list(
           type: InternetAddressType.IPv4,
           includeLinkLocal: false,
         );
-        for (final iface in interfaces) {
-          for (final addr in iface.addresses) {
-            if (addr.address.startsWith('127.')) continue;
-            final parts = addr.address.split('.');
-            if (parts.length == 4) {
-              final prefix = '${parts[0]}.${parts[1]}.${parts[2]}';
-              final candidates = [
-                17,
-                2,
-                3,
-                4,
-                5,
-                10,
-                15,
-                16,
-                18,
-                20,
-                23,
-                24,
-                25,
-                30,
-                50,
-                100
-              ];
-              final futures = candidates
-                  .map((c) => _pingLanHost('$prefix.$c', accountToken: token));
-              final results = await Future.wait(futures);
-              for (int i = 0; i < results.length; i++) {
-                if (results[i]) {
-                  final found = '$prefix.${candidates[i]}';
-                  _targetTvLanHost = found;
-                  await prefs.setString(prefKey, found);
-                  debugPrint(
-                      '🎯 [TvRemoteService] TV de la misma cuenta descubierta vía barrido LAN: $found');
-                  _discoveringLan = false;
-                  notifyListeners();
-                  return;
-                }
-              }
-            }
+        final localIp = pickBestLanIpv4([
+          for (final iface in interfaces)
+            for (final addr in iface.addresses)
+              if (!addr.isLoopback) (name: iface.name, address: addr.address),
+        ]);
+        if (localIp != null) {
+          final found = await _scanSubnetForTv(
+            localIp: localIp,
+            accountToken: token,
+          );
+          if (found != null) {
+            _targetTvLanHost = found;
+            _consecutiveLanFailures = 0;
+            await prefs.setString(prefKey, found);
+            debugPrint(
+                '🎯 [TvRemoteService] TV de la misma cuenta descubierta vía barrido /24: $found');
+            notifyListeners();
+            return;
           }
         }
       } catch (_) {}
@@ -1113,15 +1334,73 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  Future<bool> _pingLanHost(String host, {required String accountToken}) async {
+  /// Escanea la subred `/24` completa (`1..254`, omitiendo la propia IP del
+  /// celular) buscando el puerto [lanHttpPort] abierto en lotes paralelos de 48
+  /// y validando únicamente los hosts que responden con el token de la cuenta.
+  Future<String?> _scanSubnetForTv({
+    required String localIp,
+    required String accountToken,
+  }) async {
+    final parts = localIp.split('.');
+    if (parts.length != 4) return null;
+    final prefix = '${parts[0]}.${parts[1]}.${parts[2]}';
+    final selfLastOctet = int.tryParse(parts[3]) ?? -1;
+
+    final hosts = <String>[
+      for (var i = 1; i <= 254; i++)
+        if (i != selfLastOctet) '$prefix.$i',
+    ];
+
+    const batchSize = 48;
+    for (var start = 0; start < hosts.length; start += batchSize) {
+      final end =
+          (start + batchSize < hosts.length) ? start + batchSize : hosts.length;
+      final batch = hosts.sublist(start, end);
+      final openHosts = await Future.wait(batch.map((ip) async {
+        Socket? sock;
+        try {
+          sock = await Socket.connect(
+            ip,
+            lanHttpPort,
+            timeout: const Duration(milliseconds: 260),
+          );
+          return ip;
+        } catch (_) {
+          return null;
+        } finally {
+          sock?.destroy();
+        }
+      }));
+      for (final ip in openHosts) {
+        if (ip == null) continue;
+        if (await _pingLanHost(
+          ip,
+          accountToken: accountToken,
+          timeoutMs: 900,
+        )) {
+          return ip;
+        }
+      }
+    }
+    return null;
+  }
+
+  Future<bool> _pingLanHost(
+    String host, {
+    required String accountToken,
+    int timeoutMs = 1000,
+  }) async {
     HttpClient? client;
     try {
       client = HttpClient()
-        ..connectionTimeout = const Duration(milliseconds: 500);
+        ..connectionTimeout = Duration(milliseconds: timeoutMs);
+      client.findProxy = (_) => 'DIRECT';
       final req = await client
           .getUrl(Uri.parse('http://$host:$lanHttpPort/api/tv/ping'));
       req.headers.set(lanAccountHeader, accountToken);
-      final resp = await req.close().timeout(const Duration(milliseconds: 700));
+      final resp = await req
+          .close()
+          .timeout(Duration(milliseconds: timeoutMs + 300));
       if (resp.statusCode == HttpStatus.ok) {
         final body = await utf8.decoder.bind(resp).join();
         final map = jsonDecode(body);
@@ -1150,15 +1429,14 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
 
       // 1. Intentar enlace directo por LAN de ultra-baja latencia (autenticado por cuenta)
       if (_targetTvLanHost != null) {
-        HttpClient? client;
         try {
-          client = HttpClient()
-            ..connectionTimeout = const Duration(milliseconds: 1000);
+          final client = _lanHttpClient
+            ..connectionTimeout = const Duration(milliseconds: 1200);
           final req = await client.getUrl(
               Uri.parse('http://$_targetTvLanHost:$lanHttpPort/api/tv/state'));
           req.headers.set(lanAccountHeader, token);
           final resp =
-              await req.close().timeout(const Duration(milliseconds: 1200));
+              await req.close().timeout(const Duration(milliseconds: 1500));
           if (resp.statusCode == HttpStatus.forbidden) {
             debugPrint(
                 '🔒 [TvRemoteService] TV en $_targetTvLanHost tiene otra cuenta iniciada (403). Desvinculando LAN.');
@@ -1175,6 +1453,7 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
             if (map['ok'] == true &&
                 _constantTimeEquals(remoteToken, token) &&
                 map['state'] is Map<String, dynamic>) {
+              _consecutiveLanFailures = 0;
               final stateData = Map<String, dynamic>.from(map['state'] as Map);
               stateData['updatedAt'] = DateTime.now().toIso8601String();
               stateData['online'] = true;
@@ -1187,6 +1466,7 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
           debugPrint(
               '⚠️ [TvRemoteService] Falló refresco LAN con $_targetTvLanHost: $e');
           lanCheckedAndFailed = true;
+          _resetLanHttpClient();
 
           // Si el puerto fue rechazado directamente (ECONNREFUSED / Connection refused),
           // significa que el dispositivo responde en la red pero la app InútilTV en la TV está CERRADA.
@@ -1207,9 +1487,12 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
             notifyListeners();
             return;
           }
+          _consecutiveLanFailures++;
+          if (_consecutiveLanFailures >= 2) {
+            _targetTvLanHost = null;
+            _consecutiveLanFailures = 0;
+          }
           unawaited(discoverTvLan());
-        } finally {
-          client?.close(force: true);
         }
       } else {
         unawaited(discoverTvLan());
@@ -1231,10 +1514,12 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
           if (doc != null) {
             final next = TvPlaybackState.fromFirestore(doc);
             if (next.lanHost.isNotEmpty && _targetTvLanHost != next.lanHost) {
-              if (await _pingLanHost(next.lanHost, accountToken: token)) {
-                _targetTvLanHost = next.lanHost;
-                final prefs = await SharedPreferences.getInstance();
-                await prefs.setString(_lanHostPrefKeyFor(uid), next.lanHost);
+              if (await _tryPromoteLanHost(
+                next.lanHost,
+                uid: uid,
+                token: token,
+                timeoutMs: 1200,
+              )) {
                 unawaited(refreshTvStateNow());
               }
             }
@@ -1285,12 +1570,19 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
     if (uid == null || uid.isEmpty || token == null) return false;
     final cmdId = _uuid.v4();
 
-    // 1. Prioridad: Despacho directo por LAN (sub-10ms, autenticado por cuenta)
+    // 1. Prioridad: Despacho directo por LAN (keep-alive DIRECT sub-5ms, autenticado por cuenta)
+    if (_targetTvLanHost == null && _tvState.lanHost.isNotEmpty) {
+      unawaited(_tryPromoteLanHost(
+        _tvState.lanHost,
+        uid: uid,
+        token: token,
+        timeoutMs: 1100,
+      ));
+    }
     if (_targetTvLanHost != null) {
-      HttpClient? client;
       try {
-        client = HttpClient()
-          ..connectionTimeout = const Duration(milliseconds: 1000);
+        final client = _lanHttpClient
+          ..connectionTimeout = const Duration(milliseconds: 1100);
         final req = await client.postUrl(
             Uri.parse('http://$_targetTvLanHost:$lanHttpPort/api/tv/command'));
         req.headers.contentType = ContentType.json;
@@ -1302,7 +1594,8 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
           'accountToken': token,
         }));
         final resp =
-            await req.close().timeout(const Duration(milliseconds: 1200));
+            await req.close().timeout(const Duration(milliseconds: 1400));
+        await resp.drain<void>();
         if (resp.statusCode == HttpStatus.forbidden) {
           debugPrint(
               '🔒 [TvRemote] Comando $action rechazado por TV en $_targetTvLanHost (otra cuenta).');
@@ -1313,18 +1606,25 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
           return false;
         }
         if (resp.statusCode == HttpStatus.ok) {
+          _consecutiveLanFailures = 0;
           debugPrint(
               '⚡ [TvRemote] Comando $action enviado por LAN a $_targetTvLanHost en <5ms');
-          Future.delayed(const Duration(milliseconds: 250), () {
-            unawaited(refreshTvStateNow());
-          });
+          if (!action.startsWith('dpad_') && !action.startsWith('keyboard_')) {
+            Future.delayed(const Duration(milliseconds: 250), () {
+              unawaited(refreshTvStateNow());
+            });
+          }
           return true;
         }
       } catch (e) {
         debugPrint('⚠️ [TvRemote] Falló envío LAN a $_targetTvLanHost: $e');
+        _resetLanHttpClient();
+        _consecutiveLanFailures++;
+        if (_consecutiveLanFailures >= 2) {
+          _targetTvLanHost = null;
+          _consecutiveLanFailures = 0;
+        }
         unawaited(discoverTvLan());
-      } finally {
-        client?.close(force: true);
       }
     }
 

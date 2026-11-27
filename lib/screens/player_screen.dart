@@ -9,6 +9,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../models/models.dart';
 import '../services/app_settings_service.dart';
 import '../services/artwork_cache_service.dart';
+import '../services/audio_language_priority.dart';
 import '../services/device_control_service.dart';
 import '../services/firebase_auth_service.dart';
 import '../services/fullscreen_playback_coordinator.dart';
@@ -264,30 +265,30 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _sessionTasteFlushed = false;
   String _activeAudioLang = '';
 
+  String get _desiredSessionAudioLang =>
+      AudioLanguagePriority.resolveDesiredAudioLang(
+        activeSessionLang: _activeAudioLang,
+      );
+
   List<Playable> _prioritizePlayablesByAudio(List<Playable> raw) {
     if (raw.length <= 1) return List<Playable>.of(raw);
-    final configured = AppSettingsService.instance.preferredAudioLang;
-    final desired = configured != 'auto'
-        ? configured
-        : TvTasteProfileService.instance.computeSummary().preferredAudio;
-    if (desired.isEmpty || desired == 'auto') return List<Playable>.of(raw);
-
-    final offline = <Playable>[];
-    final preferred = <Playable>[];
-    final others = <Playable>[];
-    for (final p in raw) {
-      final low = p.label.toLowerCase();
-      if (low.contains('sin conexión') ||
-          low.contains('sin conexion') ||
-          low.contains('offline')) {
-        offline.add(p);
-      } else if (TvTasteProfileService.normalizeAudioLang(p.label) == desired) {
-        preferred.add(p);
-      } else {
-        others.add(p);
-      }
-    }
-    return [...offline, ...preferred, ...others];
+    final desired = _desiredSessionAudioLang;
+    final indexed = <(int idx, int rank, Playable p)>[
+      for (var i = 0; i < raw.length; i++)
+        (
+          i,
+          AudioLanguagePriority.rankForLabel(
+            raw[i].label,
+            desiredLang: desired,
+          ),
+          raw[i],
+        ),
+    ];
+    indexed.sort((a, b) {
+      if (a.$2 != b.$2) return a.$2.compareTo(b.$2);
+      return a.$1.compareTo(b.$1);
+    });
+    return [for (final e in indexed) e.$3];
   }
 
   void _flushTasteSession({bool completed = false}) {
@@ -382,8 +383,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (TvModeService.instance.isTv) {
       // En Smart TV arrancamos en pantalla completa limpia (sin iconos encima)
       _showControls = false;
-      TvRemoteService.instance
-          .registerActivePlayerHandler(_handleRemoteCommand);
+      TvRemoteService.instance.registerActivePlayerHandler(
+        _handleRemoteCommand,
+        exclusiveDpad: true,
+      );
       unawaited(_syncRemoteTvState());
     } else {
       // En celular: si la TV estaba reproduciendo, la detenemos de inmediato para evitar sonido duplicado
@@ -411,8 +414,10 @@ class _PlayerScreenState extends State<PlayerScreen>
         }
         if (_isPlaying && _hasVideo) {
           _sessionWatchedSec += 15;
-          if (_current >= 0 && _current < _activePlayables.length) {
-            final detected = TvTasteProfileService.normalizeAudioLang(
+          if (_activeAudioLang.isEmpty &&
+              _current >= 0 &&
+              _current < _activePlayables.length) {
+            final detected = AudioLanguagePriority.normalizeLanguage(
               _activePlayables[_current].label,
             );
             if (detected.isNotEmpty) _activeAudioLang = detected;
@@ -748,12 +753,16 @@ class _PlayerScreenState extends State<PlayerScreen>
     final ep = _hasEpisodes ? widget.episodeList![_episodeIndex] : null;
     _showHudToast('Buscando un servidor más rápido...');
 
-    final altSources =
-        await VodCatalogService().resolveAlternativeProviderSources(item, ep);
+    final altSources = await VodCatalogService().resolveAlternativeProviderSources(
+      item,
+      ep,
+      null,
+      _desiredSessionAudioLang,
+    );
     if (!mounted || altSources.isEmpty) return false;
 
     final existingUrls = _activePlayables.map((p) => p.url).toSet();
-    final fresh = <Playable>[
+    final fresh = _prioritizePlayablesByAudio(<Playable>[
       for (final s in altSources)
         if (existingUrls.add(s.url))
           Playable(
@@ -762,7 +771,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             headers: s.headers,
             subtitles: s.subtitles,
           ),
-    ];
+    ]);
     if (fresh.isEmpty) return false;
 
     final startIndex = _activePlayables.length;
@@ -871,6 +880,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         NextEpisodePreloader.instance.preloadNext(
           item: item,
           nextEpisode: nextEp,
+          preferredAudioLang: _desiredSessionAudioLang,
         ),
       );
     });
@@ -1000,6 +1010,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   }) async {
     if (index < 0 || index >= _activePlayables.length) return;
     final playable = _activePlayables[index];
+    if (_activeAudioLang.isEmpty) {
+      final detected = AudioLanguagePriority.normalizeLanguage(playable.label);
+      if (detected.isNotEmpty) _activeAudioLang = detected;
+    }
     final publicLabel = PlayerScreen.publicServerLabel(index, playable.label);
     final isOfflineLocal =
         preloadedLocalUrl != null && publicLabel == 'Sin conexión';
@@ -1185,6 +1199,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           );
         }
       },
+      _desiredSessionAudioLang,
     );
 
     if (!mounted) return;
@@ -1244,8 +1259,11 @@ class _PlayerScreenState extends State<PlayerScreen>
 
     // 1. ¿Ya está PRECARGADO en segundo plano? ¡Salto instantáneo <300 ms!
     if (item != null) {
-      final preloaded =
-          NextEpisodePreloader.instance.consumeIfReady(item.id, ep);
+      final preloaded = NextEpisodePreloader.instance.consumeIfReady(
+        item.id,
+        ep,
+        preferredAudioLang: _desiredSessionAudioLang,
+      );
       if (preloaded != null && preloaded.sources.isNotEmpty) {
         setState(() {
           _episodeIndex = index;
@@ -1255,7 +1273,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           _nextOverlayDismissed = false;
           _tried.clear();
         });
-        _activePlayables = [
+        final rawPlayables = [
           for (final s in preloaded.sources)
             Playable(
               s.quality.isEmpty ? 'Servidor HD' : s.quality,
@@ -1264,18 +1282,26 @@ class _PlayerScreenState extends State<PlayerScreen>
               subtitles: s.subtitles,
             ),
         ];
+        _activePlayables = _prioritizePlayablesByAudio(rawPlayables);
         if (!applyInitialSeek) _initialSeekDone = true;
-        final mb = (preloaded.bytesCached / (1024 * 1024));
-        _showHudToast(
-          mb >= 0.5
-              ? '⚡ Ep. ${ep.episodeNumber} precargado (${mb.toStringAsFixed(1)} MB) · al instante'
-              : '⚡ Ep. ${ep.episodeNumber} listo al instante',
-        );
-        await _play(
-          0,
-          preloadedSessionId: preloaded.sessionId,
-          preloadedLocalUrl: preloaded.localProxyUrl,
-        );
+        final samePrimary = _activePlayables.isNotEmpty &&
+            _activePlayables.first.url == preloaded.sources.first.url;
+        if (samePrimary) {
+          final mb = (preloaded.bytesCached / (1024 * 1024));
+          _showHudToast(
+            mb >= 0.5
+                ? '⚡ Ep. ${ep.episodeNumber} precargado (${mb.toStringAsFixed(1)} MB) · al instante'
+                : '⚡ Ep. ${ep.episodeNumber} listo al instante',
+          );
+          await _play(
+            0,
+            preloadedSessionId: preloaded.sessionId,
+            preloadedLocalUrl: preloaded.localProxyUrl,
+          );
+        } else {
+          HlsStreamProxy.instance.releaseSession(preloaded.sessionId);
+          await _play(0);
+        }
         return;
       }
 
@@ -1342,7 +1368,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     });
 
     if (ep.sources.isNotEmpty) {
-      _activePlayables = [
+      _activePlayables = _prioritizePlayablesByAudio([
         for (final s in ep.sources)
           Playable(
             s.quality.isEmpty ? 'Servidor HD' : s.quality,
@@ -1350,7 +1376,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             headers: s.headers,
             subtitles: s.subtitles,
           ),
-      ];
+      ]);
       if (!applyInitialSeek) _initialSeekDone = true;
       await _play(0);
       return;
@@ -1375,6 +1401,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           );
         }
       },
+      _desiredSessionAudioLang,
     );
 
     if (!mounted) return;
@@ -3791,9 +3818,15 @@ class _PlayerScreenState extends State<PlayerScreen>
                       Navigator.pop(ctx);
                       final chosenLabel = _activePlayables[i].label;
                       final normLang =
-                          TvTasteProfileService.normalizeAudioLang(chosenLabel);
+                          AudioLanguagePriority.normalizeLanguage(chosenLabel);
                       if (normLang.isNotEmpty) {
+                        final changedLang = _activeAudioLang != normLang;
                         _activeAudioLang = normLang;
+                        if (changedLang && _hasNextEpisode) {
+                          NextEpisodePreloader.instance.cancel();
+                          _preloadTriggerTimer?.cancel();
+                          _preloadScheduledForCurrent = false;
+                        }
                         unawaited(
                           TvTasteProfileService.instance.recordAudioChoice(
                             chosenLabel,

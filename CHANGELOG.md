@@ -1,5 +1,10 @@
 # Changelog — Inutix TV
 
+## 3.3.58 — 2026-11-27
+- **Audio en Español Latino siempre prioritario en series:** Los episodios ahora respetan Latino como preferencia principal y mantienen el mismo idioma al pasar de un capítulo al siguiente (incluyendo la precarga automática), evitando saltos inesperados a inglés.
+- **Control remoto desde el celular sin movimientos fantasma:** Corrige el desplazamiento accidental a la derecha al usar el control móvil y mejora la precisión del panel táctil.
+- **Conexión rápida en el Wi‑Fi de cualquier casa:** El control remoto móvil descubre y enlaza tu Smart TV automáticamente en tu red local para responder al instante en todos los hogares.
+
 ## 3.3.57 — 2026-11-27
 - **Reproducción 100 % fluida sin congelamientos:** Elimina las pausas periódicas de imagen que ocurrían durante películas y series mientras el audio seguía sonando, manteniendo tu progreso guardado sin interrumpir el video.
 - **Verificación de cuenta más confiable:** Corrige bloqueos falsos de «Sesión bloqueada» al iniciar la app en equipos Android recientes (incluyendo Samsung) y permite destrabar tu sesión de inmediato al pulsar «Comprobar Estado».

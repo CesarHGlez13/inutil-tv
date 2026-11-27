@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../models/models.dart';
+import 'audio_language_priority.dart';
 import 'hls_stream_proxy.dart';
 import 'stream_validator.dart';
 import 'vod_catalog_service.dart';
@@ -73,6 +74,8 @@ class NextEpisodePreloader {
   int _generation = 0;
   PreloadedEpisodeBundle? _readyBundle;
   String _readyKey = '';
+  String _readyAudioLang = '';
+  String _inFlightAudioLang = '';
 
   static String _keyFor(String itemId, VodEpisode ep) =>
       '${itemId}_s${ep.seasonNumber}_e${ep.episodeNumber}';
@@ -81,12 +84,22 @@ class NextEpisodePreloader {
   Future<void> preloadNext({
     required VodItem item,
     required VodEpisode nextEpisode,
+    String? preferredAudioLang,
   }) async {
     final key = _keyFor(item.id, nextEpisode);
+    final desired = AudioLanguagePriority.resolveDesiredAudioLang(
+      activeSessionLang: preferredAudioLang,
+    );
 
-    // Si ya está listo o cargándose exactamente el mismo episodio, no repetir.
-    if (_readyKey == key && _readyBundle != null) return;
+    // Si ya está listo o cargándose exactamente el mismo episodio con el mismo
+    // idioma objetivo, no repetir.
+    if (_readyKey == key &&
+        _readyBundle != null &&
+        _readyAudioLang == desired) {
+      return;
+    }
     if (state.value.matches(item.id, nextEpisode) &&
+        _inFlightAudioLang == desired &&
         (state.value.phase == PreloadPhase.resolving ||
             state.value.phase == PreloadPhase.buffering)) {
       return;
@@ -95,6 +108,7 @@ class NextEpisodePreloader {
     // Cancelar precarga anterior y liberar su sesión de proxy
     cancel();
     final gen = ++_generation;
+    _inFlightAudioLang = desired;
     bool cancelled() => gen != _generation;
 
     final epLabel = item.isAnime
@@ -110,16 +124,18 @@ class NextEpisodePreloader {
     );
 
     try {
-      // 1. Resolver fuentes verificadas del siguiente episodio
-      final sources = nextEpisode.sources.isNotEmpty
+      // 1. Resolver fuentes verificadas del siguiente episodio en el idioma objetivo
+      final rawSources = nextEpisode.sources.isNotEmpty
           ? nextEpisode.sources
           : await VodCatalogService().resolveAllPlaybackSources(
               item,
               nextEpisode,
+              null,
+              desired,
             );
 
       if (cancelled()) return;
-      if (sources.isEmpty) {
+      if (rawSources.isEmpty) {
         state.value = NextEpisodePreloadState(
           phase: PreloadPhase.failed,
           itemId: item.id,
@@ -129,6 +145,11 @@ class NextEpisodePreloader {
         );
         return;
       }
+
+      final sources = AudioLanguagePriority.prioritizeSources(
+        rawSources,
+        desiredLang: desired,
+      );
 
       // 2. Registrar la fuente ganadora en el proxy local y pre-bufferizar 2–3 min
       final primary = sources.first;
@@ -206,6 +227,7 @@ class NextEpisodePreloader {
       // Incluso si el servidor no permitió prefetch completo, conservamos los
       // enlaces ya resueltos + proxy listo para cero tiempo de raspado.
       _readyKey = key;
+      _readyAudioLang = desired;
       _readyBundle = PreloadedEpisodeBundle(
         sessionId: reg.sessionId,
         localProxyUrl: reg.localUrl,
@@ -238,14 +260,29 @@ class NextEpisodePreloader {
     }
   }
 
-  /// Consume y devuelve el paquete precargado si coincide con [itemId] + [ep].
+  /// Consume y devuelve el paquete precargado si coincide con [itemId] + [ep]
+  /// (y con el idioma preferido si se especifica).
   /// El consumidor pasa a ser dueño de [PreloadedEpisodeBundle.sessionId].
-  PreloadedEpisodeBundle? consumeIfReady(String itemId, VodEpisode ep) {
+  PreloadedEpisodeBundle? consumeIfReady(
+    String itemId,
+    VodEpisode ep, {
+    String? preferredAudioLang,
+  }) {
     final key = _keyFor(itemId, ep);
     if (_readyKey != key || _readyBundle == null) return null;
+    if (preferredAudioLang != null && preferredAudioLang.trim().isNotEmpty) {
+      final desired = AudioLanguagePriority.resolveDesiredAudioLang(
+        activeSessionLang: preferredAudioLang,
+      );
+      if (_readyAudioLang.isNotEmpty && _readyAudioLang != desired) {
+        cancel();
+        return null;
+      }
+    }
     final bundle = _readyBundle;
     _readyBundle = null;
     _readyKey = '';
+    _readyAudioLang = '';
     state.value = const NextEpisodePreloadState();
     return bundle;
   }
@@ -253,10 +290,12 @@ class NextEpisodePreloader {
   /// Cancela cualquier precarga en curso y libera su sesión no consumida.
   void cancel() {
     _generation++;
+    _inFlightAudioLang = '';
     if (_readyBundle != null) {
       HlsStreamProxy.instance.releaseSession(_readyBundle!.sessionId);
       _readyBundle = null;
       _readyKey = '';
+      _readyAudioLang = '';
     }
     if (state.value.phase != PreloadPhase.idle) {
       state.value = const NextEpisodePreloadState();

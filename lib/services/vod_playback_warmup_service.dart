@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../models/models.dart';
+import 'audio_language_priority.dart';
 import 'hls_stream_proxy.dart';
 import 'offline_vault_service.dart';
 import 'stream_validator.dart';
@@ -117,16 +118,23 @@ class VodPlaybackWarmupService {
     required bool Function() cancelled,
   }) async {
     try {
-      final sources = (episode != null && episode.sources.isNotEmpty)
+      final desired = AudioLanguagePriority.resolveDesiredAudioLang();
+      final rawSources = (episode != null && episode.sources.isNotEmpty)
           ? episode.sources
           : (episode == null && item.sources.isNotEmpty)
               ? item.sources
               : await VodCatalogService().resolveAllPlaybackSources(
                   item,
                   episode,
+                  null,
+                  desired,
                 );
-      if (cancelled() || sources.isEmpty) return null;
+      if (cancelled() || rawSources.isEmpty) return null;
 
+      final sources = AudioLanguagePriority.prioritizeSources(
+        rawSources,
+        desiredLang: desired,
+      );
       final primary = sources.first;
       final lowerUrl = primary.url.toLowerCase();
       final isHls = StreamValidator.needsLocalHlsProxy(primary.url) ||

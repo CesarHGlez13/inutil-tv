@@ -315,49 +315,66 @@ class _MainScaffoldState extends State<MainScaffold> {
     } catch (_) {}
   }
 
+  bool _ensureTvFocusForDirection(TraversalDirection dir) {
+    final focus = FocusManager.instance.primaryFocus;
+    final hasLeafFocus = focus != null &&
+        focus != FocusManager.instance.rootScope &&
+        focus is! FocusScopeNode;
+    if (hasLeafFocus) return false;
+    if (dir == TraversalDirection.left) {
+      _focusTvRail();
+    } else {
+      _focusTvContent();
+    }
+    return true;
+  }
+
   /// Ejecuta acciones del control remoto móvil sobre la navegación y menú de la Smart TV.
   void _handleRemoteNavigation(TvRemoteCommand cmd) {
     if (!mounted) return;
     debugPrint('📺 [MainScaffold] Ejecutando navegación remota: ${cmd.action}');
     switch (cmd.action) {
       case 'dpad_up':
-        if (FocusManager.instance.primaryFocus == null) _focusTvRail();
-        final moved = FocusManager.instance.primaryFocus
-                ?.focusInDirection(TraversalDirection.up) ??
-            false;
-        if (!moved) _simulateKey(LogicalKeyboardKey.arrowUp);
+        if (_ensureTvFocusForDirection(TraversalDirection.up)) break;
+        FocusManager.instance.primaryFocus
+            ?.focusInDirection(TraversalDirection.up);
         break;
       case 'dpad_down':
-        if (FocusManager.instance.primaryFocus == null) _focusTvRail();
-        final moved = FocusManager.instance.primaryFocus
-                ?.focusInDirection(TraversalDirection.down) ??
-            false;
-        if (!moved) _simulateKey(LogicalKeyboardKey.arrowDown);
+        if (_ensureTvFocusForDirection(TraversalDirection.down)) break;
+        FocusManager.instance.primaryFocus
+            ?.focusInDirection(TraversalDirection.down);
         break;
       case 'dpad_left':
-        if (FocusManager.instance.primaryFocus == null) _focusTvRail();
-        final moved = FocusManager.instance.primaryFocus
+        if (_ensureTvFocusForDirection(TraversalDirection.left)) break;
+        final movedLeft = FocusManager.instance.primaryFocus
                 ?.focusInDirection(TraversalDirection.left) ??
             false;
-        if (!moved) _simulateKey(LogicalKeyboardKey.arrowLeft);
+        if (!movedLeft &&
+            !_tvRailContainerNode.hasFocus &&
+            !(Navigator.maybeOf(context)?.canPop() ?? false)) {
+          _focusTvRail();
+        }
         break;
       case 'dpad_right':
-        if (FocusManager.instance.primaryFocus == null) _focusTvRail();
-        final moved = FocusManager.instance.primaryFocus
-                ?.focusInDirection(TraversalDirection.right) ??
-            false;
-        if (!moved || _tvRailContainerNode.hasFocus) {
+        if (_ensureTvFocusForDirection(TraversalDirection.right)) break;
+        if (_tvRailContainerNode.hasFocus &&
+            !(Navigator.maybeOf(context)?.canPop() ?? false)) {
           _focusTvContent();
+          break;
         }
-        if (!moved) _simulateKey(LogicalKeyboardKey.arrowRight);
+        FocusManager.instance.primaryFocus
+            ?.focusInDirection(TraversalDirection.right);
         break;
       case 'dpad_center':
       case 'select':
         final focus = FocusManager.instance.primaryFocus;
-        if (focus != null && focus.context != null) {
+        if (focus != null &&
+            focus != FocusManager.instance.rootScope &&
+            focus is! FocusScopeNode &&
+            focus.context != null) {
           Actions.invoke(focus.context!, const ActivateIntent());
         } else {
-          _simulateKey(LogicalKeyboardKey.select);
+          _focusTvContent();
         }
         break;
       // «Detener» desde el mando del celular: sale del contenido y devuelve la

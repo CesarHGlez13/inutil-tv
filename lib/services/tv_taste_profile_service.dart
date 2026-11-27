@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/models.dart';
+import 'audio_language_priority.dart';
 import 'inutil_cloud_backup_service.dart';
 import 'my_list_service.dart';
 import 'watch_history.dart';
@@ -854,25 +855,10 @@ class TvTasteProfileService extends ChangeNotifier {
     return 'noche';
   }
 
-  static final RegExp _reSubWord = RegExp(r'\bsub\b');
   static final RegExp _reWhitespace = RegExp(r'\s+');
 
-  static String normalizeAudioLang(String raw) {
-    final l = _normalizeToken(raw);
-    if (l.isEmpty) return '';
-    if (l.contains('latino') || l.contains('lat ')) return 'latino';
-    if (l.contains('subtitul') ||
-        l.contains('sub espanol') ||
-        _reSubWord.hasMatch(l) ||
-        l.contains('vose') ||
-        l.contains('ingles')) {
-      return 'sub';
-    }
-    if (l.contains('castellano') || l.contains('espana')) {
-      return 'espanol';
-    }
-    return '';
-  }
+  static String normalizeAudioLang(String raw) =>
+      AudioLanguagePriority.normalizeLanguage(raw);
 
   /// Extrae géneros canónicos filtrando ruido de proveedores (`Serie`,
   /// `Latino`, `Sub Español`, `HD`). Si el campo `genre` viene genérico,
