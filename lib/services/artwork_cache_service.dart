@@ -8,6 +8,8 @@ import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'tv_mode_service.dart';
+
 /// Nivel de tamaño objetivo para optimizar URLs de CDN (p. ej. TMDB)
 /// y reducir drásticamente los bytes descargados y la memoria GPU.
 enum ArtworkTier {
@@ -288,14 +290,21 @@ class ArtworkCacheService {
     }
   }
 
+  int get _effectiveMaxRamBytes =>
+      TvModeService.instance.isTv ? 18 * 1024 * 1024 : _maxRamBytes;
+  int get _effectiveMaxRamEntries =>
+      TvModeService.instance.isTv ? 110 : _maxRamEntries;
+
   void _putRam(String key, Uint8List bytes) {
     final prev = _ram.remove(key);
     if (prev != null) _ramBytes -= prev.length;
 
-    if (bytes.length > _maxRamBytes ~/ 2) return;
+    final maxBytes = _effectiveMaxRamBytes;
+    final maxEntries = _effectiveMaxRamEntries;
+    if (bytes.length > maxBytes ~/ 2) return;
 
-    while ((_ram.length >= _maxRamEntries ||
-            _ramBytes + bytes.length > _maxRamBytes) &&
+    while ((_ram.length >= maxEntries ||
+            _ramBytes + bytes.length > maxBytes) &&
         _ram.isNotEmpty) {
       final oldestKey = _ram.keys.first;
       final removed = _ram.remove(oldestKey);

@@ -10,6 +10,186 @@ import 'network_config_service.dart';
 ///   lentas para conservar el candidato como respaldo si ningún otro ganó rápido).
 enum StreamValidationStatus { valid, invalid, timeout }
 
+/// Resultado detallado de sonda con telemetría real de velocidad y latencia.
+class StreamProbeResult {
+  final StreamValidationStatus status;
+  final int latencyMs;
+  final double bytesPerSec;
+  final int bytesRead;
+
+  const StreamProbeResult({
+    required this.status,
+    this.latencyMs = 0,
+    this.bytesPerSec = 0,
+    this.bytesRead = 0,
+  });
+
+  bool get isValid => status == StreamValidationStatus.valid;
+}
+
+class _HostStats {
+  double ewmaBytesPerSec = 0;
+  int stallCount = 0;
+  DateTime? penalizedUntil;
+  DateTime lastUpdated = DateTime.now();
+}
+
+/// Monitor en memoria de salud y velocidad real por CDN/servidor de video.
+///
+/// Aprende en tiempo real qué hosts responden lento o se traban durante la
+/// reproducción (p. ej. nodos saturados con throttling `sp=500`) y los degrada
+/// automáticamente al final de la cola para que las películas y episodios
+/// elijan primero los servidores rápidos y fluidos.
+class StreamHostHealth {
+  StreamHostHealth._();
+  static final StreamHostHealth instance = StreamHostHealth._();
+
+  static const Duration _penaltyDuration = Duration(minutes: 12);
+  static const double _slowThresholdBytesPerSec = 180 * 1024; // 180 KB/s
+
+  final Map<String, _HostStats> _byHost = {};
+  final Map<String, _HostStats> _byServer = {};
+
+  static String _hostKey(String url) {
+    final host = Uri.tryParse(url)?.host.toLowerCase() ?? '';
+    if (host.isEmpty) return '';
+    // Agrupar subdominios aleatorios del mismo CDN (ej. h85xxx.acek-cdn.com -> acek-cdn.com)
+    final parts = host.split('.');
+    if (parts.length >= 3) {
+      return '${parts[parts.length - 2]}.${parts.last}';
+    }
+    return host;
+  }
+
+  void recordThroughput(
+    String url, {
+    required int bytes,
+    required int elapsedMs,
+    String? server,
+  }) {
+    if (bytes < 4096 || elapsedMs <= 0) return;
+    final sample = (bytes * 1000.0) / elapsedMs;
+    final now = DateTime.now();
+
+    void update(Map<String, _HostStats> map, String key) {
+      if (key.isEmpty) return;
+      final st = map.putIfAbsent(key, _HostStats.new);
+      st.ewmaBytesPerSec = st.ewmaBytesPerSec <= 0
+          ? sample
+          : (st.ewmaBytesPerSec * 0.6 + sample * 0.4);
+      st.lastUpdated = now;
+      if (sample >= _slowThresholdBytesPerSec * 1.5 && st.stallCount > 0) {
+        st.stallCount = (st.stallCount - 1).clamp(0, 10);
+        if (st.stallCount == 0) st.penalizedUntil = null;
+      } else if (bytes >= 32 * 1024 && sample < _slowThresholdBytesPerSec) {
+        // Transferencia sostenida por debajo de 180 KB/s: marcar como lento
+        st.stallCount = (st.stallCount + 1).clamp(0, 10);
+        st.penalizedUntil = now.add(_penaltyDuration);
+      }
+    }
+
+    update(_byHost, _hostKey(url));
+    if (server != null && server.isNotEmpty) {
+      update(_byServer, server.toLowerCase());
+    }
+  }
+
+  void recordStallOrTimeout(String url, {String? server}) {
+    final now = DateTime.now();
+    void penalize(Map<String, _HostStats> map, String key) {
+      if (key.isEmpty) return;
+      final st = map.putIfAbsent(key, _HostStats.new);
+      st.stallCount = (st.stallCount + 1).clamp(0, 10);
+      st.penalizedUntil = now.add(_penaltyDuration);
+      st.lastUpdated = now;
+    }
+
+    penalize(_byHost, _hostKey(url));
+    if (server != null && server.isNotEmpty) {
+      penalize(_byServer, server.toLowerCase());
+    }
+  }
+
+  bool isHostPenalized(String url, {String? server}) {
+    final now = DateTime.now();
+    final h = _byHost[_hostKey(url)];
+    if (h?.penalizedUntil != null && now.isBefore(h!.penalizedUntil!)) {
+      return true;
+    }
+    if (server != null && server.isNotEmpty) {
+      final s = _byServer[server.toLowerCase()];
+      if (s?.penalizedUntil != null && now.isBefore(s!.penalizedUntil!)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Penalización numérica para ordenar hosts candidatos antes de raspar
+  /// (0 = sano/rápido, positivo = degradado por cortes recientes).
+  int hostOrderPenalty(String server) {
+    final now = DateTime.now();
+    final st = _byServer[server.toLowerCase()];
+    if (st == null) return 0;
+    if (st.penalizedUntil != null && now.isBefore(st.penalizedUntil!)) {
+      return 100 + st.stallCount * 10;
+    }
+    if (st.ewmaBytesPerSec > 0 && st.ewmaBytesPerSec < _slowThresholdBytesPerSec) {
+      return 50;
+    }
+    return 0;
+  }
+
+  /// Puntaje compuesto de calidad de red (mayor = mejor/más rápido).
+  double scoreFor({
+    required String url,
+    String? server,
+    double probeBytesPerSec = 0,
+    int latencyMs = 0,
+  }) {
+    var score = 0.0;
+    final penalized = isHostPenalized(url, server: server);
+    if (penalized) score -= 5000.0;
+
+    final hStats = _byHost[_hostKey(url)];
+    final sStats = (server != null && server.isNotEmpty)
+        ? _byServer[server.toLowerCase()]
+        : null;
+
+    final knownSpeed = hStats != null && hStats.ewmaBytesPerSec > 0
+        ? hStats.ewmaBytesPerSec
+        : (sStats != null && sStats.ewmaBytesPerSec > 0
+            ? sStats.ewmaBytesPerSec
+            : probeBytesPerSec);
+
+    if (knownSpeed > 0) {
+      // Escala en KB/s (ej. 1400 KB/s -> +1400, 100 KB/s -> +100)
+      score += (knownSpeed / 1024.0).clamp(0.0, 4000.0);
+      if (knownSpeed < _slowThresholdBytesPerSec) {
+        score -= 1200.0;
+      }
+    }
+
+    if (latencyMs > 0) {
+      score -= (latencyMs / 10.0).clamp(0.0, 800.0);
+    }
+
+    // Heurística conocida: enlaces con throttling explícito `&sp=500` de VidHide
+    // suelen saturarse en hora pico frente a StreamWish / Vidara.
+    final lower = url.toLowerCase();
+    if (lower.contains('acek-cdn.com') || lower.contains('&sp=500')) {
+      score -= 350.0;
+    }
+
+    return score;
+  }
+
+  void resetForTest() {
+    _byHost.clear();
+    _byServer.clear();
+  }
+}
+
 /// Validador real de streams de video (HLS / MP4 / MPEG-TS) para InútilTV.
 ///
 /// Resuelve el problema clásico de "pantalla negra en 0:00": muchos servidores
@@ -264,12 +444,35 @@ class StreamValidator {
     int depth = 0,
     HttpClient? sharedClient,
   }) async {
+    final res = await probeUrl(
+      url,
+      headers: headers,
+      timeout: timeout,
+      depth: depth,
+      sharedClient: sharedClient,
+    );
+    return res.status;
+  }
+
+  /// Sonda de validación + velocidad real: además de comprobar bytes multimedia
+  /// reales (rechazando HTML/DMCA/404), mide latencia y velocidad de descarga
+  /// de una muestra real del segmento (hasta 48 KB) para detectar servidores
+  /// lentos o saturados y priorizar los más rápidos.
+  static Future<StreamProbeResult> probeUrl(
+    String url, {
+    Map<String, String> headers = const {},
+    Duration timeout = const Duration(seconds: 8),
+    int depth = 0,
+    HttpClient? sharedClient,
+    String? server,
+  }) async {
     if (depth > 3 || !url.startsWith('http')) {
-      return StreamValidationStatus.invalid;
+      return const StreamProbeResult(status: StreamValidationStatus.invalid);
     }
 
     final ownsClient = sharedClient == null;
     final client = sharedClient ?? _validationClient(timeout);
+    final totalSw = Stopwatch()..start();
 
     try {
       final uri = Uri.parse(url);
@@ -286,17 +489,28 @@ class StreamValidator {
           lowerUrl.contains('/playlist');
       // No enviar Range en playlists .m3u8/.txt (algunos CDNs devuelven 416/403).
       if (!looksLikePlaylistUrl) {
-        req.headers.set('Range', 'bytes=0-16383');
+        req.headers.set('Range', 'bytes=0-49151');
       }
 
       final res = await req.close().timeout(timeout);
       if (res.statusCode < 200 || res.statusCode >= 400) {
         await res.drain<void>().catchError((_) {});
-        return StreamValidationStatus.invalid;
+        return StreamProbeResult(
+          status: StreamValidationStatus.invalid,
+          latencyMs: totalSw.elapsedMilliseconds,
+        );
       }
 
-      final bytes = await _readUpTo(res, 16384).timeout(timeout);
-      if (bytes.isEmpty) return StreamValidationStatus.invalid;
+      final readSw = Stopwatch()..start();
+      final maxRead = looksLikePlaylistUrl ? 16384 : 49152;
+      final bytes = await _readUpTo(res, maxRead).timeout(timeout);
+      readSw.stop();
+      if (bytes.isEmpty) {
+        return StreamProbeResult(
+          status: StreamValidationStatus.invalid,
+          latencyMs: totalSw.elapsedMilliseconds,
+        );
+      }
 
       // ¿Es un playlist HLS (#EXTM3U)?
       final prefixLen = bytes.length < 128 ? bytes.length : 128;
@@ -310,7 +524,12 @@ class StreamValidator {
             .map((l) => l.trim())
             .where((l) => l.isNotEmpty && !l.startsWith('#'))
             .toList();
-        if (lines.isEmpty) return StreamValidationStatus.invalid;
+        if (lines.isEmpty) {
+          return StreamProbeResult(
+            status: StreamValidationStatus.invalid,
+            latencyMs: totalSw.elapsedMilliseconds,
+          );
+        }
 
         var resolvedBase = uri;
         for (final r in res.redirects) {
@@ -325,34 +544,63 @@ class StreamValidator {
             nextLower.contains('playlist');
 
         if (isSubPlaylist && depth < 2) {
-          return await validateUrlDetailed(
+          return await probeUrl(
             nextUri,
             headers: headers,
             timeout: timeout,
             depth: depth + 1,
             sharedClient: client,
+            server: server,
           );
         }
 
-        // Verificar bytes reales del primer segmento de video usando el MISMO client keep-alive
-        return await _validateSegmentBytesDetailed(
+        // Verificar bytes reales + velocidad del primer segmento usando el MISMO client keep-alive
+        return await _probeSegmentBytes(
           nextUri,
           headers: headers,
           timeout: timeout,
           client: client,
+          server: server,
+          totalElapsedBeforeMs: totalSw.elapsedMilliseconds,
         );
       }
 
       // Stream directo (MP4 / TS / MKV)
-      return isPlayableMediaBytes(bytes)
-          ? StreamValidationStatus.valid
-          : StreamValidationStatus.invalid;
+      final ok = isPlayableMediaBytes(bytes);
+      final elapsedMs = readSw.elapsedMilliseconds.clamp(1, 60000);
+      final bps = ok ? (bytes.length * 1000.0) / elapsedMs : 0.0;
+      if (ok && bytes.length >= 4096) {
+        StreamHostHealth.instance.recordThroughput(
+          url,
+          bytes: bytes.length,
+          elapsedMs: elapsedMs,
+          server: server,
+        );
+      }
+      return StreamProbeResult(
+        status: ok
+            ? StreamValidationStatus.valid
+            : StreamValidationStatus.invalid,
+        latencyMs: totalSw.elapsedMilliseconds,
+        bytesPerSec: bps,
+        bytesRead: bytes.length,
+      );
     } on TimeoutException {
-      return StreamValidationStatus.timeout;
+      StreamHostHealth.instance.recordStallOrTimeout(url, server: server);
+      return StreamProbeResult(
+        status: StreamValidationStatus.timeout,
+        latencyMs: totalSw.elapsedMilliseconds,
+      );
     } on SocketException {
-      return StreamValidationStatus.timeout;
+      return StreamProbeResult(
+        status: StreamValidationStatus.timeout,
+        latencyMs: totalSw.elapsedMilliseconds,
+      );
     } catch (_) {
-      return StreamValidationStatus.invalid;
+      return StreamProbeResult(
+        status: StreamValidationStatus.invalid,
+        latencyMs: totalSw.elapsedMilliseconds,
+      );
     } finally {
       if (ownsClient) {
         client.close(force: true);
@@ -360,12 +608,15 @@ class StreamValidator {
     }
   }
 
-  static Future<StreamValidationStatus> _validateSegmentBytesDetailed(
+  static Future<StreamProbeResult> _probeSegmentBytes(
     String segmentUrl, {
     required Map<String, String> headers,
     required Duration timeout,
     required HttpClient client,
+    String? server,
+    int totalElapsedBeforeMs = 0,
   }) async {
+    final segSw = Stopwatch()..start();
     try {
       final req = await client
           .getUrl(Uri.parse(segmentUrl))
@@ -376,24 +627,58 @@ class StreamValidator {
           req.headers.set(k, v);
         }
       });
-      req.headers.set('Range', 'bytes=0-1023');
+      // Leer hasta 48 KB reales: ~35 ms en un servidor rápido, pero expone de
+      // inmediato CDNs con throttling o estancados tras el primer KB.
+      req.headers.set('Range', 'bytes=0-49151');
 
       final res = await req.close().timeout(timeout);
       if (res.statusCode < 200 || res.statusCode >= 400) {
         await res.drain<void>().catchError((_) {});
-        return StreamValidationStatus.invalid;
+        return StreamProbeResult(
+          status: StreamValidationStatus.invalid,
+          latencyMs: totalElapsedBeforeMs + segSw.elapsedMilliseconds,
+        );
       }
 
-      final bytes = await _readUpTo(res, 1024).timeout(timeout);
-      return isPlayableMediaBytes(bytes)
-          ? StreamValidationStatus.valid
-          : StreamValidationStatus.invalid;
+      final readSw = Stopwatch()..start();
+      final bytes = await _readUpTo(res, 49152).timeout(timeout);
+      readSw.stop();
+      final ok = isPlayableMediaBytes(bytes);
+      final elapsedMs = readSw.elapsedMilliseconds.clamp(1, 60000);
+      final bps = ok ? (bytes.length * 1000.0) / elapsedMs : 0.0;
+      if (ok && bytes.length >= 4096) {
+        StreamHostHealth.instance.recordThroughput(
+          segmentUrl,
+          bytes: bytes.length,
+          elapsedMs: elapsedMs,
+          server: server,
+        );
+      }
+      return StreamProbeResult(
+        status: ok
+            ? StreamValidationStatus.valid
+            : StreamValidationStatus.invalid,
+        latencyMs: totalElapsedBeforeMs + segSw.elapsedMilliseconds,
+        bytesPerSec: bps,
+        bytesRead: bytes.length,
+      );
     } on TimeoutException {
-      return StreamValidationStatus.timeout;
+      StreamHostHealth.instance
+          .recordStallOrTimeout(segmentUrl, server: server);
+      return StreamProbeResult(
+        status: StreamValidationStatus.timeout,
+        latencyMs: totalElapsedBeforeMs + segSw.elapsedMilliseconds,
+      );
     } on SocketException {
-      return StreamValidationStatus.timeout;
+      return StreamProbeResult(
+        status: StreamValidationStatus.timeout,
+        latencyMs: totalElapsedBeforeMs + segSw.elapsedMilliseconds,
+      );
     } catch (_) {
-      return StreamValidationStatus.invalid;
+      return StreamProbeResult(
+        status: StreamValidationStatus.invalid,
+        latencyMs: totalElapsedBeforeMs + segSw.elapsedMilliseconds,
+      );
     }
   }
 

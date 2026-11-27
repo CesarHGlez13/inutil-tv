@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/models.dart';
 import '../services/artwork_cache_service.dart';
+import '../services/tv_mode_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_ui.dart';
 import 'dynamic_poster_canvas.dart';
@@ -186,6 +187,7 @@ class _PosterCardState extends State<PosterCard> {
         borderRadius: BorderRadius.circular(appArtworkRadius),
         focusScale: 1.045,
         pressScale: 0.96,
+        showFocusBorder: false,
         onLongPress: () {
           if (!_liveHold) setState(() => _liveHold = true);
         },
@@ -210,36 +212,50 @@ class _PosterCardState extends State<PosterCard> {
     final cardSurface = AppColors.elevatedSurfaceFor(context);
     final canvasAccent = DynamicPosterCanvas.accentForTitle(item.title);
     final totalSeasons = item.seasons.length;
-    final placeholderCanvas = _buildPlaceholder(context);
+    final isTv = TvModeService.instance.isTv;
+    final placeholderCanvas = isTv
+        ? ColoredBox(color: cardSurface)
+        : _buildPlaceholder(context);
+    final errorCanvas = _buildPlaceholder(context);
 
     // Canvas en vivo (v3.3.18): en TV al enfocar la tarjeta, en el teléfono
     // manteniendo pulsado. Sin stills reales => se queda la carátula de siempre.
     final live = (_pressed || _liveHold) && item.highlightStills.length >= 2;
+    final radius = BorderRadius.circular(appArtworkRadius);
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOutCubic,
+    return DecoratedBox(
+      position: DecorationPosition.foreground,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(appArtworkRadius),
-        color: cardSurface,
+        borderRadius: radius,
         border: Border.all(
-          color: _pressed
-              ? canvasAccent.withValues(alpha: 0.85)
-              : AppColors.cardBorderFor(context),
-          width: _pressed ? 1.3 : 0.75,
+          color: _pressed ? accent : AppColors.cardBorderFor(context),
+          width: _pressed ? 2.6 : 0.75,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: canvasAccent.withValues(alpha: _pressed ? 0.36 : 0.12),
-            blurRadius: _pressed ? 16 : 8,
-            spreadRadius: _pressed ? 0.5 : -2,
-            offset: Offset(0, _pressed ? 6 : 4),
-          ),
-        ],
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(appArtworkRadius - 0.5),
-        child: Stack(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: radius,
+          color: cardSurface,
+          boxShadow: [
+            if (_pressed)
+              BoxShadow(
+                color: accent.withValues(alpha: 0.32),
+                blurRadius: 14,
+                spreadRadius: 0,
+                blurStyle: BlurStyle.outer,
+              )
+            else
+              BoxShadow(
+                color: canvasAccent.withValues(alpha: 0.12),
+                blurRadius: 8,
+                spreadRadius: -2,
+                offset: const Offset(0, 4),
+              ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: radius,
+          child: Stack(
           fit: StackFit.expand,
           children: [
             if (live)
@@ -260,10 +276,12 @@ class _PosterCardState extends State<PosterCard> {
               FastArtwork(
                 url: item.poster,
                 tier: ArtworkTier.poster,
-                cacheWidth: 500,
+                // En TV Box de 2 GB RAM decodificar a 260px ahorra ~73% de VRAM
+                // por póster manteniendo nitidez total en tarjetas de 128–150dp.
+                cacheWidth: isTv ? 260 : 340,
                 fit: BoxFit.cover,
                 placeholder: placeholderCanvas,
-                errorWidget: placeholderCanvas,
+                errorWidget: errorCanvas,
               ),
 
             // Sutil degradado superior/inferior para legibilidad sin opacar la carátula
@@ -434,6 +452,7 @@ class _PosterCardState extends State<PosterCard> {
               ),
           ],
         ),
+      ),
       ),
     );
   }

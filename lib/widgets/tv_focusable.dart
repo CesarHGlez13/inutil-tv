@@ -65,14 +65,16 @@ class TvFocusable extends StatefulWidget {
   };
 
   /// Crea un [FocusNode] para `TextField` de una línea en Smart TV / Android TV:
-  /// - Al pulsar **OK (`select`)** del control remoto (o **Enter** en modo TV),
-  ///   abre el teclado D-Pad integrado de Inutix TV ([InutilTvKeyboard]) en vez
-  ///   del IME del sistema Android TV, que en varias TVs aparece sin foco D-pad.
+  /// - Por defecto abre el teclado nativo del sistema (Gboard TV / dictado por
+  ///   voz en Google TV) al pulsar **OK (`select`)** o **Enter**.
+  /// - Si [useCustomTvKeyboard] es `true`, abre el teclado D-Pad opcional de
+  ///   la app ([InutilTvKeyboard]) para TVs cuyo IME del sistema no responda.
   /// - Al pulsar **Flecha Abajo / Arriba** (y **Flecha Izquierda** si el campo
-  ///   está vacío), mueve el foco al control vecino cuando el IME no está abierto.
+  ///   está vacío), mueve el foco al control vecino en lugar de quedar atrapado.
   static FocusNode createTextFieldFocusNode({
     VoidCallback? onDoneKey,
     TextEditingController? controller,
+    bool useCustomTvKeyboard = false,
     String tvKeyboardTitle = 'Escribir con el control remoto',
     String tvKeyboardHint = '',
     InutilTvKeyboardMode tvKeyboardMode = InutilTvKeyboardMode.search,
@@ -91,28 +93,29 @@ class TvFocusable extends StatefulWidget {
 
         if (isRemoteOk || isEnter) {
           final isTv = TvModeService.instance.isTv || isRemoteOk;
-          if (onDoneKey != null) {
-            if (isTv) {
+          if (useCustomTvKeyboard && isTv) {
+            if (onDoneKey != null) {
               SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+              onDoneKey();
+              return KeyEventResult.handled;
             }
-            onDoneKey();
-            return KeyEventResult.handled;
-          }
-          final ctx = node.context;
-          if (isTv && controller != null && ctx != null) {
-            SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
-            InutilTvKeyboard.showModal(
-              ctx,
-              controller: controller,
-              title: tvKeyboardTitle,
-              hintText: tvKeyboardHint,
-              mode: tvKeyboardMode,
-              obscureText: obscureText,
-              onChanged: onChanged,
-            );
-            return KeyEventResult.handled;
+            final ctx = node.context;
+            if (controller != null && ctx != null) {
+              SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+              InutilTvKeyboard.showModal(
+                ctx,
+                controller: controller,
+                title: tvKeyboardTitle,
+                hintText: tvKeyboardHint,
+                mode: tvKeyboardMode,
+                obscureText: obscureText,
+                onChanged: onChanged,
+              );
+              return KeyEventResult.handled;
+            }
           }
           SystemChannels.textInput.invokeMethod<void>('TextInput.show');
+          onDoneKey?.call();
           return KeyEventResult.handled;
         }
         if (key == LogicalKeyboardKey.arrowDown) {
@@ -124,21 +127,20 @@ class TvFocusable extends StatefulWidget {
           return KeyEventResult.handled;
         }
         if (key == LogicalKeyboardKey.arrowLeft &&
-            controller != null &&
-            controller.text.isEmpty) {
+            (controller == null || controller.text.isEmpty)) {
           node.focusInDirection(TraversalDirection.left);
           return KeyEventResult.handled;
         }
         return KeyEventResult.ignored;
       },
     );
-    created.addListener(() {
-      if (created.hasFocus && TvModeService.instance.isTv) {
-        // Evita que Google TV / Android TV levante Gboard TV encima del campo
-        // antes de que el usuario pulse OK para abrir InutilTvKeyboard.
-        SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
-      }
-    });
+    if (useCustomTvKeyboard) {
+      created.addListener(() {
+        if (created.hasFocus && TvModeService.instance.isTv) {
+          SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+        }
+      });
+    }
     return created;
   }
 
@@ -218,8 +220,9 @@ class _TvFocusableState extends State<TvFocusable> {
                         boxShadow: [
                           BoxShadow(
                             color: accent.withValues(alpha: 0.30),
-                            blurRadius: 14,
-                            spreadRadius: 1,
+                            blurRadius: 12,
+                            spreadRadius: 0,
+                            blurStyle: BlurStyle.outer,
                           ),
                         ],
                       )

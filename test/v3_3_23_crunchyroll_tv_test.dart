@@ -61,18 +61,19 @@ void main() {
         isSeries: true,
       );
 
-  group('v3.3.23 a v3.3.54 — pins de versión', () {
-    test('pubspec.yaml en 3.3.54+103', () {
-      expect(_pubspecVersion(), '3.3.54+103');
+  group('v3.3.23 a v3.3.55 — pins de versión', () {
+    test('pubspec.yaml en 3.3.55+104', () {
+      expect(_pubspecVersion(), '3.3.55+104');
     });
 
-    test('lib/constants/app_info.dart en 3.3.54', () {
+    test('lib/constants/app_info.dart en 3.3.55', () {
       expect(File('lib/constants/app_info.dart').readAsStringSync(),
-          contains("static const String appVersion = '3.3.54'"));
-      expect(AppInfo.appVersion, '3.3.54');
+          contains("static const String appVersion = '3.3.55'"));
+      expect(AppInfo.appVersion, '3.3.55');
     });
 
-    test('CHANGELOG.md documenta 3.3.54', () {
+    test('CHANGELOG.md documenta 3.3.55', () {
+      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.55'));
       expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.54'));
       expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.53'));
       expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.52'));
@@ -192,6 +193,66 @@ void main() {
 
       // Barra flotante persistente al pie (ElevatedButton)
       expect(find.byType(ElevatedButton), findsOneWidget);
+    });
+
+    testWidgets(
+        'en TV el botón Play de episodios está centrado verticalmente y el aro no recorta',
+        (tester) async {
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      TvModeService.instance.setForTest(detectedTv: true);
+
+      const seriesWithEps = VodItem(
+        id: 'tv_ep_center_test',
+        title: 'Anime Prueba',
+        year: '2026',
+        genre: 'Acción',
+        provider: 'jkanime',
+        isAnime: true,
+        isSeries: true,
+        episodes: [
+          VodEpisode(
+            id: 'ep_1',
+            seasonNumber: 1,
+            episodeNumber: 1,
+            title: 'Episodio Uno',
+            duration: '24 min',
+          ),
+          VodEpisode(
+            id: 'ep_2',
+            seasonNumber: 1,
+            episodeNumber: 2,
+            title: 'Episodio Dos',
+            duration: '24 min',
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        wrapTheme(const Scaffold(body: VodDetailModal(item: seriesWithEps))),
+      );
+      await tester.pumpAndSettle();
+
+      final playIconFinder = find.byIcon(Icons.play_circle_fill_rounded);
+      expect(playIconFinder, findsAtLeast(1));
+
+      final thumbFinder = find.byType(AspectRatio).first;
+      final thumbRect = tester.getRect(thumbFinder);
+      final iconRect = tester.getRect(playIconFinder.first);
+
+      // El botón Play debe estar centrado vertical y horizontalmente en el 16:9
+      expect(
+        (iconRect.center.dy - thumbRect.center.dy).abs(),
+        lessThanOrEqualTo(2.0),
+        reason: 'el icono Play debe estar en el centro vertical de la miniatura 16:9',
+      );
+      expect(
+        (iconRect.center.dx - thumbRect.center.dx).abs(),
+        lessThanOrEqualTo(2.0),
+        reason: 'el icono Play debe estar en el centro horizontal de la miniatura 16:9',
+      );
     });
   });
 }

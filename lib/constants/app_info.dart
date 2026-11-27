@@ -4,7 +4,7 @@ class AppInfo {
   const AppInfo._();
 
   static const String appName = 'Inutix TV';
-  static const String appVersion = '3.3.54';
+  static const String appVersion = '3.3.55';
   static const String creatorName = 'César';
   static const String supportEmail = 'cesarmaster133@gmail.com';
 
@@ -21,6 +21,9 @@ class AppInfo {
       'Ecosistema inutix.com · Inutix TV & Inutix Music';
 
   static const List<String> whatsNewHighlights = [
+    'Reproducción más rápida y estable: arranque ágil de películas y series con cambio automático cuando un servidor se pausa',
+    'Búsqueda y navegación más fluidas en Google TV y Smart TV, con teclado nativo por defecto y mejor respuesta del control remoto',
+    'Diseño más limpio en Smart TV: marco de selección refinado en pósters y episodios con botón Play centrado',
     'Mejoras internas de estabilidad y verificación de sesión para mantener tu cuenta y reproducción siempre sincronizadas',
     'Inicio, Novedades y Series más dinámicos: las secciones principales ahora se adaptan mejor a tus gustos y rotan con contenido fresco',
     'Tu progreso siempre a salvo: al reinstalar o cambiar de equipo recuperas dónde te quedaste, tu lista, tus canales favoritos y tus preferencias',

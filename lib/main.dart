@@ -82,6 +82,27 @@ class _InutilTvAppState extends State<InutilTvApp> {
   void initState() {
     super.initState();
     _settings.load();
+    _tuneImageCacheForDevice();
+    TvModeService.instance.addListener(_tuneImageCacheForDevice);
+  }
+
+  @override
+  void dispose() {
+    TvModeService.instance.removeListener(_tuneImageCacheForDevice);
+    super.dispose();
+  }
+
+  /// En TV Box de 2 GB RAM (ej. Onn 4K), limita la caché de texturas GPU para
+  /// evitar pausas de GC/swap que traban Gboard TV y el desplazamiento rápido.
+  void _tuneImageCacheForDevice() {
+    final cache = PaintingBinding.instance.imageCache;
+    if (TvModeService.instance.isTv) {
+      cache.maximumSize = 80;
+      cache.maximumSizeBytes = 36 * 1024 * 1024; // 36 MiB
+    } else {
+      cache.maximumSize = 160;
+      cache.maximumSizeBytes = 72 * 1024 * 1024; // 72 MiB
+    }
   }
 
   @override

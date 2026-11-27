@@ -12,6 +12,7 @@ import '../services/tv_mode_service.dart';
 import '../services/tv_remote_service.dart';
 import '../services/tv_taste_profile_service.dart';
 import '../services/vod_catalog_service.dart';
+import '../services/vod_playback_warmup_service.dart';
 import '../services/watch_history.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_ui.dart';
@@ -179,6 +180,7 @@ class _VodDetailModalState extends State<VodDetailModal>
 
   bool _loadingEpisodes = false;
   int _requestToken = 0;
+  Timer? _warmupDebounce;
 
   @override
   void initState() {
@@ -203,12 +205,41 @@ class _VodDetailModalState extends State<VodDetailModal>
 
   @override
   void dispose() {
+    _warmupDebounce?.cancel();
     if (widget.scrollController == null) {
       _scrollController.dispose();
       _tvScrollController.dispose();
     }
     _reveal?.dispose();
     super.dispose();
+  }
+
+  void _schedulePlaybackWarmup({VodEpisode? episode}) {
+    if (!VodPlaybackWarmupService.instance.enabled) return;
+    _warmupDebounce?.cancel();
+    final targetItem = _item;
+    final token = _requestToken;
+    _warmupDebounce = Timer(const Duration(milliseconds: 300), () {
+      if (!mounted || token != _requestToken) return;
+      VodPlaybackWarmupService.instance.warmUp(
+        item: targetItem,
+        episode: episode,
+      );
+    });
+  }
+
+  VodEpisode? _targetWarmupEpisode(List<VodEpisode> eps) {
+    if (eps.isEmpty) return null;
+    final saved = _history.progressFor(_item.id);
+    if (saved != null) {
+      final found = eps.indexWhere(
+        (e) =>
+            e.seasonNumber == saved.seasonNumber &&
+            e.episodeNumber == saved.episodeNumber,
+      );
+      if (found >= 0) return eps[found];
+    }
+    return eps.first;
   }
 
   @override
@@ -241,9 +272,13 @@ class _VodDetailModalState extends State<VodDetailModal>
       if (_item.episodes.isNotEmpty) {
         _episodes = _item.episodes;
         _selectedSeason = _item.seasons.first;
+        _schedulePlaybackWarmup(episode: _targetWarmupEpisode(_episodes));
       } else {
         _loadEpisodes(token);
       }
+    } else {
+      // Precalentar la película en segundo plano mientras el usuario ve la ficha
+      _schedulePlaybackWarmup();
     }
   }
 
@@ -303,6 +338,9 @@ class _VodDetailModalState extends State<VodDetailModal>
         }
       }
     });
+    if (eps.isNotEmpty) {
+      _schedulePlaybackWarmup(episode: _targetWarmupEpisode(eps));
+    }
   }
 
   List<int> get _seasons {
@@ -1746,11 +1784,13 @@ class _VodDetailModalState extends State<VodDetailModal>
 
                     // Selector de Temporadas horizontal con D-pad
                     if (seasons.length > 1) ...[
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 8),
                       SizedBox(
-                        height: 42,
+                        height: 54,
                         child: ListView.builder(
                           scrollDirection: Axis.horizontal,
+                          clipBehavior: Clip.none,
+                          padding: const EdgeInsets.symmetric(vertical: 6),
                           itemCount: seasons.length,
                           itemBuilder: (_, idx) {
                             final s = seasons[idx];
@@ -1798,11 +1838,13 @@ class _VodDetailModalState extends State<VodDetailModal>
 
                     // Paginación si hay más de 50 episodios
                     if (totalChunks > 1) ...[
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 6),
                       SizedBox(
-                        height: 36,
+                        height: 48,
                         child: ListView.builder(
                           scrollDirection: Axis.horizontal,
+                          clipBehavior: Clip.none,
+                          padding: const EdgeInsets.symmetric(vertical: 6),
                           itemCount: totalChunks,
                           itemBuilder: (_, idx) {
                             final start = idx * _pageChunk + 1;
@@ -1847,7 +1889,7 @@ class _VodDetailModalState extends State<VodDetailModal>
                         ),
                       ),
                     ],
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 10),
 
                     // Carrusel de Episodios horizontal 16:9
                     if (visibleEpisodes.isEmpty && !_loadingEpisodes)
@@ -1865,12 +1907,14 @@ class _VodDetailModalState extends State<VodDetailModal>
                       )
                     else
                       SizedBox(
-                        height: 205,
+                        height: 218,
                         child: ListView.separated(
                           scrollDirection: Axis.horizontal,
+                          clipBehavior: Clip.none,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
                           itemCount: visibleEpisodes.length,
                           separatorBuilder: (_, __) =>
-                              const SizedBox(width: 16),
+                              const SizedBox(width: 18),
                           itemBuilder: (context, idx) {
                             final ep = visibleEpisodes[idx];
                             return _buildTvEpisodeCard(
@@ -1886,7 +1930,7 @@ class _VodDetailModalState extends State<VodDetailModal>
 
                   // Sección de Títulos Similares para TV
                   if (widget.recommendations.isNotEmpty) ...[
-                    const SizedBox(height: 40),
+                    const SizedBox(height: 32),
                     const Text(
                       'Títulos Similares',
                       style: TextStyle(
@@ -1895,13 +1939,15 @@ class _VodDetailModalState extends State<VodDetailModal>
                         fontWeight: FontWeight.w900,
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 10),
                     SizedBox(
-                      height: 240,
+                      height: 262,
                       child: ListView.separated(
                         scrollDirection: Axis.horizontal,
+                        clipBehavior: Clip.none,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
                         itemCount: widget.recommendations.length,
-                        separatorBuilder: (_, __) => const SizedBox(width: 16),
+                        separatorBuilder: (_, __) => const SizedBox(width: 18),
                         itemBuilder: (_, idx) {
                           final sim = widget.recommendations[idx];
                           return PosterCard(
@@ -1965,43 +2011,58 @@ class _VodDetailModalState extends State<VodDetailModal>
         ? (saved.positionSec / saved.durationSec).clamp(0.0, 1.0)
         : (watched ? 1.0 : 0.0);
 
+    final thumbRadius = BorderRadius.circular(12);
+
     return SizedBox(
       width: 250,
       child: TvFocusable(
-        borderRadius: BorderRadius.circular(14),
-        focusScale: 1.06,
-        showFocusBorder: true,
+        borderRadius: thumbRadius,
+        focusScale: 1.05,
+        showFocusBorder: false,
         focusColor: brandAccent,
         onTap: () => _openPlayer(
           episode: ep,
           episodeList: _episodes,
           initialEpisodeIndex: globalIndex >= 0 ? globalIndex : 0,
         ),
-        child: Column(
+        builder: (context, focused, _) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // Miniatura 16:9
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Stack(
-                children: [
-                  AspectRatio(
+            // Miniatura 16:9 con anillo de foco limpio sólo alrededor del recuadro
+            DecoratedBox(
+              position: DecorationPosition.foreground,
+              decoration: BoxDecoration(
+                borderRadius: thumbRadius,
+                border: Border.all(
+                  color: focused ? brandAccent : Colors.white.withValues(alpha: 0.14),
+                  width: focused ? 2.8 : 0.8,
+                ),
+              ),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: thumbRadius,
+                  boxShadow: focused
+                      ? [
+                          BoxShadow(
+                            color: brandAccent.withValues(alpha: 0.34),
+                            blurRadius: 14,
+                            spreadRadius: 0,
+                            blurStyle: BlurStyle.outer,
+                          ),
+                        ]
+                      : null,
+                ),
+                child: ClipRRect(
+                  borderRadius: thumbRadius,
+                  child: AspectRatio(
                     aspectRatio: 16 / 9,
-                    child: (ep.thumbnail.isNotEmpty)
-                        ? FastArtwork(
-                            url: ep.thumbnail,
-                            tier: ArtworkTier.thumbnail,
-                            cacheWidth: 400,
-                            fit: BoxFit.cover,
-                            errorWidget: ColoredBox(
-                              color: Colors.white.withValues(alpha: 0.08),
-                            ),
-                          )
-                        : (_item.backdrop.isNotEmpty || _item.poster.isNotEmpty)
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        (ep.thumbnail.isNotEmpty)
                             ? FastArtwork(
-                                url: _item.backdrop.isNotEmpty
-                                    ? _item.backdrop
-                                    : _item.poster,
+                                url: ep.thumbnail,
                                 tier: ArtworkTier.thumbnail,
                                 cacheWidth: 400,
                                 fit: BoxFit.cover,
@@ -2009,68 +2070,98 @@ class _VodDetailModalState extends State<VodDetailModal>
                                   color: Colors.white.withValues(alpha: 0.08),
                                 ),
                               )
-                            : ColoredBox(
-                                color: Colors.white.withValues(alpha: 0.08),
+                            : (_item.backdrop.isNotEmpty || _item.poster.isNotEmpty)
+                                ? FastArtwork(
+                                    url: _item.backdrop.isNotEmpty
+                                        ? _item.backdrop
+                                        : _item.poster,
+                                    tier: ArtworkTier.thumbnail,
+                                    cacheWidth: 400,
+                                    fit: BoxFit.cover,
+                                    errorWidget: ColoredBox(
+                                      color: Colors.white.withValues(alpha: 0.08),
+                                    ),
+                                  )
+                                : ColoredBox(
+                                    color: Colors.white.withValues(alpha: 0.08),
+                                  ),
+                        ColoredBox(
+                          color: Colors.black.withValues(alpha: focused ? 0.25 : 0.35),
+                        ),
+                        Positioned.fill(
+                          child: Center(
+                            child: Container(
+                              width: 46,
+                              height: 46,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.black.withValues(
+                                  alpha: focused ? 0.56 : 0.42,
+                                ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Colors.black54,
+                                    blurRadius: 10,
+                                  ),
+                                ],
                               ),
-                  ),
-                  Positioned.fill(
-                    child: Container(
-                      color: Colors.black.withValues(alpha: 0.35),
-                    ),
-                  ),
-                  Center(
-                    child: Icon(
-                      watched
-                          ? Icons.check_circle_rounded
-                          : Icons.play_circle_fill_rounded,
-                      color: watched
-                          ? const Color(0xFF18C75A)
-                          : Colors.white,
-                      size: 32,
-                    ),
-                  ),
-                  if (progress > 0.05)
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      height: 4,
-                      child: Container(
-                        color: Colors.black54,
-                        child: FractionallySizedBox(
-                          alignment: Alignment.centerLeft,
-                          widthFactor: progress,
-                          child: Container(
-                            color: watched
-                                ? const Color(0xFF18C75A)
-                                : brandAccent,
+                              child: Icon(
+                                watched
+                                    ? Icons.check_circle_rounded
+                                    : Icons.play_circle_fill_rounded,
+                                color: watched
+                                    ? const Color(0xFF18C75A)
+                                    : Colors.white,
+                                size: 38,
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                  Positioned(
-                    right: 6,
-                    bottom: 6,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black87,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        ep.duration.isNotEmpty ? ep.duration : 'HD',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
+                        if (progress > 0.05)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            height: 4,
+                            child: Container(
+                              color: Colors.black54,
+                              child: FractionallySizedBox(
+                                alignment: Alignment.centerLeft,
+                                widthFactor: progress,
+                                child: Container(
+                                  color: watched
+                                      ? const Color(0xFF18C75A)
+                                      : brandAccent,
+                                ),
+                              ),
+                            ),
+                          ),
+                        Positioned(
+                          right: 6,
+                          bottom: 6,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black87,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              ep.duration.isNotEmpty ? ep.duration : 'HD',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
                   ),
-                ],
+                ),
               ),
             ),
             const SizedBox(height: 8),
@@ -2079,8 +2170,10 @@ class _VodDetailModalState extends State<VodDetailModal>
               'E${ep.episodeNumber} · ${ep.title}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: focused
+                    ? Colors.white
+                    : Colors.white.withValues(alpha: 0.86),
                 fontWeight: FontWeight.w700,
                 fontSize: 13.5,
               ),

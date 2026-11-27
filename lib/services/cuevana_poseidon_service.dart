@@ -277,16 +277,23 @@ class CuevanaPoseidonService {
     if (videosMap is! Map) return [];
 
     // Construir cola ordenada: Latino primero, luego Español, luego Subtitulado.
-    // Prioridad de host por confiabilidad verificada por bytes reales:
-    // VidHide (7 espejos activos, HLS 1080p en ~100% de cine y series) ->
-    // Vidara (API POST directa, HLS 1080p + subtítulos) -> Doodstream (MP4).
+    // Prioridad de host guiada por salud y velocidad real medida (`StreamHostHealth`):
+    // StreamWish (CDN rápido) + Vidara (API directa) + VidHide + Doodstream,
+    // degradando automáticamente cualquier host que esté lento o trabado.
     final candidates = <_ServerCandidate>[];
     const langOrder = [
       ('latino', 'Latino'),
       ('spanish', 'Español'),
       ('english', 'Subtitulado'),
     ];
-    const hostOrder = ['vidhide', 'streamwish', 'vidara', 'doodstream'];
+    final baseHosts = ['streamwish', 'vidara', 'vidhide', 'doodstream'];
+    final hostOrder = List<String>.of(baseHosts)
+      ..sort((a, b) {
+        final pa = StreamHostHealth.instance.hostOrderPenalty(a);
+        final pb = StreamHostHealth.instance.hostOrderPenalty(b);
+        if (pa != pb) return pa.compareTo(pb);
+        return baseHosts.indexOf(a).compareTo(baseHosts.indexOf(b));
+      });
 
     for (final (langKey, langLabel) in langOrder) {
       final list = videosMap[langKey];
@@ -312,20 +319,28 @@ class CuevanaPoseidonService {
       return [];
     }
 
-    final verified = <StreamSource>[];
+    final verifiedScored = <({StreamSource source, double score, int langRank})>[];
     final timeoutFallbacks = <StreamSource>[];
     final seenUrls = <String>{};
 
-    // Carrera en lotes paralelos de 3 hosts (sin doble validación y con respaldo
-    // para redes lentas si la sonda excede el tiempo pero el servidor sí extrajo URL).
+    int langRankFor(String label) {
+      final l = label.toLowerCase();
+      if (l.contains('latino')) return 0;
+      if (l.contains('español') || l.contains('espanol')) return 1;
+      return 2;
+    }
+
+    // Carrera en lotes paralelos de 3 hosts con sonda real de velocidad (48 KB):
+    // prioriza el servidor más rápido y sano dentro del mismo idioma.
     const batchSize = 3;
-    for (var i = 0; i < candidates.length && verified.isEmpty; i += batchSize) {
+    for (var i = 0; i < candidates.length && verifiedScored.isEmpty; i += batchSize) {
       final batch = candidates.skip(i).take(batchSize).toList();
       final first = batch.first;
       onStatus?.call(
         'Verificando servidor (${first.language})...',
       );
 
+      final probeScores = <String, double>{};
       final batchResults = await collectBatchWithFastWin(
         batch.map((cand) async {
           final embedUrl = await _resolvePlayerRedirect(cand.playerPhpUrl);
@@ -364,15 +379,22 @@ class CuevanaPoseidonService {
           }
           StreamSource? timedOutCandidate;
           for (final source in extracted) {
-            final status = await StreamValidator.validateUrlDetailed(
+            final probe = await StreamValidator.probeUrl(
               source.url,
               headers: source.headers,
-              timeout: const Duration(seconds: 9),
+              timeout: const Duration(seconds: 7),
+              server: source.server,
             );
-            if (status == StreamValidationStatus.valid) {
-              return (source, status);
+            if (probe.isValid) {
+              probeScores[source.url] = StreamHostHealth.instance.scoreFor(
+                url: source.url,
+                server: source.server,
+                probeBytesPerSec: probe.bytesPerSec,
+                latencyMs: probe.latencyMs,
+              );
+              return (source, probe.status);
             }
-            if (status == StreamValidationStatus.timeout &&
+            if (probe.status == StreamValidationStatus.timeout &&
                 timedOutCandidate == null) {
               timedOutCandidate = source;
             }
@@ -382,17 +404,32 @@ class CuevanaPoseidonService {
           }
           return (null as StreamSource?, StreamValidationStatus.invalid);
         }).toList(growable: false),
+        graceWindow: const Duration(milliseconds: 900),
       );
 
       for (final (source, status) in batchResults) {
         if (source == null || !seenUrls.add(source.url)) continue;
         if (status == StreamValidationStatus.valid) {
-          verified.add(source);
+          verifiedScored.add((
+            source: source,
+            score: probeScores[source.url] ??
+                StreamHostHealth.instance.scoreFor(
+                  url: source.url,
+                  server: source.server,
+                ),
+            langRank: langRankFor(source.quality),
+          ));
         } else if (status == StreamValidationStatus.timeout) {
           timeoutFallbacks.add(source);
         }
       }
     }
+
+    verifiedScored.sort((a, b) {
+      if (a.langRank != b.langRank) return a.langRank.compareTo(b.langRank);
+      return b.score.compareTo(a.score);
+    });
+    final verified = verifiedScored.map((e) => e.source).toList();
 
     // Priorizar siempre los validados por bytes; si la red es muy lenta y sólo
     // hubo timeouts (no DMCA/404), entregar los extraídos para que HlsStreamProxy

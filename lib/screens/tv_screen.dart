@@ -23,7 +23,6 @@ import '../theme/app_ui.dart';
 import '../theme/inutil_icons.dart';
 import '../widgets/fast_artwork.dart';
 import '../widgets/inutil_sleep_timer_sheet.dart';
-import '../widgets/inutil_tv_keyboard.dart';
 import '../widgets/tv_focusable.dart';
 import '../widgets/tv_remote_sheet.dart';
 import 'player_screen.dart';
@@ -1700,17 +1699,6 @@ class _TvScreenState extends State<TvScreen> with WidgetsBindingObserver {
             child: TextField(
               controller: _searchCtl,
               focusNode: _searchFocus,
-              readOnly: TvModeService.of(context),
-              showCursor: true,
-              onTap: TvModeService.of(context)
-                  ? () => InutilTvKeyboard.showModal(
-                        context,
-                        controller: _searchCtl,
-                        title: 'Buscar canales en vivo',
-                        mode: InutilTvKeyboardMode.search,
-                        onChanged: (_) => setState(_applyFilters),
-                      )
-                  : null,
               onChanged: (_) => setState(_applyFilters),
               style: TextStyle(color: headingColor, fontSize: 13),
               decoration: InputDecoration(

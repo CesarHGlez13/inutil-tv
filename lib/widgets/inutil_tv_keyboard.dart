@@ -142,9 +142,9 @@ class _InutilTvKeyboardState extends State<InutilTvKeyboard> {
     final isPassOrText = widget.mode == InutilTvKeyboardMode.password ||
         widget.mode == InutilTvKeyboardMode.text;
 
-    final row0Letters = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'];
-    final row1Letters = ['k', 'l', 'm', 'n', 'ñ', 'o', 'p', 'q', 'r', 's'];
-    final row2Letters = ['t', 'u', 'v', 'w', 'x', 'y', 'z', '1', '2', '3'];
+    final row0Letters = ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'];
+    final row1Letters = ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'ñ'];
+    final row2Letters = ['z', 'x', 'c', 'v', 'b', 'n', 'm', '1', '2', '3'];
     final row3Nums = ['4', '5', '6', '7', '8', '9', '0'];
 
     _rows = [
@@ -471,6 +471,8 @@ class _InutilTvKeyboardState extends State<InutilTvKeyboard> {
   }) {
     final node = _nodeFor(r, c);
     return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
       onKeyEvent: (_, event) => _handleGridNavigation(r, c, event),
       child: TvFocusable(
         key: ValueKey('tv_key_${spec.id}'),

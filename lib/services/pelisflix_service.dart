@@ -427,68 +427,119 @@ class PelisflixService {
         return [];
       }
 
-      // 1. Probar Nupload validando bytes reales (rechaza HTML DMCA de sv2/sv3/sv4)
-      var nuploadCount = 0;
-      for (final u in decodedUrls.where((x) => x.contains('nupload.my'))) {
-        nuploadCount++;
-        onStatus?.call('Verificando servidor #$nuploadCount...');
-        final stream = await _decryptNupload(u);
-        if (stream != null && stream.isNotEmpty && seenUrls.add(stream)) {
-          final isReal = await StreamValidator.validateUrl(
-            stream,
-            headers: playbackHeaders,
-          );
-          if (!isReal) continue;
-          resolved.add(StreamSource(
-            url: stream,
-            quality: 'Servidor HD #$nuploadCount',
-            server: 'nupload',
-            headers: playbackHeaders,
-          ));
-          if (resolved.length >= 2) break;
-        }
-      }
+      // 1. Probar Nupload + VOE en paralelo con sonda de velocidad real (rechaza DMCA y prioriza el más rápido)
+      final scored = <({StreamSource source, double score})>[];
+      final nuploadUrls =
+          decodedUrls.where((x) => x.contains('nupload.my')).take(4).toList();
+      final voeUrls =
+          decodedUrls.where((x) => x.contains('voe.')).take(3).toList();
 
-      // 2. Probar VOE (validado por bytes)
-      if (resolved.length < 2) {
-        var voeCount = 0;
-        for (final u in decodedUrls.where((x) => x.contains('voe.'))) {
-          voeCount++;
-          onStatus?.call('Verificando servidor alterno #$voeCount...');
-          final stream = await _decryptVoe(u, referer: pageUrl);
-          if (stream != null && stream.isNotEmpty && seenUrls.add(stream)) {
-            final isReal = await StreamValidator.validateUrl(
-              stream,
-              headers: playbackHeaders,
-            );
-            if (!isReal) continue;
-            resolved.add(StreamSource(
-              url: stream,
-              quality: 'Servidor HD',
-              server: 'voe',
-              headers: playbackHeaders,
-            ));
-            if (resolved.length >= 2) break;
+      if (nuploadUrls.isNotEmpty || voeUrls.isNotEmpty) {
+        onStatus?.call('Verificando servidores rápidos...');
+        final probeTasks = <Future<({StreamSource source, double score})?>>[
+          for (var i = 0; i < nuploadUrls.length; i++)
+            () async {
+              final stream = await _decryptNupload(nuploadUrls[i]);
+              if (stream == null || stream.isEmpty) return null;
+              final probe = await StreamValidator.probeUrl(
+                stream,
+                headers: playbackHeaders,
+                timeout: const Duration(seconds: 7),
+                server: 'nupload',
+              );
+              if (!probe.isValid) return null;
+              return (
+                source: StreamSource(
+                  url: stream,
+                  quality: 'Servidor HD #${i + 1}',
+                  server: 'nupload',
+                  headers: playbackHeaders,
+                ),
+                score: StreamHostHealth.instance.scoreFor(
+                  url: stream,
+                  server: 'nupload',
+                  probeBytesPerSec: probe.bytesPerSec,
+                  latencyMs: probe.latencyMs,
+                ),
+              );
+            }(),
+          for (var i = 0; i < voeUrls.length; i++)
+            () async {
+              final stream = await _decryptVoe(voeUrls[i], referer: pageUrl);
+              if (stream == null || stream.isEmpty) return null;
+              final probe = await StreamValidator.probeUrl(
+                stream,
+                headers: playbackHeaders,
+                timeout: const Duration(seconds: 7),
+                server: 'voe',
+              );
+              if (!probe.isValid) return null;
+              return (
+                source: StreamSource(
+                  url: stream,
+                  quality: 'Servidor HD',
+                  server: 'voe',
+                  headers: playbackHeaders,
+                ),
+                score: StreamHostHealth.instance.scoreFor(
+                  url: stream,
+                  server: 'voe',
+                  probeBytesPerSec: probe.bytesPerSec,
+                  latencyMs: probe.latencyMs,
+                ),
+              );
+            }(),
+        ];
+        final results = await Future.wait(probeTasks);
+        for (final r in results) {
+          if (r != null && seenUrls.add(r.source.url)) {
+            scored.add(r);
           }
         }
       }
 
-      // 3. Directos .m3u8 o .mp4 (validados por bytes)
-      for (final u in decodedUrls) {
-        if ((u.contains('.m3u8') || u.contains('.mp4')) && seenUrls.add(u)) {
-          final isReal = await StreamValidator.validateUrl(
-            u,
-            headers: playbackHeaders,
-          );
-          if (!isReal) continue;
-          resolved.add(StreamSource(
-            url: u,
-            quality: 'Servidor HD',
-            server: 'direct',
-            headers: playbackHeaders,
-          ));
+      // 2. Directos .m3u8 o .mp4 (en paralelo si faltan fuentes)
+      if (scored.length < 2) {
+        final directUrls = decodedUrls
+            .where((u) =>
+                (u.contains('.m3u8') || u.contains('.mp4')) &&
+                !seenUrls.contains(u))
+            .take(3)
+            .toList();
+        if (directUrls.isNotEmpty) {
+          final directRes = await Future.wait(directUrls.map((u) async {
+            final probe = await StreamValidator.probeUrl(
+              u,
+              headers: playbackHeaders,
+              timeout: const Duration(seconds: 7),
+              server: 'direct',
+            );
+            if (!probe.isValid) return null;
+            return (
+              source: StreamSource(
+                url: u,
+                quality: 'Servidor HD',
+                server: 'direct',
+                headers: playbackHeaders,
+              ),
+              score: StreamHostHealth.instance.scoreFor(
+                url: u,
+                server: 'direct',
+                probeBytesPerSec: probe.bytesPerSec,
+                latencyMs: probe.latencyMs,
+              ),
+            );
+          }));
+          for (final r in directRes) {
+            if (r != null && seenUrls.add(r.source.url)) {
+              scored.add(r);
+            }
+          }
         }
       }
+
+      scored.sort((a, b) => b.score.compareTo(a.score));
+      resolved.addAll(scored.map((e) => e.source));
 
       if (resolved.isNotEmpty) {
         _cache[cacheKey] = _CachedSources(

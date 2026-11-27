@@ -1,5 +1,10 @@
 # Changelog — Inutix TV
 
+## 3.3.55 — 2026-11-27
+- **Reproducción más rápida y fluida:** Inicio más ágil de películas, series y anime, y cambio automático sin perder el minuto exacto si algún servidor se pausa.
+- **Mejor rendimiento en Smart TV y Google TV:** Búsqueda más ligera con teclado nativo del sistema (y opción QWERTY integrada), menor consumo de memoria y navegación más suave.
+- **Interfaz más pulida en TV:** Aro de selección limpio en pósters y episodios, con el botón Play perfectamente centrado.
+
 ## 3.3.54 — 2026-11-27
 - **Mejoras de estabilidad y cuenta:** Sincronización de sesión más confiable al cambiar de red o reanudar la app en móvil y Smart TV.
 - **Mejor continuidad de reproducción:** Ajustes internos para una experiencia más fluida en películas, series, anime y canales en vivo.

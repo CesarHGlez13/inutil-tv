@@ -529,12 +529,25 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
     });
 
     _tvCommandPollTimer?.cancel();
+    _tvPollTickCount = 0;
     _tvCommandPollTimer =
         Timer.periodic(const Duration(milliseconds: 1500), (_) {
       _maybeReprobeRelay();
-      unawaited(_pollIncomingCommand());
+      _tvPollTickCount++;
+      // Polling adaptativo: 1.5 s cuando hubo actividad de un celular en los
+      // últimos 2 min; en reposo sondea cada 6 s (ahorra ~75 % de red/CPU
+      // mientras los comandos LAN siguen entrando en <10 ms al instante).
+      final recentlyControlled = _lastRemoteActivityAt != null &&
+          DateTime.now().difference(_lastRemoteActivityAt!) <
+              const Duration(minutes: 2);
+      if (recentlyControlled || _tvPollTickCount % 4 == 0) {
+        unawaited(_pollIncomingCommand());
+      }
     });
   }
+
+  DateTime? _lastRemoteActivityAt;
+  int _tvPollTickCount = 0;
 
   /// Re-sonda del relay, colgada del tick de 1.5 s que ya existe.
   ///
@@ -718,6 +731,7 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
       }
       req.response.headers.contentType = ContentType.json;
       final map = _tvState.toFirestore();
+      _lastRemoteActivityAt = DateTime.now();
       map['updatedAt'] =
           (_tvState.updatedAt ?? DateTime.now()).toIso8601String();
       req.response.write(jsonEncode({
@@ -746,6 +760,7 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
         final cmdId = json['commandId']?.toString() ?? _uuid.v4();
 
         if (action.isNotEmpty) {
+          _lastRemoteActivityAt = DateTime.now();
           final cmd = TvRemoteCommand(
             commandId: cmdId,
             action: action,
@@ -873,6 +888,7 @@ class TvRemoteService extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
       _lastHandledCommandId = cmd.commandId;
+      _lastRemoteActivityAt = DateTime.now();
       debugPrint(
           '📺 [TvRemoteService] Comando recibido en TV: ${cmd.action} (id: ${cmd.commandId})');
       dispatchCommandLocally(cmd);

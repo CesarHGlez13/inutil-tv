@@ -54,6 +54,7 @@ class _HeroCarouselState extends State<HeroCarousel>
   Timer? _autoTimer;
   Timer? _resumeTimer;
   bool _interacting = false;
+  bool _routeCurrent = true;
 
   @override
   void initState() {
@@ -65,6 +66,20 @@ class _HeroCarouselState extends State<HeroCarousel>
     );
     _prefetchSlides();
     if (widget.active) _startTimer();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final isCurrent = ModalRoute.of(context)?.isCurrent ?? true;
+    if (isCurrent == _routeCurrent) return;
+    _routeCurrent = isCurrent;
+    if (!isCurrent) {
+      _autoTimer?.cancel();
+      _kenBurns.stop();
+    } else if (widget.active && !_interacting) {
+      _startTimer();
+    }
   }
 
   void _prefetchSlides() {
@@ -84,10 +99,10 @@ class _HeroCarouselState extends State<HeroCarousel>
 
   void _startTimer() {
     _autoTimer?.cancel();
-    if (!widget.active || widget.featured.length <= 1) return;
+    if (!widget.active || !_routeCurrent || widget.featured.length <= 1) return;
     _kenBurns.forward(from: 0);
     _autoTimer = Timer.periodic(const Duration(milliseconds: _autoMs), (_) {
-      if (!mounted || _interacting || !widget.active) return;
+      if (!mounted || _interacting || !widget.active || !_routeCurrent) return;
       final next = (_currentIndex + 1) % widget.featured.length;
       final isTv = TvModeService.instance.isTv;
       if (isTv) {
@@ -296,25 +311,28 @@ class _HeroCarouselState extends State<HeroCarousel>
                       fit: StackFit.expand,
                       children: [
                         if (image.isNotEmpty)
-                          AnimatedBuilder(
-                            animation: _kenBurns,
-                            builder: (context, child) {
-                              final t = widget.active ? _kenBurns.value : 0.02;
-                              return Transform.scale(
-                                scale: 1.0 + 0.06 * t,
-                                alignment: Alignment.center,
-                                child: child,
-                              );
-                            },
-                            child: FastArtwork(
-                              url: image,
-                              tier: ArtworkTier.backdrop,
-                              cacheWidth: 1280,
-                              fit: BoxFit.cover,
-                              placeholder: _buildDegradado(title: item.title),
-                              errorWidget: _buildFallback(
-                                portada: item.poster == image ? '' : item.poster,
-                                title: item.title,
+                          RepaintBoundary(
+                            child: AnimatedBuilder(
+                              animation: _kenBurns,
+                              builder: (context, child) {
+                                final t = widget.active ? _kenBurns.value : 0.02;
+                                return Transform.scale(
+                                  scale: 1.0 + 0.06 * t,
+                                  alignment: Alignment.center,
+                                  child: child,
+                                );
+                              },
+                              child: FastArtwork(
+                                url: image,
+                                tier: ArtworkTier.backdrop,
+                                cacheWidth: 1080,
+                                fit: BoxFit.cover,
+                                placeholder: _buildDegradado(title: item.title),
+                                errorWidget: _buildFallback(
+                                  portada:
+                                      item.poster == image ? '' : item.poster,
+                                  title: item.title,
+                                ),
                               ),
                             ),
                           )

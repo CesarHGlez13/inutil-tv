@@ -1057,6 +1057,90 @@ class VodCatalogService {
     return all.isNotEmpty ? all.first : null;
   }
 
+  /// Resuelve fuentes desde proveedores ALTERNOS cuando el proveedor primario
+  /// respondió con servidores saturados o cortados en mitad de la reproducción.
+  Future<List<StreamSource>> resolveAlternativeProviderSources(
+    VodItem item, [
+    VodEpisode? episode,
+    void Function(String status)? onStatus,
+  ]) async {
+    try {
+      if (item.isAnime) {
+        final epNum = episode?.episodeNumber ?? 1;
+        if (item.provider == 'jkanime') {
+          final tio = await _tioanime.resolveEpisodeFallback(
+            item.slug.isNotEmpty ? item.slug : item.title,
+            epNum,
+            onStatus: onStatus,
+          );
+          if (tio.isNotEmpty) return tio;
+        }
+        final cpHits = await _poseidon.search(item.title);
+        final match =
+            _pickBestMatch(cpHits, item.title, isSeries: item.isSeries);
+        if (match != null) {
+          final cpRes = await _poseidon.resolveAllStreamSources(
+            match,
+            episode: episode,
+            onStatus: onStatus,
+          );
+          if (cpRes.isNotEmpty) return cpRes;
+        }
+        return const [];
+      }
+
+      if (item.isSeries && episode != null) {
+        if (item.provider == 'poseidon') {
+          final sk = await _serieskao.resolveByTitleAndEpisode(
+            item.title,
+            episode.seasonNumber,
+            episode.episodeNumber,
+            onStatus: onStatus,
+          );
+          if (sk.isNotEmpty) return sk;
+        } else {
+          final cpHits = await _poseidon.search(item.title);
+          final match = _pickBestMatch(cpHits, item.title, isSeries: true);
+          if (match != null) {
+            final cpRes = await _poseidon.resolveAllStreamSources(
+              match,
+              episode: episode,
+              onStatus: onStatus,
+            );
+            if (cpRes.isNotEmpty) return cpRes;
+          }
+        }
+        return const [];
+      }
+
+      // Películas: cruzar PoseidonHD2 <-> PelisFlix
+      if (item.provider == 'poseidon') {
+        final pfHits = await _pelisflix.search(item.title);
+        final match = _pickBestMatch(pfHits, item.title, isSeries: false);
+        if (match != null) {
+          final pfRes = await _pelisflix.resolveAllStreamSources(
+            match.slug,
+            onStatus: onStatus,
+          );
+          if (pfRes.isNotEmpty) return pfRes;
+        }
+      } else {
+        final cpHits = await _poseidon.search(item.title);
+        final match = _pickBestMatch(cpHits, item.title, isSeries: false);
+        if (match != null) {
+          final cpRes = await _poseidon.resolveAllStreamSources(
+            match,
+            onStatus: onStatus,
+          );
+          if (cpRes.isNotEmpty) return cpRes;
+        }
+      }
+    } catch (e) {
+      debugPrint('[VodCatalog] resolveAlternativeProviderSources err: $e');
+    }
+    return const [];
+  }
+
   static List<VodItem> _dedupeByTitle(List<VodItem> items) {
     final out = <VodItem>[];
     final seen = <String>{};

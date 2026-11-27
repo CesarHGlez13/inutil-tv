@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import 'network_config_service.dart';
 import 'stream_validator.dart';
+import 'tv_mode_service.dart';
 import 'vault_crypto.dart';
 
 /// Proxy HTTP local (`127.0.0.1:<puerto_efímero>`) de InútilTV v3.1.
@@ -28,10 +29,10 @@ class HlsStreamProxy {
   HlsStreamProxy._();
   static final HlsStreamProxy instance = HlsStreamProxy._();
 
-  static const int _maxTotalCacheBytes = 36 * 1024 * 1024; // 36 MB máx. global
+  static const int _maxTotalCacheBytes = 42 * 1024 * 1024; // 42 MB máx. global
   static const int _maxSessions = 6;
-  static const Duration _connectTimeout = Duration(seconds: 12);
-  static const Duration _upstreamTimeout = Duration(seconds: 22);
+  static const Duration _connectTimeout = Duration(seconds: 7);
+  static const Duration _upstreamTimeout = Duration(seconds: 12);
 
   HttpServer? _server;
   HttpClient? _sharedHttpClient;
@@ -118,10 +119,15 @@ class HlsStreamProxy {
   /// Registra un flujo HLS remoto y devuelve su URL local `http://127.0.0.1:...`
   /// lista para `media_kit` (con extensión `.ts` garantizada y recorte de header
   /// PNG falso).
+  ///
+  /// Si [eagerWarmup] es `true`, comienza en segundo plano a descargar el
+  /// master playlist, la variante preferida y los primeros 2 segmentos antes
+  /// incluso de que `libmpv` abra el socket local.
   Future<ProxyRegistration> registerHlsSession({
     required String upstreamUrl,
     Map<String, String> headers = const {},
     String? tag,
+    bool eagerWarmup = false,
   }) async {
     await ensureStarted();
     _evictOldSessionsIfNeeded();
@@ -136,11 +142,37 @@ class HlsStreamProxy {
     );
     _sessions[id] = session;
 
+    if (eagerWarmup) {
+      unawaited(_warmHlsStartup(session));
+    }
+
     return ProxyRegistration(
       sessionId: id,
       localUrl: 'http://127.0.0.1:$_port/s/$id/master.m3u8',
       isMp4: false,
     );
+  }
+
+  /// Calienta silenciosamente el playlist maestro, su variante preferida y los
+  /// primeros 2 segmentos en paralelo para recortar el arranque en frío.
+  Future<void> _warmHlsStartup(_ProxySession session) async {
+    try {
+      final master = await _ensureMasterPlaylist(session);
+      if (master == null || !_sessions.containsKey(session.id)) return;
+      if (master.variantIndices.isNotEmpty) {
+        final bestVarIdx =
+            master.preferredVariantIndex ?? master.variantIndices.first;
+        final sub = await _ensureSubPlaylist(session, bestVarIdx);
+        if (sub != null &&
+            sub.segmentIndices.isNotEmpty &&
+            _sessions.containsKey(session.id)) {
+          _triggerLookahead(session, sub.segmentIndices.first - 1, maxAhead: 2);
+        }
+      } else if (master.segmentIndices.isNotEmpty) {
+        _triggerLookahead(session, master.segmentIndices.first - 1,
+            maxAhead: 2);
+      }
+    } catch (_) {}
   }
 
   /// Registra un MP4 directo para precarga de sus primeros bytes y proxy de
@@ -540,28 +572,92 @@ class HlsStreamProxy {
     }
   }
 
+  Future<_RewrittenPlaylist?> _ensureMasterPlaylist(_ProxySession session) {
+    final cached = session.rewrittenMasterResult;
+    if (cached != null) return Future.value(cached);
+    final running = session.inFlightMaster;
+    if (running != null) return running;
+
+    final future = () async {
+      try {
+        final fetched = await _fetchAndRewritePlaylist(
+          session,
+          session.upstreamMasterUrl,
+        );
+        if (fetched != null) {
+          session.rewrittenMaster = fetched.rewrittenBody;
+          session.rewrittenMasterResult = fetched;
+          if (fetched.segmentIndices.isNotEmpty) {
+            session.activeMediaSegmentIndices = fetched.segmentIndices;
+          }
+        }
+        return fetched;
+      } finally {
+        session.inFlightMaster = null;
+      }
+    }();
+    session.inFlightMaster = future;
+    return future;
+  }
+
+  Future<_RewrittenPlaylist?> _ensureSubPlaylist(
+    _ProxySession session,
+    int idx,
+  ) {
+    final cached = session.rewrittenSubPlaylistResults[idx];
+    if (cached != null) return Future.value(cached);
+    final running = session.inFlightSubPlaylists[idx];
+    if (running != null) return running;
+    final upstream = session.subPlaylists[idx];
+    if (upstream == null) return Future.value(null);
+
+    final future = () async {
+      try {
+        final fetched = await _fetchAndRewritePlaylist(session, upstream);
+        if (fetched != null) {
+          session.rewrittenSubPlaylists[idx] = fetched.rewrittenBody;
+          session.rewrittenSubPlaylistResults[idx] = fetched;
+          if (fetched.segmentIndices.isNotEmpty) {
+            session.activeMediaSegmentIndices = fetched.segmentIndices;
+          }
+        }
+        return fetched;
+      } finally {
+        session.inFlightSubPlaylists.remove(idx);
+      }
+    }();
+    session.inFlightSubPlaylists[idx] = future;
+    return future;
+  }
+
   Future<void> _serveMasterPlaylist(
     HttpRequest req,
     _ProxySession session,
   ) async {
     var body = session.rewrittenMaster;
     if (body == null) {
-      final fetched = await _fetchAndRewritePlaylist(
-        session,
-        session.upstreamMasterUrl,
-      );
+      final fetched = await _ensureMasterPlaylist(session);
       if (fetched == null) {
         req.response.statusCode = HttpStatus.badGateway;
         await req.response.close();
         return;
       }
       body = fetched.rewrittenBody;
-      session.rewrittenMaster = body;
-      if (fetched.segmentIndices.isNotEmpty) {
-        session.activeMediaSegmentIndices = fetched.segmentIndices;
-        // Comenzar a descargar el primer segmento inmediatamente mientras libmpv parsea
+      if (fetched.variantIndices.isNotEmpty) {
+        // Adelantar sub-playlist y primeros 2 segmentos mientras libmpv parsea el master
+        final bestVarIdx =
+            fetched.preferredVariantIndex ?? fetched.variantIndices.first;
+        unawaited(_ensureSubPlaylist(session, bestVarIdx).then((sub) {
+          if (sub != null &&
+              sub.segmentIndices.isNotEmpty &&
+              _sessions.containsKey(session.id)) {
+            _triggerLookahead(session, sub.segmentIndices.first - 1,
+                maxAhead: 2);
+          }
+        }));
+      } else if (fetched.segmentIndices.isNotEmpty) {
         _triggerLookahead(session, fetched.segmentIndices.first - 1,
-            maxAhead: 1);
+            maxAhead: 2);
       }
     }
 
@@ -589,19 +685,17 @@ class HlsStreamProxy {
         await req.response.close();
         return;
       }
-      final fetched = await _fetchAndRewritePlaylist(session, upstream);
+      final fetched = await _ensureSubPlaylist(session, idx);
       if (fetched == null) {
         req.response.statusCode = HttpStatus.badGateway;
         await req.response.close();
         return;
       }
       body = fetched.rewrittenBody;
-      session.rewrittenSubPlaylists[idx] = body;
       if (fetched.segmentIndices.isNotEmpty) {
-        session.activeMediaSegmentIndices = fetched.segmentIndices;
-        // Comenzar a descargar el primer segmento inmediatamente mientras libmpv parsea
+        // Comenzar a descargar los primeros 2 segmentos en paralelo mientras libmpv parsea
         _triggerLookahead(session, fetched.segmentIndices.first - 1,
-            maxAhead: 1);
+            maxAhead: 2);
       }
     }
 
@@ -621,6 +715,10 @@ class HlsStreamProxy {
     _ProxySession session,
     int idx,
   ) async {
+    // Disparar lookahead INMEDIATAMENTE antes de esperar el segmento actual:
+    // así N+1..N+ahead se descargan en paralelo con N (cero cascada secuencial).
+    _triggerLookahead(session, idx);
+
     // 1. Respuesta instantánea desde memoria si ya fue precargado (<5ms!)
     var bytes = session.cachedSegments[idx];
     if (bytes == null) {
@@ -641,9 +739,6 @@ class HlsStreamProxy {
       await req.response.close();
       return;
     }
-
-    // Lookahead silencioso de +2 segmentos durante reproducción activa
-    _triggerLookahead(session, idx);
 
     req.response.statusCode = HttpStatus.ok;
     req.response.headers.set(HttpHeaders.contentTypeHeader, 'video/mp2t');
@@ -1176,7 +1271,7 @@ class HlsStreamProxy {
 
     final future = () async {
       try {
-        for (var attempt = 0; attempt < 3; attempt++) {
+        for (var attempt = 0; attempt < 2; attempt++) {
           try {
             final sw = Stopwatch()..start();
             final req = await _httpClient
@@ -1186,10 +1281,8 @@ class HlsStreamProxy {
             final res = await req.close().timeout(_upstreamTimeout);
             if (res.statusCode < 200 || res.statusCode >= 300) {
               await res.drain<void>().catchError((_) {});
-              if (attempt < 2) {
-                await Future<void>.delayed(
-                  Duration(milliseconds: attempt == 0 ? 250 : 750),
-                );
+              if (attempt == 0) {
+                await Future<void>.delayed(const Duration(milliseconds: 220));
               }
               continue;
             }
@@ -1198,6 +1291,11 @@ class HlsStreamProxy {
             sw.stop();
             if (raw.isEmpty) continue;
             _recordThroughput(raw.length, sw.elapsedMilliseconds);
+            StreamHostHealth.instance.recordThroughput(
+              upstream,
+              bytes: raw.length,
+              elapsedMs: sw.elapsedMilliseconds,
+            );
 
             final clean = stripDisguisedHeader(raw);
             if (storeInCache) {
@@ -1205,10 +1303,9 @@ class HlsStreamProxy {
             }
             return clean;
           } catch (_) {
-            if (attempt < 2) {
-              await Future<void>.delayed(
-                Duration(milliseconds: attempt == 0 ? 250 : 750),
-              );
+            StreamHostHealth.instance.recordStallOrTimeout(upstream);
+            if (attempt == 0) {
+              await Future<void>.delayed(const Duration(milliseconds: 220));
             }
           }
         }
@@ -1282,12 +1379,16 @@ class HlsStreamProxy {
     }
   }
 
+  int get _effectiveMaxTotalCacheBytes =>
+      TvModeService.instance.isTv ? 28 * 1024 * 1024 : _maxTotalCacheBytes;
+
   void _enforceGlobalByteBudget({String? protectedSessionId}) {
     var total = 0;
     for (final s in _sessions.values) {
       total += s.totalCachedBytes;
     }
-    if (total <= _maxTotalCacheBytes) return;
+    final limit = _effectiveMaxTotalCacheBytes;
+    if (total <= limit) return;
 
     final ordered = _sessions.values
         .where((s) => s.id != protectedSessionId)
@@ -1295,7 +1396,7 @@ class HlsStreamProxy {
       ..sort((a, b) => a.lastAccessedAt.compareTo(b.lastAccessedAt));
 
     for (final s in ordered) {
-      if (total <= _maxTotalCacheBytes) break;
+      if (total <= limit) break;
       total -= s.totalCachedBytes;
       s.clearCache();
     }
@@ -1391,9 +1492,13 @@ class _ProxySession {
   DateTime lastAccessedAt = DateTime.now();
 
   String? rewrittenMaster;
+  _RewrittenPlaylist? rewrittenMasterResult;
+  Future<_RewrittenPlaylist?>? inFlightMaster;
   final Map<int, String> subPlaylists = {};
   final Map<String, int> _subPlaylistToIdx = {};
   final Map<int, String> rewrittenSubPlaylists = {};
+  final Map<int, _RewrittenPlaylist> rewrittenSubPlaylistResults = {};
+  final Map<int, Future<_RewrittenPlaylist?>> inFlightSubPlaylists = {};
 
   final Map<int, String> segments = {};
   final Map<String, int> _segmentToIdx = {};

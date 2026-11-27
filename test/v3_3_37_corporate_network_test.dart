@@ -157,10 +157,10 @@ void main() {
               .firstMatch(pubspec);
       expect(match, isNotNull);
       final viva = match!;
-      expect(viva.group(1), '3.3.54');
-      expect(viva.group(2), '103');
-      expect(AppInfo.appVersion, '3.3.54');
-      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.54'));
+      expect(viva.group(1), '3.3.55');
+      expect(viva.group(2), '104');
+      expect(AppInfo.appVersion, '3.3.55');
+      expect(File('CHANGELOG.md').readAsStringSync(), contains('## 3.3.55'));
     });
 
     test('la nota de 3.3.37 no expone detalles administrativos ni internos',

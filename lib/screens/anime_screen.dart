@@ -10,7 +10,6 @@ import '../theme/app_colors.dart';
 import '../theme/app_ui.dart';
 import '../theme/inutil_icons.dart';
 import '../widgets/catalog_empty_state.dart';
-import '../widgets/inutil_tv_keyboard.dart';
 import '../widgets/poster_card.dart';
 import '../widgets/tv_focusable.dart';
 import '../widgets/vod_detail_modal.dart';
@@ -135,13 +134,14 @@ class _AnimeScreenState extends State<AnimeScreen> {
       _loadPage(page: 1, reset: true);
       return;
     }
+    if (trimmed.length < 2) return;
     final token = ++_requestToken;
-    setState(() {
-      _isSearching = true;
-      _loading = true;
-    });
-    _debounce = Timer(const Duration(milliseconds: 320), () async {
+    _debounce = Timer(const Duration(milliseconds: 520), () async {
       if (!mounted || token != _requestToken) return;
+      setState(() {
+        _isSearching = true;
+        _loading = true;
+      });
       final results = await _catalog.searchAnime(trimmed);
       if (!mounted || token != _requestToken) return;
       setState(() {
@@ -153,8 +153,8 @@ class _AnimeScreenState extends State<AnimeScreen> {
         ArtworkCacheService.instance.prefetchUrls(
           results.map((e) => e.poster),
           tier: ArtworkTier.poster,
-          maxConcurrent: 6,
-          limit: 18,
+          maxConcurrent: TvModeService.instance.isTv ? 3 : 5,
+          limit: TvModeService.instance.isTv ? 12 : 18,
         ),
       );
     });
@@ -203,17 +203,6 @@ class _AnimeScreenState extends State<AnimeScreen> {
             child: TextField(
               controller: _searchCtl,
               focusNode: _searchFocus,
-              readOnly: TvModeService.of(context),
-              showCursor: true,
-              onTap: TvModeService.of(context)
-                  ? () => InutilTvKeyboard.showModal(
-                        context,
-                        controller: _searchCtl,
-                        title: 'Buscar anime',
-                        mode: InutilTvKeyboardMode.search,
-                        onChanged: _onSearchChanged,
-                      )
-                  : null,
               onChanged: _onSearchChanged,
               style: TextStyle(
                 color: AppColors.contentHeadingFor(context),
@@ -380,6 +369,7 @@ class _AnimeScreenState extends State<AnimeScreen> {
                           }
                           final item = _items[index];
                           return PosterCard(
+                            key: ValueKey(item.id),
                             item: item,
                             expandInGrid: true,
                             onTap: () => _showDetails(item),

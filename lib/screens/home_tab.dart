@@ -10,6 +10,7 @@ import '../services/firebase_auth_service.dart';
 import '../services/my_list_service.dart';
 import '../services/offline_vault_service.dart';
 import '../services/play_target.dart';
+import '../services/tv_mode_service.dart';
 import '../services/tv_remote_service.dart';
 import '../services/tv_taste_profile_service.dart';
 import '../services/watch_history.dart';
@@ -62,6 +63,7 @@ class _HomeTabState extends State<HomeTab> {
   final _heroPlayFocusNode = FocusNode(debugLabel: 'heroPlayFocus');
 
   bool _loading = true;
+  bool _heroInView = true;
   int _featuredSeed = 0;
   List<Channel> _sportsChannels = [];
   List<Channel> _mexicoChannels = [];
@@ -93,11 +95,21 @@ class _HomeTabState extends State<HomeTab> {
   @override
   void initState() {
     super.initState();
+    _homeScrollController.addListener(_onHomeScroll);
     _loadData();
+  }
+
+  void _onHomeScroll() {
+    if (!_homeScrollController.hasClients) return;
+    final visible = _homeScrollController.offset < 340;
+    if (visible != _heroInView && mounted) {
+      setState(() => _heroInView = visible);
+    }
   }
 
   @override
   void dispose() {
+    _homeScrollController.removeListener(_onHomeScroll);
     _homeScrollController.dispose();
     _heroPlayFocusNode.dispose();
     super.dispose();
@@ -227,7 +239,7 @@ class _HomeTabState extends State<HomeTab> {
           onRefresh: () => _refreshHomeData(shuffle: true),
           child: ListView(
             controller: _homeScrollController,
-            cacheExtent: 700,
+            cacheExtent: TvModeService.instance.isTv ? 320 : 700,
             padding: const EdgeInsets.only(top: 10, bottom: 112),
             children: [
               // 0. Saludo contextual + píldoras rápidas (estilo Inútil Music v2.2+)
@@ -352,7 +364,7 @@ class _HomeTabState extends State<HomeTab> {
               if (showHero) ...[
                 HeroCarousel(
                   featured: featured,
-                  active: widget.isTabActive,
+                  active: widget.isTabActive && _heroInView,
                   onPlay: _playVod,
                   onDetails: _showDetails,
                   playFocusNode: _heroPlayFocusNode,

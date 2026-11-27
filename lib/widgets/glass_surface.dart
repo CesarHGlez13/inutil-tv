@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 
+import '../services/tv_mode_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 
@@ -100,11 +101,21 @@ class GlassSurface extends StatelessWidget {
       );
     }
 
+    // En Smart TV / TV Box conservamos el vidrio esmerilado pero con sigma
+    // compacto (6–8) y TileMode.clamp: ~70 % menos píxeles muestreados en GPU.
+    final effectiveSigma = TvModeService.instance.isTv
+        ? (blurSigma * 0.45).clamp(5.0, 8.0)
+        : blurSigma;
+
     return RepaintBoundary(
       child: ClipRRect(
         borderRadius: borderRadius,
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+          filter: ImageFilter.blur(
+            sigmaX: effectiveSigma,
+            sigmaY: effectiveSigma,
+            tileMode: TileMode.clamp,
+          ),
           child: box,
         ),
       ),

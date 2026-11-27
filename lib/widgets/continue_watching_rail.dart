@@ -75,16 +75,17 @@ class ContinueWatchingRail extends StatelessWidget {
           ),
         ),
         SizedBox(
-          height: 142,
+          height: 158,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             cacheExtent: 500,
             addAutomaticKeepAlives: false,
             padding: const EdgeInsets.symmetric(
               horizontal: appPagePaddingHorizontal,
+              vertical: 8,
             ),
             itemCount: history.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            separatorBuilder: (_, __) => const SizedBox(width: 14),
             itemBuilder: (context, i) => _buildCard(context, history[i]),
           ),
         ),

@@ -575,26 +575,26 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // En fila 0, col 0 está 'A' (en modo búsqueda arranca en mayúsculas); Select escribe 'A'
+      // En fila 0, col 0 está 'Q' (layout QWERTY en mayúsculas); Select escribe 'Q'
       await tester.sendKeyEvent(LogicalKeyboardKey.select);
       await tester.pump();
-      expect(controller.text, 'A');
+      expect(controller.text, 'Q');
 
-      // Derecha -> 'B', Select escribe 'B'
+      // Derecha -> 'W', Select escribe 'W'
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.select);
       await tester.pump();
-      expect(controller.text, 'AB');
+      expect(controller.text, 'QW');
 
       // Botón Buscar también funciona con tap directo
       await tester.tap(find.text('BUSCAR'));
       await tester.pump();
-      expect(submitted, 'AB');
+      expect(submitted, 'QW');
     });
 
     testWidgets(
-        'en modo Google TV, pulsar OK sobre un TextField abre el modal InutilTvKeyboard y escribe con D-Pad',
+        'en modo Google TV el teclado opcional QWERTY se abre solo si useCustomTvKeyboard=true',
         (tester) async {
       TvModeService.instance.setForTest(detectedTv: true);
       addTearDown(TvModeService.instance.resetForTest);
@@ -602,6 +602,7 @@ void main() {
       final controller = TextEditingController();
       final focusNode = TvFocusable.createTextFieldFocusNode(
         controller: controller,
+        useCustomTvKeyboard: true,
         tvKeyboardTitle: 'Buscar en Google TV',
         tvKeyboardMode: InutilTvKeyboardMode.search,
       );
@@ -626,12 +627,12 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Pulsar OK del control remoto de Google TV abre el teclado D-Pad propio
+      // Pulsar OK del control remoto con useCustomTvKeyboard=true abre el teclado QWERTY opcional
       await tester.sendKeyEvent(LogicalKeyboardKey.select);
       await tester.pumpAndSettle();
       expect(find.text('Buscar en Google TV'), findsOneWidget);
 
-      // Escribir 'A' y luego moverse a 'B' y pulsar Select
+      // Escribir 'Q' y luego moverse a 'W' y pulsar Select
       await tester.sendKeyEvent(LogicalKeyboardKey.select);
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
@@ -639,7 +640,7 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.select);
       await tester.pump();
 
-      expect(controller.text, 'AB');
+      expect(controller.text, 'QW');
     });
   });
 }

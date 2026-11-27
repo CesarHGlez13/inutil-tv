@@ -24,6 +24,7 @@ import '../services/tv_mode_service.dart';
 import '../services/tv_remote_service.dart';
 import '../services/tv_taste_profile_service.dart';
 import '../services/vod_catalog_service.dart';
+import '../services/vod_playback_warmup_service.dart';
 import '../services/watch_history.dart';
 import '../theme/app_colors.dart';
 import '../theme/inutil_icons.dart';
@@ -206,7 +207,12 @@ class _PlayerScreenState extends State<PlayerScreen>
   Timer? _tvSeekBarTimer;
   Timer? _tvLiveBannerTimer;
   Timer? _stallTimer;
+  Timer? _rebufferTimer;
   Timer? _progressSaveTimer;
+  final List<DateTime> _rebufferTimestamps = [];
+  Duration? _resumePositionOverride;
+  bool _triedCrossProviderFallback = false;
+  bool _switchingMidPlayback = false;
 
   // Ripple doble toque ±10s
   int _seekRippleDir = 0;
@@ -454,16 +460,20 @@ class _PlayerScreenState extends State<PlayerScreen>
       'cache': 'yes',
       'cache-pause': 'yes',
       'cache-pause-initial': 'yes',
-      'cache-pause-wait': isVod ? '2.0' : '1.0',
+      // Arranque ágil (0.6s VOD / 0.5s En Vivo) con proxy local adelantando segmentos
+      'cache-pause-wait': isVod ? '0.6' : '0.5',
       'demuxer-max-bytes': isTv
-          ? (isVod ? '16MiB' : '10MiB')
+          ? (isVod ? '20MiB' : '10MiB')
           : (settings.ultraBuffer ? '64MiB' : '32MiB'),
       'demuxer-max-back-bytes': isTv ? '6MiB' : '16MiB',
       'demuxer-readahead-secs':
-          isTv ? (isVod ? '24' : '8') : (isVod ? '60' : '12'),
-      'network-timeout': '30',
+          isTv ? (isVod ? '32' : '8') : (isVod ? '60' : '12'),
+      // Sonda FFmpeg compacta: ahorra 1–2.5 s de espera antes del primer fotograma
+      'demuxer-lavf-probesize': '1048576',
+      'demuxer-lavf-analyzeduration': '1.0',
+      'network-timeout': '20',
       'stream-lavf-o':
-          'reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=8,multiple_requests=1',
+          'reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5,multiple_requests=1',
       'framedrop': 'vo',
       'video-sync': 'audio',
       'hwdec-codecs': 'h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1',
@@ -524,13 +534,25 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   void _bindPlayerStreams() {
     _subs.add(_player.stream.buffering.listen((b) {
-      if (!mounted || _buffering == b) return;
-      setState(() => _buffering = b);
+      if (!mounted) return;
+      if (_buffering != b) {
+        setState(() => _buffering = b);
+      }
+      if (!b) {
+        _rebufferTimer?.cancel();
+      } else if (_hasVideo && _isPlaying && !_resolving && _error == null) {
+        _armMidPlaybackRebufferWatchdog();
+      }
     }));
 
     _subs.add(_player.stream.playing.listen((p) {
       if (!mounted || _isPlaying == p) return;
       setState(() => _isPlaying = p);
+      if (!p) {
+        _rebufferTimer?.cancel();
+      } else if (_hasVideo && _buffering && !_resolving && _error == null) {
+        _armMidPlaybackRebufferWatchdog();
+      }
       // IMPORTANTE: JAMÁS marcamos _hasVideo = true con un timer ciego.
       // Esperamos fotogramas reales (videoParams) o avance real (position > 600ms).
     }));
@@ -631,13 +653,130 @@ class _PlayerScreenState extends State<PlayerScreen>
     }));
   }
 
+  bool get _canAutoRecoverMidPlayback {
+    if (_switchingMidPlayback || _resolving || _error != null) return false;
+    if (_nextUntried() != null) return true;
+    return _isVodMode &&
+        widget.vodItem != null &&
+        !_triedCrossProviderFallback;
+  }
+
+  /// Guardián anti-trabado en plena reproducción:
+  /// - Si el servidor se queda pausado cargando >= 7s seguidos, o se traba
+  ///   3 veces en menos de 45s (típico CDN saturado), cambia automáticamente
+  ///   a un servidor más rápido conservando el segundo exacto de reproducción.
+  void _armMidPlaybackRebufferWatchdog() {
+    if (!_isVodMode || !_canAutoRecoverMidPlayback) return;
+    final now = DateTime.now();
+    _rebufferTimestamps
+        .removeWhere((t) => now.difference(t) > const Duration(seconds: 45));
+    _rebufferTimestamps.add(now);
+
+    if (_rebufferTimestamps.length >= 3) {
+      _rebufferTimer?.cancel();
+      unawaited(_onMidPlaybackStall());
+      return;
+    }
+
+    _rebufferTimer?.cancel();
+    _rebufferTimer = Timer(const Duration(seconds: 7), () {
+      if (!mounted || !_hasVideo || !_buffering || !_isPlaying || _resolving) {
+        return;
+      }
+      unawaited(_onMidPlaybackStall());
+    });
+  }
+
+  Future<void> _onMidPlaybackStall() async {
+    if (!mounted || _switchingMidPlayback || _resolving) return;
+    _switchingMidPlayback = true;
+    _rebufferTimer?.cancel();
+    try {
+      // Penalizar el servidor actual para que futuras películas lo eviten
+      if (_current >= 0 && _current < _activePlayables.length) {
+        StreamHostHealth.instance
+            .recordStallOrTimeout(_activePlayables[_current].url);
+      }
+
+      // Conservar el segundo exacto donde se pausó la película o episodio
+      final pos = _player.state.position;
+      if (pos > const Duration(seconds: 5)) {
+        _resumePositionOverride = pos;
+        _initialSeekDone = false;
+      }
+
+      final next = _nextUntried();
+      if (next != null) {
+        _showHudToast('Cambiando a un servidor más rápido...');
+        await _play(next);
+        return;
+      }
+
+      if (await _tryCrossProviderFailover()) {
+        return;
+      }
+    } finally {
+      _switchingMidPlayback = false;
+    }
+  }
+
+  Future<bool> _tryCrossProviderFailover() async {
+    if (!_isVodMode || widget.vodItem == null || _triedCrossProviderFallback) {
+      return false;
+    }
+    _triedCrossProviderFallback = true;
+    final item = widget.vodItem!;
+    final ep = _hasEpisodes ? widget.episodeList![_episodeIndex] : null;
+    _showHudToast('Buscando un servidor más rápido...');
+
+    final altSources =
+        await VodCatalogService().resolveAlternativeProviderSources(item, ep);
+    if (!mounted || altSources.isEmpty) return false;
+
+    final existingUrls = _activePlayables.map((p) => p.url).toSet();
+    final fresh = <Playable>[
+      for (final s in altSources)
+        if (existingUrls.add(s.url))
+          Playable(
+            s.quality.isEmpty ? 'Servidor HD' : s.quality,
+            s.url,
+            headers: s.headers,
+            subtitles: s.subtitles,
+          ),
+    ];
+    if (fresh.isEmpty) return false;
+
+    final startIndex = _activePlayables.length;
+    _activePlayables = [..._activePlayables, ...fresh];
+    await _play(startIndex);
+    return true;
+  }
+
   void _failoverOrShowError(String reason) {
     _stallTimer?.cancel();
+    _rebufferTimer?.cancel();
+    if (_current >= 0 && _current < _activePlayables.length) {
+      StreamHostHealth.instance
+          .recordStallOrTimeout(_activePlayables[_current].url);
+    }
     final next = _nextUntried();
     if (next != null) {
       _tried.add(next);
-      _showHudToast('Cambiando a ${_activePlayables[next].label}...');
+      _showHudToast('Cambiando a un servidor más rápido...');
       _play(next);
+    } else if (_isVodMode &&
+        widget.vodItem != null &&
+        !_triedCrossProviderFallback) {
+      unawaited(_tryCrossProviderFailover().then((recovered) {
+        if (!recovered && mounted && !_hasVideo) {
+          setState(() {
+            _error =
+                'No fue posible reproducir este título en este momento.\nIntenta reintentar o prueba otro episodio.';
+            _buffering = false;
+            _hasVideo = false;
+          });
+        }
+      }));
     } else {
       setState(() {
         _error =
@@ -650,16 +789,20 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   void _tryInitialSeek() {
     if (_initialSeekDone) return;
-    final target = widget.initialPosition;
-    if (target != null && target > const Duration(seconds: 8)) {
+    final overridePos = _resumePositionOverride;
+    final target = overridePos ?? widget.initialPosition;
+    if (target != null && target > const Duration(seconds: 5)) {
       _initialSeekDone = true;
+      _resumePositionOverride = null;
       Future.delayed(const Duration(milliseconds: 350), () {
         if (!mounted) return;
         final dur = _player.state.duration;
         if (dur == Duration.zero ||
             target < dur - const Duration(seconds: 10)) {
           _player.seek(target);
-          _showHudToast('Reanudando en ${_fmt(target)}');
+          _showHudToast(overridePos != null
+              ? 'Continuando en ${_fmt(target)}'
+              : 'Reanudando en ${_fmt(target)}');
         }
       });
     } else {
@@ -843,6 +986,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         preloadedLocalUrl != null && publicLabel == 'Sin conexión';
     if (!_enforcePlaybackLicenseGuard(isOfflineLocal: isOfflineLocal)) return;
     _stallTimer?.cancel();
+    _rebufferTimer?.cancel();
+    _rebufferTimestamps.clear();
     _tried.add(index);
     setState(() {
       _current = index;
@@ -890,6 +1035,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                 upstreamUrl: playable.url,
                 headers: playable.headers,
                 tag: _activeTitle,
+                eagerWarmup: true,
               )
             : await HlsStreamProxy.instance.registerMp4Session(
                 upstreamUrl: playable.url,
@@ -929,9 +1075,15 @@ class _PlayerScreenState extends State<PlayerScreen>
         });
       }
 
-      // Guardián anti-pantalla-negra: en VOD damos 22s para tolerar redes lentas
-      // (3G/4G débil) sin abortar mientras se descarga el primer segmento; en TV en Vivo 12s.
-      _stallTimer = Timer(Duration(seconds: _isVodMode ? 22 : 12), () {
+      // Guardián anti-pantalla-negra: si hay servidores de respaldo disponibles,
+      // cambiamos en 11s para no hacer esperar al usuario; en el último servidor
+      // damos 22s para tolerar redes lentas. En TV en Vivo 12s.
+      final hasBackup = _nextUntried() != null ||
+          (_isVodMode &&
+              widget.vodItem != null &&
+              !_triedCrossProviderFallback);
+      final initialWaitSec = !_isVodMode ? 12 : (hasBackup ? 11 : 22);
+      _stallTimer = Timer(Duration(seconds: initialWaitSec), () {
         if (!mounted || _hasVideo || _error != null || _resolving) return;
         _failoverOrShowError('Tiempo de espera agotado');
       });
@@ -945,18 +1097,62 @@ class _PlayerScreenState extends State<PlayerScreen>
     bool applyInitialSeek = false,
   }) async {
     _stallTimer?.cancel();
+    _rebufferTimer?.cancel();
+    _triedCrossProviderFallback = false;
     // 0. ¿Ya está descargada en la bóveda offline? 0 ms, 0 MB de datos móviles.
     if (await _tryOpenOfflineMovie(item, applyInitialSeek: applyInitialSeek)) {
       return;
     }
     if (!mounted) return;
     if (!_enforcePlaybackLicenseGuard(isOfflineLocal: false)) return;
+
+    // 0.5. ¿Ya está PRECALENTADA desde VodDetailModal? Arranque instantáneo (<300 ms)!
     setState(() {
       _resolving = true;
       _buffering = true;
       _hasVideo = false;
       _error = null;
       _tried.clear();
+      _statusMessage = 'Preparando reproducción...';
+    });
+    final warmed = await VodPlaybackWarmupService.instance.consumeOrAttach(
+      item.id,
+      waitIfInFlight: const Duration(seconds: 5),
+    );
+    if (!mounted) {
+      if (warmed != null) {
+        HlsStreamProxy.instance.releaseSession(warmed.sessionId);
+      }
+      return;
+    }
+    if (warmed != null && warmed.sources.isNotEmpty) {
+      final rawPlayables = [
+        for (final s in warmed.sources)
+          Playable(
+            s.quality.isEmpty ? 'Servidor HD' : s.quality,
+            s.url,
+            headers: s.headers,
+            subtitles: s.subtitles,
+          ),
+      ];
+      _activePlayables = _prioritizePlayablesByAudio(rawPlayables);
+      if (!applyInitialSeek) _initialSeekDone = true;
+      final samePrimary = _activePlayables.isNotEmpty &&
+          _activePlayables.first.url == warmed.sources.first.url;
+      if (samePrimary) {
+        await _play(
+          0,
+          preloadedSessionId: warmed.sessionId,
+          preloadedLocalUrl: warmed.localProxyUrl,
+        );
+      } else {
+        HlsStreamProxy.instance.releaseSession(warmed.sessionId);
+        await _play(0);
+      }
+      return;
+    }
+
+    setState(() {
       _statusMessage = 'Buscando servidores disponibles...';
     });
 
@@ -1005,6 +1201,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     _sessionTasteFlushed = false;
     _cancelNextEpisodeCountdown();
     _stallTimer?.cancel();
+    _rebufferTimer?.cancel();
+    _triedCrossProviderFallback = false;
     _preloadTriggerTimer?.cancel();
     _preloadScheduledForCurrent = false;
 
@@ -1059,6 +1257,53 @@ class _PlayerScreenState extends State<PlayerScreen>
           preloadedSessionId: preloaded.sessionId,
           preloadedLocalUrl: preloaded.localProxyUrl,
         );
+        return;
+      }
+
+      // 1.5. ¿Ya está PRECALENTADO desde VodDetailModal? Arranque instantáneo!
+      final warmed = await VodPlaybackWarmupService.instance.consumeOrAttach(
+        item.id,
+        episode: ep,
+        waitIfInFlight: const Duration(seconds: 5),
+      );
+      if (!mounted) {
+        if (warmed != null) {
+          HlsStreamProxy.instance.releaseSession(warmed.sessionId);
+        }
+        return;
+      }
+      if (warmed != null && warmed.sources.isNotEmpty) {
+        setState(() {
+          _episodeIndex = index;
+          _activeSubtitle =
+              'T${ep.seasonNumber} · Ep. ${ep.episodeNumber} — ${ep.title}';
+          _introSkipped = false;
+          _nextOverlayDismissed = false;
+          _tried.clear();
+        });
+        final rawPlayables = [
+          for (final s in warmed.sources)
+            Playable(
+              s.quality.isEmpty ? 'Servidor HD' : s.quality,
+              s.url,
+              headers: s.headers,
+              subtitles: s.subtitles,
+            ),
+        ];
+        _activePlayables = _prioritizePlayablesByAudio(rawPlayables);
+        if (!applyInitialSeek) _initialSeekDone = true;
+        final samePrimary = _activePlayables.isNotEmpty &&
+            _activePlayables.first.url == warmed.sources.first.url;
+        if (samePrimary) {
+          await _play(
+            0,
+            preloadedSessionId: warmed.sessionId,
+            preloadedLocalUrl: warmed.localProxyUrl,
+          );
+        } else {
+          HlsStreamProxy.instance.releaseSession(warmed.sessionId);
+          await _play(0);
+        }
         return;
       }
     }
@@ -1527,6 +1772,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _tvSeekBarTimer?.cancel();
     _tvLiveBannerTimer?.cancel();
     _stallTimer?.cancel();
+    _rebufferTimer?.cancel();
     _hudToastTimer?.cancel();
     _seekRippleTimer?.cancel();
     _nextCountdownTimer?.cancel();
@@ -1862,11 +2108,16 @@ class _PlayerScreenState extends State<PlayerScreen>
                   left: 0,
                   right: 0,
                   child: Center(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(20),
-                      child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-                        child: Container(
+                    child: RepaintBoundary(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(
+                            sigmaX: TvModeService.instance.isTv ? 7 : 14,
+                            sigmaY: TvModeService.instance.isTv ? 7 : 14,
+                            tileMode: TileMode.clamp,
+                          ),
+                          child: Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 16,
                             vertical: 8,
@@ -1890,6 +2141,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                           ),
                         ),
                       ),
+                    ),
                     ),
                   ),
                 ),
@@ -2000,11 +2252,16 @@ class _PlayerScreenState extends State<PlayerScreen>
     final isB = _draggingBrightness;
     final val = isB ? _brightnessVal : _volumeVal;
     return Center(
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(18),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-          child: Container(
+      child: RepaintBoundary(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(
+              sigmaX: TvModeService.instance.isTv ? 7 : 16,
+              sigmaY: TvModeService.instance.isTv ? 7 : 16,
+              tileMode: TileMode.clamp,
+            ),
+            child: Container(
             width: 152,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
@@ -2051,29 +2308,38 @@ class _PlayerScreenState extends State<PlayerScreen>
           ),
         ),
       ),
+      ),
     );
   }
 
   /// Pantalla de carga minimalista y elegante (póster difuminado + progreso honesto)
   Widget _buildLoadingOverlay(Color accent) {
+    final blurRadius = TvModeService.instance.isTv ? 10.0 : 22.0;
     return Stack(
       fit: StackFit.expand,
       children: [
         if (widget.posterUrl.isNotEmpty)
-          ImageFiltered(
-            imageFilter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-            child: Opacity(
-              opacity: 0.28,
-              child: FastArtwork(
-                url:
-                    widget.posterUrl.startsWith('http') ? widget.posterUrl : '',
-                localFilePath: widget.posterUrl.startsWith('http')
-                    ? null
-                    : widget.posterUrl,
-                tier: ArtworkTier.backdrop,
-                cacheWidth: 540,
-                fit: BoxFit.cover,
-                errorWidget: const SizedBox.shrink(),
+          RepaintBoundary(
+            child: ImageFiltered(
+              imageFilter: ImageFilter.blur(
+                sigmaX: blurRadius,
+                sigmaY: blurRadius,
+                tileMode: TileMode.clamp,
+              ),
+              child: Opacity(
+                opacity: 0.28,
+                child: FastArtwork(
+                  url: widget.posterUrl.startsWith('http')
+                      ? widget.posterUrl
+                      : '',
+                  localFilePath: widget.posterUrl.startsWith('http')
+                      ? null
+                      : widget.posterUrl,
+                  tier: ArtworkTier.backdrop,
+                  cacheWidth: TvModeService.instance.isTv ? 360 : 540,
+                  fit: BoxFit.cover,
+                  errorWidget: const SizedBox.shrink(),
+                ),
               ),
             ),
           ),
@@ -3180,11 +3446,17 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   Widget _buildNextEpisodeCard() {
     final nextEp = widget.episodeList![_episodeIndex + 1];
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-        child: Container(
+    final sigma = TvModeService.instance.isTv ? 7.0 : 16.0;
+    return RepaintBoundary(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(
+            sigmaX: sigma,
+            sigmaY: sigma,
+            tileMode: TileMode.clamp,
+          ),
+          child: Container(
           width: 278,
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -3290,6 +3562,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             ],
           ),
         ),
+      ),
       ),
     );
   }
@@ -3452,53 +3725,66 @@ class _PlayerScreenState extends State<PlayerScreen>
       context: context,
       backgroundColor: AppColors.carbonSurface,
       builder: (ctx) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          padding: const EdgeInsets.all(16),
-          children: [
-            const Text(
-              'Servidores disponibles',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 10),
-            for (var i = 0; i < _activePlayables.length; i++)
-              _sheetRow(
-                active: i == _current,
-                leading: Icon(
-                  i == _current
-                      ? Icons.check_circle_rounded
-                      : Icons.dns_outlined,
-                  color: i == _current ? Colors.white : Colors.white54,
-                ),
-                title: Text(
-                  PlayerScreen.publicServerLabel(i, _activePlayables[i].label),
-                  style: const TextStyle(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(ctx).height * 0.65,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, 10),
+                child: Text(
+                  'Servidores disponibles',
+                  style: TextStyle(
                     color: Colors.white,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  final chosenLabel = _activePlayables[i].label;
-                  final normLang =
-                      TvTasteProfileService.normalizeAudioLang(chosenLabel);
-                  if (normLang.isNotEmpty) {
-                    _activeAudioLang = normLang;
-                    unawaited(
-                      TvTasteProfileService.instance.recordAudioChoice(
-                        chosenLabel,
-                        item: widget.vodItem,
-                      ),
-                    );
-                  }
-                  _play(i);
-                },
               ),
-          ],
+              Flexible(
+                child: ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  itemCount: _activePlayables.length,
+                  itemBuilder: (_, i) => _sheetRow(
+                    active: i == _current,
+                    leading: Icon(
+                      i == _current
+                          ? Icons.check_circle_rounded
+                          : Icons.dns_outlined,
+                      color: i == _current ? Colors.white : Colors.white54,
+                    ),
+                    title: Text(
+                      PlayerScreen.publicServerLabel(
+                          i, _activePlayables[i].label),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      final chosenLabel = _activePlayables[i].label;
+                      final normLang =
+                          TvTasteProfileService.normalizeAudioLang(chosenLabel);
+                      if (normLang.isNotEmpty) {
+                        _activeAudioLang = normLang;
+                        unawaited(
+                          TvTasteProfileService.instance.recordAudioChoice(
+                            chosenLabel,
+                            item: widget.vodItem,
+                          ),
+                        );
+                      }
+                      _play(i);
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -3511,127 +3797,165 @@ class _PlayerScreenState extends State<PlayerScreen>
       context: context,
       backgroundColor: AppColors.carbonSurface,
       builder: (ctx) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          padding: const EdgeInsets.all(16),
-          children: [
-            const Text(
-              'Velocidad de reproducción',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 8),
-            for (final s in speeds)
-              _sheetRow(
-                active: (currentRate - s).abs() < 0.05,
-                leading: Icon(
-                  (currentRate - s).abs() < 0.05
-                      ? Icons.check_circle_rounded
-                      : Icons.speed_rounded,
-                  color: (currentRate - s).abs() < 0.05
-                      ? Colors.white
-                      : Colors.white54,
-                ),
-                title: Text(
-                  s == 1.0 ? 'Normal (1.0x)' : '${s}x',
-                  style: const TextStyle(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(ctx).height * 0.65,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text(
+                  'Velocidad de reproducción',
+                  style: TextStyle(
                     color: Colors.white,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _player.setRate(s);
-                  _showHudToast('Velocidad ${s}x');
-                },
               ),
-          ],
+              Flexible(
+                child: ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  itemCount: speeds.length,
+                  itemBuilder: (_, idx) {
+                    final s = speeds[idx];
+                    return _sheetRow(
+                      active: (currentRate - s).abs() < 0.05,
+                      leading: Icon(
+                        (currentRate - s).abs() < 0.05
+                            ? Icons.check_circle_rounded
+                            : Icons.speed_rounded,
+                        color: (currentRate - s).abs() < 0.05
+                            ? Colors.white
+                            : Colors.white54,
+                      ),
+                      title: Text(
+                        s == 1.0 ? 'Normal (1.0x)' : '${s}x',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _player.setRate(s);
+                        _showHudToast('Velocidad ${s}x');
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
   void _openTracksSheet() {
-    final audios = _player.state.tracks.audio;
-    final subs = _player.state.tracks.subtitle;
+    final audios =
+        _player.state.tracks.audio.where((a) => a.id != 'no').toList();
+    final subs = _player.state.tracks.subtitle
+        .where((s) => s.id != 'no' && s.id != 'auto')
+        .toList();
+    final rows = <Widget>[
+      if (audios.length > 1) ...[
+        const Padding(
+          padding: EdgeInsets.only(top: 4, bottom: 4),
+          child: Text(
+            'Pistas de Audio',
+            style: TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+        ),
+        for (final a in audios)
+          _sheetRow(
+            active: _player.state.track.audio.id == a.id,
+            title: Text(
+              a.title ?? a.language ?? 'Pista ${a.id}',
+              style: const TextStyle(color: Colors.white),
+            ),
+            trailing: _player.state.track.audio.id == a.id
+                ? const Icon(Icons.check_rounded, color: Colors.white)
+                : null,
+            onTap: () {
+              Navigator.pop(context);
+              _player.setAudioTrack(a);
+            },
+          ),
+      ],
+      const Padding(
+        padding: EdgeInsets.only(top: 8, bottom: 4),
+        child: Text(
+          'Subtítulos',
+          style: TextStyle(color: Colors.white54, fontSize: 12),
+        ),
+      ),
+      _sheetRow(
+        active: _player.state.track.subtitle.id == 'no',
+        title: const Text(
+          'Desactivados',
+          style: TextStyle(color: Colors.white),
+        ),
+        trailing: _player.state.track.subtitle.id == 'no'
+            ? const Icon(Icons.check_rounded, color: Colors.white)
+            : null,
+        onTap: () {
+          Navigator.pop(context);
+          _player.setSubtitleTrack(SubtitleTrack.no());
+        },
+      ),
+      for (final s in subs)
+        _sheetRow(
+          active: _player.state.track.subtitle.id == s.id,
+          title: Text(
+            s.title ?? s.language ?? 'Subtítulo ${s.id}',
+            style: const TextStyle(color: Colors.white),
+          ),
+          trailing: _player.state.track.subtitle.id == s.id
+              ? const Icon(Icons.check_rounded, color: Colors.white)
+              : null,
+          onTap: () {
+            Navigator.pop(context);
+            _player.setSubtitleTrack(s);
+          },
+        ),
+    ];
+
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.carbonSurface,
       builder: (ctx) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          padding: const EdgeInsets.all(16),
-          children: [
-            const Text(
-              'Audio y Subtítulos',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            if (audios.length > 1) ...[
-              const SizedBox(height: 12),
-              const Text(
-                'Pistas de Audio',
-                style: TextStyle(color: Colors.white54, fontSize: 12),
-              ),
-              for (final a in audios)
-                if (a.id != 'no')
-                  _sheetRow(
-                    active: _player.state.track.audio.id == a.id,
-                    title: Text(
-                      a.title ?? a.language ?? 'Pista ${a.id}',
-                      style: const TextStyle(color: Colors.white),
-                    ),
-                    trailing: _player.state.track.audio.id == a.id
-                        ? const Icon(Icons.check_rounded, color: Colors.white)
-                        : null,
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      _player.setAudioTrack(a);
-                    },
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(ctx).height * 0.65,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text(
+                  'Audio y Subtítulos',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
                   ),
-            ],
-            const SizedBox(height: 12),
-            const Text(
-              'Subtítulos',
-              style: TextStyle(color: Colors.white54, fontSize: 12),
-            ),
-            _sheetRow(
-              active: _player.state.track.subtitle.id == 'no',
-              title: const Text(
-                'Desactivados',
-                style: TextStyle(color: Colors.white),
-              ),
-              trailing: _player.state.track.subtitle.id == 'no'
-                  ? const Icon(Icons.check_rounded, color: Colors.white)
-                  : null,
-              onTap: () {
-                Navigator.pop(ctx);
-                _player.setSubtitleTrack(SubtitleTrack.no());
-              },
-            ),
-            for (final s in subs)
-              if (s.id != 'no' && s.id != 'auto')
-                _sheetRow(
-                  active: _player.state.track.subtitle.id == s.id,
-                  title: Text(
-                    s.title ?? s.language ?? 'Subtítulo ${s.id}',
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                  trailing: _player.state.track.subtitle.id == s.id
-                      ? const Icon(Icons.check_rounded, color: Colors.white)
-                      : null,
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _player.setSubtitleTrack(s);
-                  },
                 ),
-          ],
+              ),
+              Flexible(
+                child: ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  itemCount: rows.length,
+                  itemBuilder: (_, idx) => rows[idx],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

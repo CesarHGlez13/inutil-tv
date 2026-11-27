@@ -429,29 +429,31 @@ class SeriesKaoService {
       final embeds = extractDecryptedEmbeds(vidRes.body);
       if (embeds.isEmpty) return [];
 
-      // Ordenar: LAT primero -> ESP -> SUB; VidHide y StreamWish primero
+      // Ordenar: LAT primero -> ESP -> SUB; servidores sanos y más rápidos primero
       embeds.sort((a, b) {
         final langCmp =
             _langPriority(a.language).compareTo(_langPriority(b.language));
         if (langCmp != 0) return langCmp;
+        final pa = StreamHostHealth.instance.hostOrderPenalty(a.server);
+        final pb = StreamHostHealth.instance.hostOrderPenalty(b.server);
+        if (pa != pb) return pa.compareTo(pb);
         return _hostPriority(a.server).compareTo(_hostPriority(b.server));
       });
 
       final cp = CuevanaPoseidonService();
-      final verified = <StreamSource>[];
+      final verifiedScored = <({StreamSource source, double score})>[];
       final timeoutFallbacks = <StreamSource>[];
       final seenUrls = <String>{};
 
-      // Carrera en lotes paralelos de 3 hosts: retorna en cuanto haya >=1 servidor
-      // verificado por bytes (sin esperar otro lote extra de 8s) y conserva respaldo
-      // en caso de timeout por red lenta.
+      // Carrera en lotes paralelos de 3 hosts con sonda real de velocidad (48 KB)
       const batchSize = 3;
-      for (var i = 0; i < embeds.length && verified.isEmpty; i += batchSize) {
+      for (var i = 0; i < embeds.length && verifiedScored.isEmpty; i += batchSize) {
         final batch = embeds.skip(i).take(batchSize).toList();
         onStatus?.call(
           'Verificando servidor (${batch.first.langLabel})...',
         );
 
+        final probeScores = <String, double>{};
         final batchResults =
             await CuevanaPoseidonService.collectBatchWithFastWin(
           batch.map((e) async {
@@ -479,15 +481,22 @@ class SeriesKaoService {
 
             StreamSource? timedOutCandidate;
             for (final src in extracted) {
-              final status = await StreamValidator.validateUrlDetailed(
+              final probe = await StreamValidator.probeUrl(
                 src.url,
                 headers: src.headers,
-                timeout: const Duration(seconds: 9),
+                timeout: const Duration(seconds: 7),
+                server: src.server,
               );
-              if (status == StreamValidationStatus.valid) {
-                return (src, status);
+              if (probe.isValid) {
+                probeScores[src.url] = StreamHostHealth.instance.scoreFor(
+                  url: src.url,
+                  server: src.server,
+                  probeBytesPerSec: probe.bytesPerSec,
+                  latencyMs: probe.latencyMs,
+                );
+                return (src, probe.status);
               }
-              if (status == StreamValidationStatus.timeout &&
+              if (probe.status == StreamValidationStatus.timeout &&
                   timedOutCandidate == null) {
                 timedOutCandidate = src;
               }
@@ -497,17 +506,28 @@ class SeriesKaoService {
             }
             return (null as StreamSource?, StreamValidationStatus.invalid);
           }).toList(growable: false),
+          graceWindow: const Duration(milliseconds: 900),
         );
 
         for (final (s, status) in batchResults) {
           if (s == null || !seenUrls.add(s.url)) continue;
           if (status == StreamValidationStatus.valid) {
-            verified.add(s);
+            verifiedScored.add((
+              source: s,
+              score: probeScores[s.url] ??
+                  StreamHostHealth.instance.scoreFor(
+                    url: s.url,
+                    server: s.server,
+                  ),
+            ));
           } else if (status == StreamValidationStatus.timeout) {
             timeoutFallbacks.add(s);
           }
         }
       }
+
+      verifiedScored.sort((a, b) => b.score.compareTo(a.score));
+      final verified = verifiedScored.map((e) => e.source).toList();
 
       final resolved = <StreamSource>[
         ...verified,

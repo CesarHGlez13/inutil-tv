@@ -819,64 +819,87 @@ class JkAnimeService {
       final matches = pageHtml == null
           ? const <RegExpMatch>[]
           : regex.allMatches(pageHtml).toList();
-      var idx = 0;
+      final playerUrls = <String>[
+        for (final m in matches)
+          if (m.group(1) != null && m.group(1)!.startsWith('http')) m.group(1)!,
+      ];
 
-      for (final m in matches) {
-        final playerUrl = m.group(1);
-        if (playerUrl == null || !playerUrl.startsWith('http')) continue;
-        idx++;
-        onStatus?.call('Verificando servidor #$idx...');
+      final scored = <({StreamSource source, double score})>[];
+      const batchSize = 3;
+      for (var i = 0; i < playerUrls.length && scored.isEmpty; i += batchSize) {
+        final batch = playerUrls.skip(i).take(batchSize).toList();
+        onStatus?.call('Verificando servidores rápidos...');
+        final batchResults = await Future.wait(
+          List.generate(batch.length, (offset) async {
+            final idx = i + offset + 1;
+            final playerUrl = batch[offset];
+            try {
+              final pRes = await _send(
+                'GET',
+                playerUrl,
+                extra: {'Referer': episodePageUrl},
+                timeout: const Duration(seconds: 7),
+              );
+              if (pRes == null || pRes.statusCode != 200) return null;
 
-        try {
-          final pRes = await _send(
-            'GET',
-            playerUrl,
-            extra: {'Referer': episodePageUrl},
-            timeout: const Duration(seconds: 7),
-          );
-
-          if (pRes == null || pRes.statusCode != 200) continue;
-
-          String? streamUrl;
-          final m3Match = RegExp(r'''(https?://[^\s"'<>]+\.m3u8[^\s"'<>]*)''')
-              .firstMatch(pRes.body);
-          if (m3Match != null) {
-            streamUrl = m3Match.group(1)!;
-          } else {
-            final atobMatch =
-                RegExp(r'''atob\(\s*['"]([A-Za-z0-9+/=]{10,})['"]\)''')
-                    .firstMatch(pRes.body);
-            if (atobMatch != null) {
-              try {
-                final dec = utf8.decode(
-                  base64.decode(atobMatch.group(1)!),
-                  allowMalformed: true,
-                );
-                if (dec.contains('.m3u8') || dec.startsWith('http')) {
-                  streamUrl = dec;
+              String? streamUrl;
+              final m3Match =
+                  RegExp(r'''(https?://[^\s"'<>]+\.m3u8[^\s"'<>]*)''')
+                      .firstMatch(pRes.body);
+              if (m3Match != null) {
+                streamUrl = m3Match.group(1)!;
+              } else {
+                final atobMatch =
+                    RegExp(r'''atob\(\s*['"]([A-Za-z0-9+/=]{10,})['"]\)''')
+                        .firstMatch(pRes.body);
+                if (atobMatch != null) {
+                  try {
+                    final dec = utf8.decode(
+                      base64.decode(atobMatch.group(1)!),
+                      allowMalformed: true,
+                    );
+                    if (dec.contains('.m3u8') || dec.startsWith('http')) {
+                      streamUrl = dec;
+                    }
+                  } catch (_) {}
                 }
-              } catch (_) {}
-            }
-          }
+              }
 
-          if (streamUrl != null &&
-              streamUrl.isNotEmpty &&
-              seenUrls.add(streamUrl)) {
-            final valid = await StreamValidator.validateUrl(
-              streamUrl,
-              headers: playbackHeaders,
-            );
-            if (!valid) continue;
-            sources.add(StreamSource(
-              url: streamUrl,
-              quality: 'Servidor #$idx · HD',
-              server: 'jkanime',
-              headers: playbackHeaders,
-            ));
-            if (sources.length >= 2) break;
+              if (streamUrl == null || streamUrl.isEmpty) return null;
+              final probe = await StreamValidator.probeUrl(
+                streamUrl,
+                headers: playbackHeaders,
+                timeout: const Duration(seconds: 7),
+                server: 'jkanime',
+              );
+              if (!probe.isValid) return null;
+              return (
+                source: StreamSource(
+                  url: streamUrl,
+                  quality: 'Servidor #$idx · HD',
+                  server: 'jkanime',
+                  headers: playbackHeaders,
+                ),
+                score: StreamHostHealth.instance.scoreFor(
+                  url: streamUrl,
+                  server: 'jkanime',
+                  probeBytesPerSec: probe.bytesPerSec,
+                  latencyMs: probe.latencyMs,
+                ),
+              );
+            } catch (_) {
+              return null;
+            }
+          }),
+        );
+        for (final r in batchResults) {
+          if (r != null && seenUrls.add(r.source.url)) {
+            scored.add(r);
           }
-        } catch (_) {}
+        }
       }
+      scored.sort((a, b) => b.score.compareTo(a.score));
+      sources.addAll(scored.map((e) => e.source));
 
       // Failover automático a TioAnime (YourUpload MP4 verificado) si JKAnime falló
       if (sources.isEmpty) {

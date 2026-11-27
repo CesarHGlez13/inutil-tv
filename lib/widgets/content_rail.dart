@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
+import '../services/tv_mode_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_ui.dart';
 import 'poster_card.dart';
@@ -95,21 +96,23 @@ class ContentRail extends StatelessWidget {
           ),
         ),
         SizedBox(
-          height: 236,
+          height: 252,
           child: loading
               ? _buildSkeletonRail(context)
               : ListView.separated(
                   scrollDirection: Axis.horizontal,
-                  cacheExtent: 640,
+                  cacheExtent: TvModeService.instance.isTv ? 360 : 640,
                   addAutomaticKeepAlives: false,
                   padding: const EdgeInsets.symmetric(
                     horizontal: appPagePaddingHorizontal,
+                    vertical: 8,
                   ),
                   itemCount: items.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 12),
+                  separatorBuilder: (_, __) => const SizedBox(width: 14),
                   itemBuilder: (context, index) {
                     final item = items[index];
                     return PosterCard(
+                      key: ValueKey(item.id),
                       item: item,
                       width: 128,
                       height: 188,

@@ -43,17 +43,18 @@ class _SearchScreenState extends State<SearchScreen> {
 
   static void injectText(String text) {
     _activeInstance?._controller.text = text;
-    _activeInstance?._onSearchChanged(text);
+    _activeInstance?._runSearchNow(text);
   }
 
   static void submitSearch() {
-    // El submit simplemente hace focus en los resultados (ya se buscó)
-    _activeInstance?._searchFocus.unfocus();
+    final inst = _activeInstance;
+    if (inst == null) return;
+    inst._runSearchNow(inst._controller.text, moveFocusToResults: true);
   }
 
   static void clearSearch() {
     _activeInstance?._controller.clear();
-    _activeInstance?._onSearchChanged('');
+    _activeInstance?._runSearchNow('');
   }
 
   final _catalog = VodCatalogService();
@@ -62,19 +63,15 @@ class _SearchScreenState extends State<SearchScreen> {
   final _firstFilterFocus = FocusNode(debugLabel: 'searchFirstFilter');
   late final FocusNode _searchFocus = TvFocusable.createTextFieldFocusNode(
     controller: _controller,
-    onDoneKey: () {
-      if (!_tvKeyboardVisible) {
-        setState(() => _tvKeyboardVisible = true);
-      }
-    },
   );
+  final ValueNotifier<bool> _hasText = ValueNotifier<bool>(false);
+  final ValueNotifier<bool> _searchingNotifier = ValueNotifier<bool>(false);
   bool _tvKeyboardVisible = false;
-  bool _tvKeyboardInitialized = false;
 
   List<VodItem> _matchedVod = [];
   List<Channel> _allChannels = [];
   List<Channel> _matchedChannels = [];
-  bool _searching = false;
+  String _activeQuery = '';
   int _requestToken = 0;
   Timer? _debounce;
 
@@ -119,23 +116,13 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (!_tvKeyboardInitialized) {
-      _tvKeyboardInitialized = true;
-      _tvKeyboardVisible = TvModeService.of(context);
-      if (_tvKeyboardVisible) {
-        SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
-      }
-    }
-  }
-
-  @override
   void dispose() {
     _debounce?.cancel();
     _controller.dispose();
     _searchFocus.dispose();
     _firstFilterFocus.dispose();
+    _hasText.dispose();
+    _searchingNotifier.dispose();
     if (_SearchScreenState._activeInstance == this) {
       _SearchScreenState._activeInstance = null;
     }
@@ -154,28 +141,80 @@ class _SearchScreenState extends State<SearchScreen> {
     if (!mounted || token != _requestToken) return;
     final slice = pop.take(18).toList();
     setState(() => _matchedVod = slice);
+    final isTv = TvModeService.instance.isTv;
     unawaited(
       ArtworkCacheService.instance.prefetchUrls(
         slice.map((e) => e.poster),
         tier: ArtworkTier.poster,
-        maxConcurrent: 6,
-        limit: 18,
+        maxConcurrent: isTv ? 3 : 5,
+        limit: isTv ? 12 : 18,
       ),
     );
   }
 
+  /// Al escribir:
+  /// - CERO `setState` de la pantalla completa por tecla (actualiza solo el
+  ///   icono de limpiar vía `ValueNotifier`), para que el teclado de Google TV
+  ///   jamás se trabe ni pierda fluidez.
+  /// - En Smart TV / Google TV NO dispara raspado de red en cada letra: busca
+  ///   al pulsar "Buscar / ✓" en el teclado (o tras una pausa larga si usa el
+  ///   teclado interno opcional), liberando el 100% de CPU para escribir suave.
   void _onSearchChanged(String query) {
     _debounce?.cancel();
     final q = query.trim();
+    if (_hasText.value != q.isNotEmpty) {
+      _hasText.value = q.isNotEmpty;
+    }
+
     if (q.isEmpty) {
-      setState(() {
-        _searching = false;
-        _matchedChannels = _allChannels.take(8).toList();
-      });
-      _bootstrap();
+      _searchingNotifier.value = false;
+      if (_activeQuery.isNotEmpty) {
+        _activeQuery = '';
+        setState(() {
+          _matchedChannels = _allChannels.take(8).toList();
+        });
+        _bootstrap();
+      }
       return;
     }
 
+    final isTv = TvModeService.instance.isTv;
+    // En Google TV con teclado nativo: esperar a que el usuario pulse Buscar/✓
+    // (cero trabajo pesado mientras navega teclas en Gboard TV).
+    if (isTv && !_tvKeyboardVisible) {
+      return;
+    }
+
+    // Con teclado interno opcional o en celular: debounce prudente y mín. 2-3 letras
+    final minChars = isTv ? 3 : 2;
+    if (q.length < minChars) return;
+    final wait = isTv
+        ? const Duration(milliseconds: 1100)
+        : const Duration(milliseconds: 480);
+    _debounce = Timer(wait, () => _runSearchNow(q));
+  }
+
+  Future<void> _runSearchNow(
+    String rawQuery, {
+    bool moveFocusToResults = false,
+  }) async {
+    _debounce?.cancel();
+    final q = rawQuery.trim();
+    if (_hasText.value != q.isNotEmpty) {
+      _hasText.value = q.isNotEmpty;
+    }
+    if (q.isEmpty) {
+      _searchingNotifier.value = false;
+      _activeQuery = '';
+      setState(() {
+        _matchedChannels = _allChannels.take(8).toList();
+      });
+      await _bootstrap();
+      return;
+    }
+
+    final token = ++_requestToken;
+    _searchingNotifier.value = true;
     final lower = q.toLowerCase();
     final matchedCh = _allChannels
         .where((c) =>
@@ -184,37 +223,38 @@ class _SearchScreenState extends State<SearchScreen> {
         .take(12)
         .toList();
 
-    final token = ++_requestToken;
+    final vodResults = await _catalog.search(q);
+    if (!mounted || token != _requestToken) return;
+
+    _activeQuery = q;
+    _searchingNotifier.value = false;
     setState(() {
-      _searching = true;
       _matchedChannels = matchedCh;
+      _matchedVod = vodResults;
     });
 
-    _debounce = Timer(const Duration(milliseconds: 320), () async {
-      if (!mounted || token != _requestToken) return;
-      final vodResults = await _catalog.search(q);
-      if (!mounted || token != _requestToken) return;
-      setState(() {
-        _matchedVod = vodResults;
-        _searching = false;
-      });
-      if (q.length >= 2) {
-        unawaited(
-          TvTasteProfileService.instance.recordSearch(
-            q,
-            topResults: vodResults,
-          ),
-        );
-      }
+    if (moveFocusToResults && mounted) {
+      SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+      _firstFilterFocus.requestFocus();
+    }
+
+    if (q.length >= 2) {
       unawaited(
-        ArtworkCacheService.instance.prefetchUrls(
-          vodResults.map((e) => e.poster),
-          tier: ArtworkTier.poster,
-          maxConcurrent: 6,
-          limit: 18,
+        TvTasteProfileService.instance.recordSearch(
+          q,
+          topResults: vodResults,
         ),
       );
-    });
+    }
+    final isTv = TvModeService.instance.isTv;
+    unawaited(
+      ArtworkCacheService.instance.prefetchUrls(
+        vodResults.map((e) => e.poster),
+        tier: ArtworkTier.poster,
+        maxConcurrent: isTv ? 3 : 5,
+        limit: isTv ? 12 : 18,
+      ),
+    );
   }
 
   void _showDetails(VodItem item) {
@@ -279,7 +319,9 @@ class _SearchScreenState extends State<SearchScreen> {
     final headingColor = AppColors.contentHeadingFor(context);
 
     final isTv = TvModeService.of(context);
-    final useOnScreenKeyboard = isTv || _tvKeyboardVisible;
+    final useOnScreenKeyboard = _tvKeyboardVisible;
+    final filteredVod = _filteredVod;
+    final filteredChannels = _filteredChannels;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -306,16 +348,16 @@ class _SearchScreenState extends State<SearchScreen> {
               autofocus: !useOnScreenKeyboard,
               readOnly: useOnScreenKeyboard,
               showCursor: true,
-              onTap: () {
-                if (isTv && !_tvKeyboardVisible) {
-                  setState(() => _tvKeyboardVisible = true);
-                }
-              },
+              textInputAction: TextInputAction.search,
               onChanged: _onSearchChanged,
+              onSubmitted: (value) =>
+                  _runSearchNow(value, moveFocusToResults: true),
               style: TextStyle(color: headingColor, fontSize: 13.5),
               decoration: InputDecoration(
                 filled: false,
-                hintText: 'Buscar películas, series, anime o canales...',
+                hintText: isTv
+                    ? 'Escribe y pulsa Buscar en el teclado...'
+                    : 'Buscar películas, series, anime o canales...',
                 hintStyle: TextStyle(color: subColor, fontSize: 12.5),
                 prefixIcon: Padding(
                   padding: const EdgeInsets.all(11),
@@ -328,30 +370,59 @@ class _SearchScreenState extends State<SearchScreen> {
                 suffixIcon: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (_searching)
-                      Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(
-                            color: accent,
-                            strokeWidth: 2,
-                          ),
-                        ),
-                      )
-                    else if (_controller.text.isNotEmpty)
-                      IconButton(
-                        icon: Icon(
-                          Icons.close_rounded,
-                          color: subColor,
-                          size: 18,
-                        ),
-                        onPressed: () {
-                          _controller.clear();
-                          _onSearchChanged('');
-                        },
-                      ),
+                    ValueListenableBuilder<bool>(
+                      valueListenable: _searchingNotifier,
+                      builder: (context, isSearching, _) {
+                        if (isSearching) {
+                          return Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                color: accent,
+                                strokeWidth: 2,
+                              ),
+                            ),
+                          );
+                        }
+                        return ValueListenableBuilder<bool>(
+                          valueListenable: _hasText,
+                          builder: (context, hasText, _) {
+                            if (!hasText) return const SizedBox.shrink();
+                            return Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (isTv)
+                                  IconButton(
+                                    tooltip: 'Buscar ahora',
+                                    icon: Icon(
+                                      Icons.search_rounded,
+                                      color: accent,
+                                      size: 20,
+                                    ),
+                                    onPressed: () => _runSearchNow(
+                                      _controller.text,
+                                      moveFocusToResults: true,
+                                    ),
+                                  ),
+                                IconButton(
+                                  icon: Icon(
+                                    Icons.close_rounded,
+                                    color: subColor,
+                                    size: 18,
+                                  ),
+                                  onPressed: () {
+                                    _controller.clear();
+                                    _runSearchNow('');
+                                  },
+                                ),
+                              ],
+                            );
+                          },
+                        );
+                      },
+                    ),
                     IconButton(
                       tooltip: _tvKeyboardVisible
                           ? 'Ocultar teclado en pantalla'
@@ -368,6 +439,10 @@ class _SearchScreenState extends State<SearchScreen> {
                         if (_tvKeyboardVisible) {
                           SystemChannels.textInput
                               .invokeMethod<void>('TextInput.hide');
+                        } else {
+                          _searchFocus.requestFocus();
+                          SystemChannels.textInput
+                              .invokeMethod<void>('TextInput.show');
                         }
                       },
                     ),
@@ -380,232 +455,250 @@ class _SearchScreenState extends State<SearchScreen> {
           ),
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.only(bottom: 36),
-        children: [
+      body: CustomScrollView(
+        cacheExtent: isTv ? 260 : 500,
+        slivers: [
           if (_tvKeyboardVisible)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                appPagePaddingHorizontal,
-                4,
-                appPagePaddingHorizontal,
-                8,
-              ),
-              child: InutilTvKeyboard(
-                controller: _controller,
-                mode: InutilTvKeyboardMode.search,
-                autofocusFirstKey: true,
-                onChanged: _onSearchChanged,
-                onSubmit: () => _firstFilterFocus.requestFocus(),
-                onMoveDownToResults: () => _firstFilterFocus.requestFocus(),
-              ),
-            ),
-          SizedBox(
-            height: 46,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(
-                horizontal: appPagePaddingHorizontal,
-                vertical: 6,
-              ),
-              itemCount: _filters.length,
-              itemBuilder: (context, idx) {
-                final f = _filters[idx];
-                final isSelected = _selectedFilter == f;
-                return TvFocusable(
-                  focusNode: idx == 0 ? _firstFilterFocus : null,
-                  onTap: () => setState(() => _selectedFilter = f),
-                  borderRadius: BorderRadius.circular(18),
-                  margin: const EdgeInsets.only(right: 8),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: isSelected ? accent : surface,
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(
-                        color: isSelected ? accent : border,
-                        width: 0.8,
-                      ),
-                    ),
-                    child: Text(
-                      f,
-                      style: TextStyle(
-                        color: isSelected ? onAccent : subColor,
-                        fontSize: 12,
-                        fontWeight:
-                            isSelected ? FontWeight.w800 : FontWeight.w600,
-                      ),
-                    ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  appPagePaddingHorizontal,
+                  4,
+                  appPagePaddingHorizontal,
+                  8,
+                ),
+                child: InutilTvKeyboard(
+                  controller: _controller,
+                  mode: InutilTvKeyboardMode.search,
+                  autofocusFirstKey: true,
+                  onChanged: _onSearchChanged,
+                  onSubmit: () => _runSearchNow(
+                    _controller.text,
+                    moveFocusToResults: true,
                   ),
-                );
-              },
-            ),
-          ),
-          if (_filteredChannels.isNotEmpty) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                appPagePaddingHorizontal,
-                14,
-                appPagePaddingHorizontal,
-                8,
-              ),
-              child: Text(
-                'Canales en Vivo',
-                style: appSectionTitleStyle(context),
+                  onMoveDownToResults: () => _firstFilterFocus.requestFocus(),
+                ),
               ),
             ),
-            SizedBox(
-              height: 68,
-              child: ListView.separated(
+          SliverToBoxAdapter(
+            child: SizedBox(
+              height: 46,
+              child: ListView.builder(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(
                   horizontal: appPagePaddingHorizontal,
+                  vertical: 6,
                 ),
-                itemCount: _filteredChannels.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 10),
-                itemBuilder: (context, i) {
-                  final ch = _filteredChannels[i];
+                itemCount: _filters.length,
+                itemBuilder: (context, idx) {
+                  final f = _filters[idx];
+                  final isSelected = _selectedFilter == f;
                   return TvFocusable(
-                    onTap: () => _playChannel(ch),
-                    borderRadius: BorderRadius.circular(14),
-                    focusScale: 1.03,
-                    child: Container(
-                      width: 170,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 11,
-                        vertical: 8,
-                      ),
+                    focusNode: idx == 0 ? _firstFilterFocus : null,
+                    onTap: () => setState(() => _selectedFilter = f),
+                    borderRadius: BorderRadius.circular(18),
+                    margin: const EdgeInsets.only(right: 8),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: surface,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: border, width: 0.8),
+                        color: isSelected ? accent : surface,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                          color: isSelected ? accent : border,
+                          width: 0.8,
+                        ),
                       ),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 34,
-                            height: 34,
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.4),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: ch.logo.isNotEmpty
-                                ? FastArtwork(
-                                    url: ch.logo,
-                                    tier: ArtworkTier.thumbnail,
-                                    cacheWidth: 120,
-                                    fit: BoxFit.contain,
-                                    errorWidget: Icon(
-                                      Icons.tv_rounded,
-                                      color: subColor,
-                                      size: 18,
-                                    ),
-                                  )
-                                : Icon(Icons.tv_rounded,
-                                    color: subColor, size: 18),
-                          ),
-                          const SizedBox(width: 9),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Text(
-                                  ch.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: headingColor,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                Text(
-                                  ch.group,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: subColor,
-                                    fontSize: 10,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
+                      child: Text(
+                        f,
+                        style: TextStyle(
+                          color: isSelected ? onAccent : subColor,
+                          fontSize: 12,
+                          fontWeight:
+                              isSelected ? FontWeight.w800 : FontWeight.w600,
+                        ),
                       ),
                     ),
                   );
                 },
               ),
             ),
-          ],
-          if (_selectedFilter != 'Canales TV') ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                appPagePaddingHorizontal,
-                18,
-                appPagePaddingHorizontal,
-                10,
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    _controller.text.isEmpty
-                        ? 'Tendencias'
-                        : 'Resultados ($_selectedFilter)',
-                    style: appSectionTitleStyle(context),
-                  ),
-                  Text(
-                    '${_filteredVod.length}',
-                    style: TextStyle(
-                      color: subColor,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
+          ),
+          if (filteredChannels.isNotEmpty) ...[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  appPagePaddingHorizontal,
+                  14,
+                  appPagePaddingHorizontal,
+                  8,
+                ),
+                child: Text(
+                  'Canales en Vivo',
+                  style: appSectionTitleStyle(context),
+                ),
               ),
             ),
-            if (_filteredVod.isEmpty && !_searching)
-              Padding(
-                padding: const EdgeInsets.all(40),
-                child: Center(
-                  child: Column(
-                    children: [
-                      InutilIcon(InutilGlyph.search, size: 42, color: subColor),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Sin resultados para "${_controller.text}"',
-                        textAlign: TextAlign.center,
-                        style: appListCardSubtitleStyle(context),
+            SliverToBoxAdapter(
+              child: SizedBox(
+                height: 76,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: appPagePaddingHorizontal,
+                    vertical: 4,
+                  ),
+                  itemCount: filteredChannels.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 10),
+                  itemBuilder: (context, i) {
+                    final ch = filteredChannels[i];
+                    return TvFocusable(
+                      onTap: () => _playChannel(ch),
+                      borderRadius: BorderRadius.circular(14),
+                      focusScale: 1.03,
+                      child: Container(
+                        width: 170,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 11,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: surface,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: border, width: 0.8),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 34,
+                              height: 34,
+                              padding: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.4),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: ch.logo.isNotEmpty
+                                  ? FastArtwork(
+                                      url: ch.logo,
+                                      tier: ArtworkTier.thumbnail,
+                                      cacheWidth: 120,
+                                      fit: BoxFit.contain,
+                                      errorWidget: Icon(
+                                        Icons.tv_rounded,
+                                        color: subColor,
+                                        size: 18,
+                                      ),
+                                    )
+                                  : Icon(Icons.tv_rounded,
+                                      color: subColor, size: 18),
+                            ),
+                            const SizedBox(width: 9),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    ch.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: headingColor,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  Text(
+                                    ch.group,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: subColor,
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ],
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
+          if (_selectedFilter != 'Canales TV') ...[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  appPagePaddingHorizontal,
+                  18,
+                  appPagePaddingHorizontal,
+                  10,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      _activeQuery.isEmpty
+                          ? 'Tendencias'
+                          : 'Resultados ($_selectedFilter)',
+                      style: appSectionTitleStyle(context),
+                    ),
+                    Text(
+                      '${filteredVod.length}',
+                      style: TextStyle(
+                        color: subColor,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (filteredVod.isEmpty && !_searchingNotifier.value)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(40),
+                  child: Center(
+                    child: Column(
+                      children: [
+                        InutilIcon(InutilGlyph.search, size: 42, color: subColor),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Sin resultados para "$_activeQuery"',
+                          textAlign: TextAlign.center,
+                          style: appListCardSubtitleStyle(context),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               )
             else
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: appPagePaddingHorizontal,
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(
+                  appPagePaddingHorizontal,
+                  0,
+                  appPagePaddingHorizontal,
+                  36,
                 ),
-                child: GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
+                sliver: SliverGrid.builder(
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: columns,
                     childAspectRatio: 0.56,
-                    crossAxisSpacing: 10,
+                    crossAxisSpacing: 12,
                     mainAxisSpacing: 14,
                   ),
-                  itemCount: _filteredVod.length,
+                  itemCount: filteredVod.length,
                   itemBuilder: (context, i) {
-                    final it = _filteredVod[i];
+                    final it = filteredVod[i];
                     return PosterCard(
+                      key: ValueKey(it.id),
                       item: it,
                       expandInGrid: true,
                       onTap: () => _showDetails(it),
@@ -614,6 +707,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 ),
               ),
           ],
+          const SliverToBoxAdapter(child: SizedBox(height: 24)),
         ],
       ),
     );
