@@ -10,6 +10,7 @@ import '../services/offline_vault_service.dart';
 import '../services/title_logo_service.dart';
 import '../services/tv_mode_service.dart';
 import '../services/tv_remote_service.dart';
+import '../services/tv_taste_profile_service.dart';
 import '../services/vod_catalog_service.dart';
 import '../services/watch_history.dart';
 import '../theme/app_colors.dart';
@@ -272,6 +273,7 @@ class _VodDetailModalState extends State<VodDetailModal>
 
   Future<void> _hydrateMetadata(int token) async {
     final enriched = await _catalog.enrichDetail(_item);
+    TvTasteProfileService.instance.registerEnrichedItem(enriched);
     if (!mounted || token != _requestToken) return;
     setState(() {
       _item = enriched;

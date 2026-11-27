@@ -11,6 +11,7 @@ import '../services/my_list_service.dart';
 import '../services/offline_vault_service.dart';
 import '../services/play_target.dart';
 import '../services/tv_remote_service.dart';
+import '../services/tv_taste_profile_service.dart';
 import '../services/watch_history.dart';
 import '../services/xuper_service.dart';
 import '../theme/app_colors.dart';
@@ -108,6 +109,7 @@ class _HomeTabState extends State<HomeTab> {
     await Future.wait([
       _history.load(),
       _myList.load(),
+      TvTasteProfileService.instance.load(),
       _vault.initialize(),
       _service.refreshLiveCatalog(forceShuffle: shuffle),
     ]);
@@ -145,7 +147,13 @@ class _HomeTabState extends State<HomeTab> {
     final accent = AppColors.accentFor(context);
 
     return ListenableBuilder(
-      listenable: Listenable.merge([_service, _history, _myList, _vault]),
+      listenable: Listenable.merge([
+        _service,
+        _history,
+        _myList,
+        _vault,
+        TvTasteProfileService.instance,
+      ]),
       builder: (context, _) {
         final liveMovies = _service.getLiveMovies();
         final series = _service.getSeries();
@@ -175,16 +183,41 @@ class _HomeTabState extends State<HomeTab> {
         final filteredRails = <MapEntry<String, List<VodItem>>>[];
         for (final rail in rails.entries) {
           final k = rail.key.toLowerCase();
+          final isPersonalized = k.contains('novedades') ||
+              k.contains('especialmente') ||
+              k.contains('porque viste') ||
+              k.contains('descubrimientos');
           if (_quickFilter == 'Todo') {
             filteredRails.add(rail);
-          } else if (_quickFilter == 'Cine' &&
-              !k.contains('serie') &&
-              !k.contains('anime')) {
-            filteredRails.add(rail);
-          } else if (_quickFilter == 'Series' && k.contains('serie')) {
-            filteredRails.add(rail);
-          } else if (_quickFilter == 'Anime' && k.contains('anime')) {
-            filteredRails.add(rail);
+          } else if (_quickFilter == 'Cine') {
+            if (isPersonalized) {
+              final onlyMovies =
+                  rail.value.where((v) => !v.isSeries && !v.isAnime).toList();
+              if (onlyMovies.isNotEmpty) {
+                filteredRails.add(MapEntry(rail.key, onlyMovies));
+              }
+            } else if (!k.contains('serie') && !k.contains('anime')) {
+              filteredRails.add(rail);
+            }
+          } else if (_quickFilter == 'Series') {
+            if (isPersonalized) {
+              final onlySeries =
+                  rail.value.where((v) => v.isSeries && !v.isAnime).toList();
+              if (onlySeries.isNotEmpty) {
+                filteredRails.add(MapEntry(rail.key, onlySeries));
+              }
+            } else if (k.contains('serie')) {
+              filteredRails.add(rail);
+            }
+          } else if (_quickFilter == 'Anime') {
+            if (isPersonalized) {
+              final onlyAnime = rail.value.where((v) => v.isAnime).toList();
+              if (onlyAnime.isNotEmpty) {
+                filteredRails.add(MapEntry(rail.key, onlyAnime));
+              }
+            } else if (k.contains('anime')) {
+              filteredRails.add(rail);
+            }
           }
         }
 

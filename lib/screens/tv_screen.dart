@@ -22,6 +22,7 @@ import '../theme/app_ui.dart';
 import '../theme/inutil_icons.dart';
 import '../widgets/fast_artwork.dart';
 import '../widgets/inutil_sleep_timer_sheet.dart';
+import '../widgets/inutil_tv_keyboard.dart';
 import '../widgets/tv_focusable.dart';
 import '../widgets/tv_remote_sheet.dart';
 import 'player_screen.dart';
@@ -62,8 +63,11 @@ class _TvScreenState extends State<TvScreen> with WidgetsBindingObserver {
 
   final _service = XuperService();
   final _searchCtl = TextEditingController();
-  late final FocusNode _searchFocus =
-      TvFocusable.createTextFieldFocusNode(controller: _searchCtl);
+  late final FocusNode _searchFocus = TvFocusable.createTextFieldFocusNode(
+    controller: _searchCtl,
+    tvKeyboardTitle: 'Buscar canales de TV',
+    onChanged: (_) => setState(_applyFilters),
+  );
   final List<StreamSubscription<dynamic>> _subs = [];
 
   // El reproductor de TV en Vivo es *destruible*: se libera por completo
@@ -133,8 +137,32 @@ class _TvScreenState extends State<TvScreen> with WidgetsBindingObserver {
     // pantalla completa (los decodificadores MediaCodec son limitados).
     FullscreenPlaybackCoordinator.instance.isActive
         .addListener(_onFullscreenActiveChanged);
+    InutilTvCloudBackupService.instance.addListener(_onCloudBackupUpdated);
 
     _bootstrap();
+  }
+
+  DateTime? _lastObservedRestoreAt;
+
+  void _onCloudBackupUpdated() {
+    final restoredAt = InutilTvCloudBackupService.instance.lastRestoreAt;
+    if (restoredAt == null || restoredAt == _lastObservedRestoreAt) return;
+    _lastObservedRestoreAt = restoredAt;
+    unawaited(_reloadFavoritesFromDisk());
+  }
+
+  Future<void> _reloadFavoritesFromDisk() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final favs = prefs.getStringList('inutiltv_favorite_channels') ?? [];
+      final recents = prefs.getStringList(_recentKey) ?? [];
+      if (!mounted) return;
+      setState(() {
+        _favorites = favs.toSet();
+        _recentIds = recents;
+        if (_selectedCategory == 'Favoritos') _applyFilters();
+      });
+    } catch (_) {}
   }
 
   /// Crea el reproductor de TV en Vivo con su salida de vídeo nativa.
@@ -381,6 +409,7 @@ class _TvScreenState extends State<TvScreen> with WidgetsBindingObserver {
     }
     FullscreenPlaybackCoordinator.instance.isActive
         .removeListener(_onFullscreenActiveChanged);
+    InutilTvCloudBackupService.instance.removeListener(_onCloudBackupUpdated);
     for (final s in _playerSubs) {
       s.cancel();
     }
@@ -440,6 +469,7 @@ class _TvScreenState extends State<TvScreen> with WidgetsBindingObserver {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setStringList(_recentKey, _recentIds);
+      InutilTvCloudBackupService.instance.schedulePush();
     } catch (_) {}
   }
 
@@ -1664,6 +1694,17 @@ class _TvScreenState extends State<TvScreen> with WidgetsBindingObserver {
             child: TextField(
               controller: _searchCtl,
               focusNode: _searchFocus,
+              readOnly: TvModeService.of(context),
+              showCursor: true,
+              onTap: TvModeService.of(context)
+                  ? () => InutilTvKeyboard.showModal(
+                        context,
+                        controller: _searchCtl,
+                        title: 'Buscar canales en vivo',
+                        mode: InutilTvKeyboardMode.search,
+                        onChanged: (_) => setState(_applyFilters),
+                      )
+                  : null,
               onChanged: (_) => setState(_applyFilters),
               style: TextStyle(color: headingColor, fontSize: 13),
               decoration: InputDecoration(

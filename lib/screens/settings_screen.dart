@@ -1005,6 +1005,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         },
                       ),
                     ),
+                    Divider(color: AppColors.dividerFor(context), height: 1),
+                    ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 4,
+                      ),
+                      title: Text(
+                        'Audio preferido',
+                        style: appListCardTitleStyle(context),
+                      ),
+                      subtitle: Text(
+                        _settings.preferredAudioLang == 'auto'
+                            ? 'Aprende automáticamente si prefieres Latino o Sub'
+                            : 'Prioriza servidores ${_settings.preferredAudioLang == 'latino' ? 'en Español Latino' : (_settings.preferredAudioLang == 'sub' ? 'Subtitulados' : 'en Español')}',
+                        style: appListCardSubtitleStyle(context),
+                      ),
+                      trailing: DropdownButton<String>(
+                        value: _settings.preferredAudioLang,
+                        dropdownColor: AppColors.elevatedSurfaceFor(context),
+                        underline: const SizedBox.shrink(),
+                        style: TextStyle(
+                          color: accent,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 13,
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'auto', child: Text('Auto')),
+                          DropdownMenuItem(value: 'latino', child: Text('Latino')),
+                          DropdownMenuItem(value: 'sub', child: Text('Sub')),
+                          DropdownMenuItem(value: 'espanol', child: Text('Español')),
+                        ],
+                        onChanged: (v) {
+                          if (v != null) _settings.setPreferredAudioLang(v);
+                        },
+                      ),
+                    ),
                   ],
                 ),
               ),

@@ -21,6 +21,7 @@ import '../services/stream_validator.dart';
 import '../services/tv_daily_usage_service.dart';
 import '../services/tv_mode_service.dart';
 import '../services/tv_remote_service.dart';
+import '../services/tv_taste_profile_service.dart';
 import '../services/vod_catalog_service.dart';
 import '../services/watch_history.dart';
 import '../theme/app_colors.dart';
@@ -252,12 +253,66 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool get _canShowCenterPlaybackControls =>
       _error == null && !_resolving && _hasVideo;
 
+  double _sessionWatchedSec = 0;
+  bool _sessionTasteFlushed = false;
+  String _activeAudioLang = '';
+
+  List<Playable> _prioritizePlayablesByAudio(List<Playable> raw) {
+    if (raw.length <= 1) return List<Playable>.of(raw);
+    final configured = AppSettingsService.instance.preferredAudioLang;
+    final desired = configured != 'auto'
+        ? configured
+        : TvTasteProfileService.instance.computeSummary().preferredAudio;
+    if (desired.isEmpty || desired == 'auto') return List<Playable>.of(raw);
+
+    final offline = <Playable>[];
+    final preferred = <Playable>[];
+    final others = <Playable>[];
+    for (final p in raw) {
+      final low = p.label.toLowerCase();
+      if (low.contains('sin conexión') ||
+          low.contains('sin conexion') ||
+          low.contains('offline')) {
+        offline.add(p);
+      } else if (TvTasteProfileService.normalizeAudioLang(p.label) == desired) {
+        preferred.add(p);
+      } else {
+        others.add(p);
+      }
+    }
+    return [...offline, ...preferred, ...others];
+  }
+
+  void _flushTasteSession({bool completed = false}) {
+    final item = widget.vodItem;
+    if (item == null || _sessionTasteFlushed) return;
+    final pos = _player.state.position.inSeconds.toDouble();
+    final dur = _player.state.duration.inSeconds.toDouble();
+    final watched = _sessionWatchedSec > pos ? _sessionWatchedSec : pos;
+    if (!completed && watched < 20) return;
+    _sessionTasteFlushed = true;
+    final lang = _activeAudioLang.isNotEmpty
+        ? _activeAudioLang
+        : (_current >= 0 && _current < _activePlayables.length
+            ? _activePlayables[_current].label
+            : '');
+    unawaited(
+      TvTasteProfileService.instance.recordPlaybackSession(
+        item: item,
+        watchedSec: completed && dur > 0 ? dur : watched,
+        durationSec: dur,
+        audioLang: lang,
+        completed: completed,
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
     _activeTitle = widget.title;
     _activeSubtitle = widget.subtitle;
-    _activePlayables = List.of(widget.playables);
+    _activePlayables = _prioritizePlayablesByAudio(widget.playables);
     _episodeIndex = widget.initialEpisodeIndex;
     // AVISA a TV en Vivo para que destruya su reproductor: en las TV Box de
     // 2 GB sólo hay un decodificador MediaCodec libre y si el de TV lo retiene
@@ -343,6 +398,13 @@ class _PlayerScreenState extends State<PlayerScreen>
           unawaited(_syncRemoteTvState());
         }
         if (_isPlaying && _hasVideo) {
+          _sessionWatchedSec += 15;
+          if (_current >= 0 && _current < _activePlayables.length) {
+            final detected = TvTasteProfileService.normalizeAudioLang(
+              _activePlayables[_current].label,
+            );
+            if (detected.isNotEmpty) _activeAudioLang = detected;
+          }
           final item = widget.vodItem;
           final cat = item != null
               ? (item.isAnime
@@ -898,7 +960,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       return;
     }
 
-    _activePlayables = [
+    _activePlayables = _prioritizePlayablesByAudio([
       for (final s in sources)
         Playable(
           s.quality.isEmpty ? 'Servidor HD' : s.quality,
@@ -906,7 +968,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           headers: s.headers,
           subtitles: s.subtitles,
         ),
-    ];
+    ]);
     if (!applyInitialSeek) _initialSeekDone = true;
     await _play(0);
   }
@@ -915,6 +977,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (!_hasEpisodes || index < 0 || index >= widget.episodeList!.length) {
       return;
     }
+    _flushTasteSession(completed: false);
+    _sessionWatchedSec = 0;
+    _sessionTasteFlushed = false;
     _cancelNextEpisodeCountdown();
     _stallTimer?.cancel();
     _preloadTriggerTimer?.cancel();
@@ -1035,7 +1100,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       return;
     }
 
-    _activePlayables = [
+    _activePlayables = _prioritizePlayablesByAudio([
       for (final s in sources)
         Playable(
           s.quality.isEmpty ? 'Servidor HD' : s.quality,
@@ -1043,7 +1108,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           headers: s.headers,
           subtitles: s.subtitles,
         ),
-    ];
+    ]);
     if (!applyInitialSeek) _initialSeekDone = true;
     await _play(0);
   }
@@ -1122,6 +1187,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       positionSec: forceCompleted && dur > 0 ? dur : pos,
       durationSec: dur > 0 ? dur : (pos + 60),
     );
+    if (forceCompleted) {
+      _flushTasteSession(completed: true);
+    }
   }
 
   void _onVideoReady() {
@@ -1426,6 +1494,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   @override
   void dispose() {
     _saveCurrentProgress();
+    _flushTasteSession(completed: false);
     // Cierre de sesión (stop del último playback): momento de mandar el acumulado
     // del día al relay. El servicio garantiza una sola escritura por día, así que
     // los cierres extra son no-ops y no añaden timers ni polls.
@@ -3390,6 +3459,18 @@ class _PlayerScreenState extends State<PlayerScreen>
                 ),
                 onTap: () {
                   Navigator.pop(ctx);
+                  final chosenLabel = _activePlayables[i].label;
+                  final normLang =
+                      TvTasteProfileService.normalizeAudioLang(chosenLabel);
+                  if (normLang.isNotEmpty) {
+                    _activeAudioLang = normLang;
+                    unawaited(
+                      TvTasteProfileService.instance.recordAudioChoice(
+                        chosenLabel,
+                        item: widget.vodItem,
+                      ),
+                    );
+                  }
                   _play(i);
                 },
               ),

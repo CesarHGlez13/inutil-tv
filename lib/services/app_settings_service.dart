@@ -2,12 +2,14 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../theme/app_theme.dart';
+import 'inutil_cloud_backup_service.dart';
 
 /// Preferencias reales y persistentes del motor de video y apariencia de InútilTV.
 /// Incluye personalización visual compartida con Inútil Music:
 /// - `accent` (18 colores, por defecto Blanco Puro `#F5F7F5`)
 /// - `surfaceMode` (`liquidGlass` / `transparent` / `accent`)
 /// - `themeMode` (`dark` / `light` / `system`)
+/// - `preferredAudioLang` (`auto` / `latino` / `sub` / `espanol`)
 class AppSettingsService extends ChangeNotifier {
   AppSettingsService._();
   static final AppSettingsService instance = AppSettingsService._();
@@ -20,6 +22,7 @@ class AppSettingsService extends ChangeNotifier {
   static const _kAccent = 'inutiltv_appearance_accent_v3';
   static const _kSurfaceMode = 'inutiltv_appearance_surface_v3';
   static const _kThemeMode = 'inutiltv_appearance_theme_v3';
+  static const _kPreferredAudio = 'inutiltv_preferred_audio_lang_v1';
 
   bool _loaded = false;
   bool _hwAcceleration = true;
@@ -27,6 +30,7 @@ class AppSettingsService extends ChangeNotifier {
   bool _autoNextEpisode = true;
   bool _preloadNextEpisode = true;
   int _skipIntroSeconds = 85;
+  String _preferredAudioLang = 'auto';
 
   AppAccent _accent = AppAccent.white;
   SurfaceBackgroundMode _surfaceMode = SurfaceBackgroundMode.liquidGlass;
@@ -41,6 +45,9 @@ class AppSettingsService extends ChangeNotifier {
   bool get autoNextEpisode => _autoNextEpisode;
   bool get preloadNextEpisode => _preloadNextEpisode;
   int get skipIntroSeconds => _skipIntroSeconds;
+
+  /// Preferencia de idioma/audio para VOD: `auto` | `latino` | `sub` | `espanol`.
+  String get preferredAudioLang => _preferredAudioLang;
 
   AppAccent get accent => _accent;
   SurfaceBackgroundMode get surfaceMode => _surfaceMode;
@@ -61,9 +68,29 @@ class AppSettingsService extends ChangeNotifier {
       _accent = AppAccent.fromCode(sp.getString(_kAccent));
       _surfaceMode = SurfaceBackgroundMode.fromCode(sp.getString(_kSurfaceMode));
       _themeMode = AppThemeMode.fromCode(sp.getString(_kThemeMode));
+      final rawLang = (sp.getString(_kPreferredAudio) ?? 'auto').trim().toLowerCase();
+      _preferredAudioLang =
+          const {'auto', 'latino', 'sub', 'espanol'}.contains(rawLang)
+              ? rawLang
+              : 'auto';
     } catch (_) {}
     _loaded = true;
     notifyListeners();
+  }
+
+  Future<void> setPreferredAudioLang(String value) async {
+    final norm = value.trim().toLowerCase();
+    final safe = const {'auto', 'latino', 'sub', 'espanol'}.contains(norm)
+        ? norm
+        : 'auto';
+    if (_preferredAudioLang == safe) return;
+    _preferredAudioLang = safe;
+    notifyListeners();
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString(_kPreferredAudio, safe);
+      InutilTvCloudBackupService.instance.schedulePush();
+    } catch (_) {}
   }
 
   Future<void> setPreloadNextEpisode(bool value) async {
@@ -72,6 +99,7 @@ class AppSettingsService extends ChangeNotifier {
     try {
       final sp = await SharedPreferences.getInstance();
       await sp.setBool(_kPreloadNext, value);
+      InutilTvCloudBackupService.instance.schedulePush();
     } catch (_) {}
   }
 
@@ -82,6 +110,7 @@ class AppSettingsService extends ChangeNotifier {
     try {
       final sp = await SharedPreferences.getInstance();
       await sp.setString(_kAccent, value.code);
+      InutilTvCloudBackupService.instance.schedulePush();
     } catch (_) {}
   }
 
@@ -92,6 +121,7 @@ class AppSettingsService extends ChangeNotifier {
     try {
       final sp = await SharedPreferences.getInstance();
       await sp.setString(_kSurfaceMode, value.code);
+      InutilTvCloudBackupService.instance.schedulePush();
     } catch (_) {}
   }
 
@@ -102,6 +132,7 @@ class AppSettingsService extends ChangeNotifier {
     try {
       final sp = await SharedPreferences.getInstance();
       await sp.setString(_kThemeMode, value.code);
+      InutilTvCloudBackupService.instance.schedulePush();
     } catch (_) {}
   }
 
@@ -111,6 +142,7 @@ class AppSettingsService extends ChangeNotifier {
     try {
       final sp = await SharedPreferences.getInstance();
       await sp.setBool(_kHwAccel, value);
+      InutilTvCloudBackupService.instance.schedulePush();
     } catch (_) {}
   }
 
@@ -120,6 +152,7 @@ class AppSettingsService extends ChangeNotifier {
     try {
       final sp = await SharedPreferences.getInstance();
       await sp.setBool(_kUltraBuffer, value);
+      InutilTvCloudBackupService.instance.schedulePush();
     } catch (_) {}
   }
 
@@ -129,6 +162,7 @@ class AppSettingsService extends ChangeNotifier {
     try {
       final sp = await SharedPreferences.getInstance();
       await sp.setBool(_kAutoNext, value);
+      InutilTvCloudBackupService.instance.schedulePush();
     } catch (_) {}
   }
 
@@ -138,6 +172,7 @@ class AppSettingsService extends ChangeNotifier {
     try {
       final sp = await SharedPreferences.getInstance();
       await sp.setInt(_kSkipIntroSec, _skipIntroSeconds);
+      InutilTvCloudBackupService.instance.schedulePush();
     } catch (_) {}
   }
 }

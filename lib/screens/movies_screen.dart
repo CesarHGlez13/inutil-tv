@@ -10,6 +10,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_ui.dart';
 import '../theme/inutil_icons.dart';
 import '../widgets/catalog_empty_state.dart';
+import '../widgets/inutil_tv_keyboard.dart';
 import '../widgets/poster_card.dart';
 import '../widgets/tv_focusable.dart';
 import '../widgets/vod_detail_modal.dart';
@@ -27,8 +28,11 @@ class MoviesScreen extends StatefulWidget {
 class _MoviesScreenState extends State<MoviesScreen> {
   final _catalog = VodCatalogService();
   final _searchCtl = TextEditingController();
-  late final FocusNode _searchFocus =
-      TvFocusable.createTextFieldFocusNode(controller: _searchCtl);
+  late final FocusNode _searchFocus = TvFocusable.createTextFieldFocusNode(
+    controller: _searchCtl,
+    tvKeyboardTitle: 'Buscar películas en HD',
+    onChanged: _onSearchChanged,
+  );
   final _scrollCtl = ScrollController();
 
   List<VodItem> _items = [];
@@ -211,6 +215,17 @@ class _MoviesScreenState extends State<MoviesScreen> {
             child: TextField(
               controller: _searchCtl,
               focusNode: _searchFocus,
+              readOnly: TvModeService.of(context),
+              showCursor: true,
+              onTap: TvModeService.of(context)
+                  ? () => InutilTvKeyboard.showModal(
+                        context,
+                        controller: _searchCtl,
+                        title: 'Buscar películas en HD',
+                        mode: InutilTvKeyboardMode.search,
+                        onChanged: _onSearchChanged,
+                      )
+                  : null,
               onChanged: _onSearchChanged,
               style: TextStyle(
                 color: AppColors.contentHeadingFor(context),

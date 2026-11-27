@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../services/tv_mode_service.dart';
 import '../theme/app_colors.dart';
+import 'inutil_tv_keyboard.dart';
 
 /// Envoltorio universal táctil + control remoto (D-pad de Smart TV / Android TV).
 ///
@@ -63,24 +65,54 @@ class TvFocusable extends StatefulWidget {
   };
 
   /// Crea un [FocusNode] para `TextField` de una línea en Smart TV / Android TV:
-  /// - Al pulsar **OK (`select`)** o **Enter** estando enfocado, abre el
-  ///   teclado virtual (`TextInput.show`) antes de que `ActivateIntent` lo consuma.
+  /// - Al pulsar **OK (`select`)** del control remoto (o **Enter** en modo TV),
+  ///   abre el teclado D-Pad integrado de Inutix TV ([InutilTvKeyboard]) en vez
+  ///   del IME del sistema Android TV, que en varias TVs aparece sin foco D-pad.
   /// - Al pulsar **Flecha Abajo / Arriba** (y **Flecha Izquierda** si el campo
-  ///   está vacío), mueve el foco al control vecino en lugar de quedar atrapado
-  ///   dentro de `EditableText`.
+  ///   está vacío), mueve el foco al control vecino cuando el IME no está abierto.
   static FocusNode createTextFieldFocusNode({
     VoidCallback? onDoneKey,
     TextEditingController? controller,
+    String tvKeyboardTitle = 'Escribir con el control remoto',
+    String tvKeyboardHint = '',
+    InutilTvKeyboardMode tvKeyboardMode = InutilTvKeyboardMode.search,
+    bool obscureText = false,
+    ValueChanged<String>? onChanged,
   }) {
-    return FocusNode(
+    late final FocusNode created;
+    created = FocusNode(
       onKeyEvent: (node, event) {
         if (event is! KeyDownEvent) return KeyEventResult.ignored;
         final key = event.logicalKey;
-        if (key == LogicalKeyboardKey.select ||
-            key == LogicalKeyboardKey.enter ||
-            key == LogicalKeyboardKey.numpadEnter) {
+        final isRemoteOk = key == LogicalKeyboardKey.select ||
+            key == LogicalKeyboardKey.gameButtonA;
+        final isEnter = key == LogicalKeyboardKey.enter ||
+            key == LogicalKeyboardKey.numpadEnter;
+
+        if (isRemoteOk || isEnter) {
+          final isTv = TvModeService.instance.isTv || isRemoteOk;
+          if (onDoneKey != null) {
+            if (isTv) {
+              SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+            }
+            onDoneKey();
+            return KeyEventResult.handled;
+          }
+          final ctx = node.context;
+          if (isTv && controller != null && ctx != null) {
+            SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+            InutilTvKeyboard.showModal(
+              ctx,
+              controller: controller,
+              title: tvKeyboardTitle,
+              hintText: tvKeyboardHint,
+              mode: tvKeyboardMode,
+              obscureText: obscureText,
+              onChanged: onChanged,
+            );
+            return KeyEventResult.handled;
+          }
           SystemChannels.textInput.invokeMethod<void>('TextInput.show');
-          onDoneKey?.call();
           return KeyEventResult.handled;
         }
         if (key == LogicalKeyboardKey.arrowDown) {
@@ -92,13 +124,22 @@ class TvFocusable extends StatefulWidget {
           return KeyEventResult.handled;
         }
         if (key == LogicalKeyboardKey.arrowLeft &&
-            (controller == null || controller.text.isEmpty)) {
+            controller != null &&
+            controller.text.isEmpty) {
           node.focusInDirection(TraversalDirection.left);
           return KeyEventResult.handled;
         }
         return KeyEventResult.ignored;
       },
     );
+    created.addListener(() {
+      if (created.hasFocus && TvModeService.instance.isTv) {
+        // Evita que Google TV / Android TV levante Gboard TV encima del campo
+        // antes de que el usuario pulse OK para abrir InutilTvKeyboard.
+        SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+      }
+    });
+    return created;
   }
 
   @override

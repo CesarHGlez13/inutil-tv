@@ -4,11 +4,14 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/artwork_cache_service.dart';
 import '../services/tv_mode_service.dart';
+import '../services/tv_taste_profile_service.dart';
 import '../services/vod_catalog_service.dart';
+import '../services/watch_history.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_ui.dart';
 import '../theme/inutil_icons.dart';
 import '../widgets/catalog_empty_state.dart';
+import '../widgets/inutil_tv_keyboard.dart';
 import '../widgets/poster_card.dart';
 import '../widgets/tv_focusable.dart';
 import '../widgets/vod_detail_modal.dart';
@@ -25,8 +28,11 @@ class SeriesScreen extends StatefulWidget {
 class _SeriesScreenState extends State<SeriesScreen> {
   final _catalog = VodCatalogService();
   final _searchCtl = TextEditingController();
-  late final FocusNode _searchFocus =
-      TvFocusable.createTextFieldFocusNode(controller: _searchCtl);
+  late final FocusNode _searchFocus = TvFocusable.createTextFieldFocusNode(
+    controller: _searchCtl,
+    tvKeyboardTitle: 'Buscar series en HD',
+    onChanged: _onSearchChanged,
+  );
   final _scrollCtl = ScrollController();
 
   List<VodItem> _items = [];
@@ -36,13 +42,14 @@ class _SeriesScreenState extends State<SeriesScreen> {
   bool _falloDeRed = false;
   int _currentPage = 1;
   int _requestToken = 0;
-  String _selectedCategory = 'populares';
+  String _selectedCategory = 'para_ti';
   Timer? _debounce;
 
   static const _categories = [
+    (id: 'para_ti', label: 'Para ti'),
+    (id: 'recientes', label: 'Recientes'),
     (id: 'populares', label: 'Populares HD'),
     (id: 'tendencias', label: 'Tendencias'),
-    (id: 'recientes', label: 'Recientes'),
     (id: 'estrenos', label: 'Estrenos'),
     // Géneros de SeriesKao añadidos en v3.3.16 (slugs del propio sitio,
     // verificados en vivo: 200 OK con 24 tarjetas por página).
@@ -64,16 +71,75 @@ class _SeriesScreenState extends State<SeriesScreen> {
   void initState() {
     super.initState();
     _scrollCtl.addListener(_onScroll);
+    TvTasteProfileService.instance.addListener(_onTasteUpdated);
     _loadPage(page: 1, reset: true);
   }
 
   @override
   void dispose() {
+    TvTasteProfileService.instance.removeListener(_onTasteUpdated);
     _debounce?.cancel();
     _scrollCtl.dispose();
     _searchCtl.dispose();
     _searchFocus.dispose();
     super.dispose();
+  }
+
+  void _onTasteUpdated() {
+    if (!mounted ||
+        _selectedCategory != 'para_ti' ||
+        _searchCtl.text.trim().isNotEmpty ||
+        _items.isEmpty) {
+      return;
+    }
+    setState(() {
+      _items = _rankSeriesForUser(_items);
+    });
+  }
+
+  List<VodItem> _rankSeriesForUser(List<VodItem> list) {
+    final taste = TvTasteProfileService.instance;
+    final summary = taste.computeSummary();
+    final history = WatchHistory().items;
+    final scored = list
+        .map((it) => MapEntry(
+              it,
+              taste.scoreItem(
+                it,
+                summary: summary,
+                history: history,
+                applyImpressionPenalty: false,
+              ),
+            ))
+        .toList();
+    scored.sort((a, b) => b.value.compareTo(a.value));
+    return scored.map((e) => e.key).toList();
+  }
+
+  Future<List<VodItem>> _fetchPersonalizedSeriesPage(int page) async {
+    await TvTasteProfileService.instance.load();
+    final taste = TvTasteProfileService.instance;
+    final summary = taste.computeSummary();
+    final futures = <Future<List<VodItem>>>[
+      _catalog.getSeries(page: page, category: 'recientes'),
+      _catalog.getSeries(page: page, category: 'populares'),
+    ];
+    if (page == 1) {
+      for (final g in summary.topGenres(2)) {
+        final slug = TvTasteProfileService.toSeriesCategorySlug(g.key);
+        if (slug != null) {
+          futures.add(_catalog.getSeries(page: 1, category: slug));
+          break;
+        }
+      }
+    }
+    final batches = await Future.wait(
+      futures.map((f) => f.catchError((_) => const <VodItem>[])),
+    );
+    final merged = VodCatalogService.groupByShowStateless([
+      for (final b in batches) ...b,
+    ]);
+    return _rankSeriesForUser(merged);
   }
 
   void _onScroll() {
@@ -97,10 +163,12 @@ class _SeriesScreenState extends State<SeriesScreen> {
       });
     }
 
-    final newItems = await _catalog.getSeries(
-      page: page,
-      category: _selectedCategory,
-    );
+    final newItems = _selectedCategory == 'para_ti'
+        ? await _fetchPersonalizedSeriesPage(page)
+        : await _catalog.getSeries(
+            page: page,
+            category: _selectedCategory,
+          );
     final cayoLaRed = _catalog.ultimoErrorDeRed;
     if (!mounted || token != _requestToken) return;
     setState(() {
@@ -208,6 +276,17 @@ class _SeriesScreenState extends State<SeriesScreen> {
             child: TextField(
               controller: _searchCtl,
               focusNode: _searchFocus,
+              readOnly: TvModeService.of(context),
+              showCursor: true,
+              onTap: TvModeService.of(context)
+                  ? () => InutilTvKeyboard.showModal(
+                        context,
+                        controller: _searchCtl,
+                        title: 'Buscar series en HD',
+                        mode: InutilTvKeyboardMode.search,
+                        onChanged: _onSearchChanged,
+                      )
+                  : null,
               onChanged: _onSearchChanged,
               style: TextStyle(
                 color: AppColors.contentHeadingFor(context),

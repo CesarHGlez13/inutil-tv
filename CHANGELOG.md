@@ -1,5 +1,10 @@
 # Changelog — Inutix TV
 
+## 3.3.53 — 2026-11-26
+- **Inicio, Novedades y Series más dinámicos:** Las secciones principales ahora se adaptan mejor a tus gustos y rotan para mostrarte siempre contenido fresco.
+- **Tu progreso siempre a salvo:** Si cambias de equipo o reinstalas la app, al iniciar sesión recuperas dónde te quedaste, tu lista, tus canales favoritos y tus preferencias.
+- **Mejor escritura con control remoto:** Nuevo teclado integrado para buscar y escribir más fácil en Smart TV y TV Box.
+
 ## 3.3.52 — 2026-11-25
 - **App más limpia y ligera:** Se retiraron módulos heredados, librerías sin uso y rutas de rodeo obsoletas que ya quedaron sustituidas por el Modo VPN Inutix.
 - **Arranque y navegación más directos:** Sin el Modo VPN encendido, las listas y la reproducción salen directo sin viajes extra innecesarios; con el Modo VPN encendido, toda la app sale cifrada.

@@ -11,6 +11,7 @@ import '../services/tv_qr_pairing_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/inutil_icons.dart';
 import 'inutil_inactivity_paused_screen.dart';
+import 'inutil_tv_keyboard.dart';
 import 'tv_focusable.dart';
 
 /// Barrera de autenticación y licencias Firebase para InútilTV.
@@ -53,6 +54,7 @@ class _InutilAuthGateState extends State<InutilAuthGate>
     } else if (state == AppLifecycleState.paused) {
       unawaited(InutilTvCloudBackupService.instance.pushNow());
       unawaited(TvDailyUsageService.instance.flush());
+      unawaited(TvDailyUsageService.instance.flushRichAnalytics());
     }
   }
 
@@ -131,9 +133,23 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
   final _displayNameController = TextEditingController();
 
   late final FocusNode _displayNameFocus =
-      TvFocusable.createTextFieldFocusNode();
-  late final FocusNode _emailFocus = TvFocusable.createTextFieldFocusNode();
-  late final FocusNode _passwordFocus = TvFocusable.createTextFieldFocusNode();
+      TvFocusable.createTextFieldFocusNode(
+    controller: _displayNameController,
+    tvKeyboardTitle: 'Tu Nombre o Alias',
+    tvKeyboardMode: InutilTvKeyboardMode.text,
+  );
+  late final FocusNode _emailFocus = TvFocusable.createTextFieldFocusNode(
+    controller: _emailController,
+    tvKeyboardTitle: 'Correo Electrónico',
+    tvKeyboardHint: 'ejemplo@gmail.com',
+    tvKeyboardMode: InutilTvKeyboardMode.email,
+  );
+  late final FocusNode _passwordFocus = TvFocusable.createTextFieldFocusNode(
+    controller: _passwordController,
+    tvKeyboardTitle: 'Contraseña',
+    tvKeyboardMode: InutilTvKeyboardMode.password,
+    obscureText: true,
+  );
   final FocusNode _eyeSkipFocus = FocusNode(skipTraversal: true);
   final FocusNode _copyIdSkipFocus = FocusNode(skipTraversal: true);
 
@@ -846,6 +862,16 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
                               TextField(
                                 controller: _displayNameController,
                                 focusNode: _displayNameFocus,
+                                readOnly: TvModeService.of(context),
+                                showCursor: true,
+                                onTap: TvModeService.of(context)
+                                    ? () => InutilTvKeyboard.showModal(
+                                          context,
+                                          controller: _displayNameController,
+                                          title: 'Tu Nombre o Alias',
+                                          mode: InutilTvKeyboardMode.text,
+                                        )
+                                    : null,
                                 style: TextStyle(
                                   color: heading,
                                   fontSize: 14,
@@ -853,8 +879,10 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
                                 textInputAction: TextInputAction.next,
                                 onSubmitted: (_) {
                                   _emailFocus.requestFocus();
-                                  SystemChannels.textInput
-                                      .invokeMethod<void>('TextInput.show');
+                                  if (!TvModeService.of(context)) {
+                                    SystemChannels.textInput
+                                        .invokeMethod<void>('TextInput.show');
+                                  }
                                 },
                                 decoration: _fieldDecoration(
                                   context,
@@ -868,6 +896,16 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
                             TextField(
                               controller: _emailController,
                               focusNode: _emailFocus,
+                              readOnly: TvModeService.of(context),
+                              showCursor: true,
+                              onTap: TvModeService.of(context)
+                                  ? () => InutilTvKeyboard.showModal(
+                                        context,
+                                        controller: _emailController,
+                                        title: 'Correo Electrónico',
+                                        mode: InutilTvKeyboardMode.email,
+                                      )
+                                  : null,
                               style: TextStyle(
                                 color: heading,
                                 fontSize: 14,
@@ -876,8 +914,10 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
                               textInputAction: TextInputAction.next,
                               onSubmitted: (_) {
                                 _passwordFocus.requestFocus();
-                                SystemChannels.textInput
-                                    .invokeMethod<void>('TextInput.show');
+                                if (!TvModeService.of(context)) {
+                                  SystemChannels.textInput
+                                      .invokeMethod<void>('TextInput.show');
+                                }
                               },
                               decoration: _fieldDecoration(
                                 context,
@@ -890,6 +930,17 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
                             TextField(
                               controller: _passwordController,
                               focusNode: _passwordFocus,
+                              readOnly: TvModeService.of(context),
+                              showCursor: true,
+                              onTap: TvModeService.of(context)
+                                  ? () => InutilTvKeyboard.showModal(
+                                        context,
+                                        controller: _passwordController,
+                                        title: 'Contraseña',
+                                        mode: InutilTvKeyboardMode.password,
+                                        obscureText: _obscurePassword,
+                                      )
+                                  : null,
                               style: TextStyle(
                                 color: heading,
                                 fontSize: 14,

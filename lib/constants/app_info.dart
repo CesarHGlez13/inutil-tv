@@ -4,7 +4,7 @@ class AppInfo {
   const AppInfo._();
 
   static const String appName = 'Inutix TV';
-  static const String appVersion = '3.3.52';
+  static const String appVersion = '3.3.53';
   static const String creatorName = 'César';
   static const String supportEmail = 'cesarmaster133@gmail.com';
 
@@ -21,6 +21,9 @@ class AppInfo {
       'Ecosistema inutix.com · Inutix TV & Inutix Music';
 
   static const List<String> whatsNewHighlights = [
+    'Inicio, Novedades y Series más dinámicos: las secciones principales ahora se adaptan mejor a tus gustos y rotan con contenido fresco',
+    'Tu progreso siempre a salvo: al reinstalar o cambiar de equipo recuperas dónde te quedaste, tu lista, tus canales favoritos y tus preferencias',
+    'Mejor escritura con control remoto: nuevo teclado integrado para buscar y escribir más fácil en Smart TV y TV Box',
     'App más limpia y ligera: se retiraron módulos obsoletos y rutas de rodeo ya sustituidas por el Modo VPN Inutix, reduciendo tamaño y arrancando más rápido',
     'Nuevo Modo VPN Inutix integrado: cifra todo el catálogo, las portadas y la reproducción de video desde dentro de la app para saltar bloqueos de oficina, escuela u hotel sin instalar apps externas',
     'La conexión con tu servidor de datos se recupera sola: si se reinicia con la app abierta, la app lo detecta y vuelve a él sin que hagas nada',

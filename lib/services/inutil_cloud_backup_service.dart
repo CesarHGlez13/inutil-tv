@@ -10,24 +10,31 @@ import 'firebase_auth_service.dart';
 import 'firebase_firestore_service.dart';
 import 'inutil_wrapped_service.dart';
 import 'my_list_service.dart';
+import 'tv_daily_usage_service.dart';
+import 'tv_taste_profile_service.dart';
 import 'watch_history.dart';
+import 'xuper_service.dart';
 
-/// Respaldo en la nube de InútilTV (portado de Inútil Music v2.4).
+/// Respaldo total en la nube de InútilTV (esquema v2, retrocompatible con v1).
 ///
-/// Guarda y restaura en `users/{uid}/data/tv_backup` (completamente aislado de
-/// `backup_meta` / `backup_tracks_*` de Inútil Music para que jamás colisionen):
-/// - Mi Lista (`inutiltv_my_list_v1`)
-/// - Historial "Seguir viendo" (`inutiltv_watch_history_v1`) y episodios vistos
+/// Guarda y restaura en `users/{uid}/data/tv_backup` (aislado de Inutix Music):
+/// - Posición exacta en segundos de cada película/capítulo («Seguir viendo» +
+///   historial completo hasta 120 títulos, resuelto por `updatedAt` más reciente)
+/// - Episodios vistos por serie (fusión por unión de conjuntos)
+/// - «Mi Lista» completa
+/// - Perfil de gustos / afinidad (`TvTasteProfileService`: géneros, búsquedas,
+///   ratio, audio preferido, finalizaciones/abandonos, horarios)
 /// - Canales Favoritos (`inutiltv_favorite_channels`) y recientes
-/// - Apariencia y motor de video (`AppSettingsService`)
+/// - Preferencias de reproductor, idioma de audio y apariencia (`AppSettingsService`)
 ///
-/// Incluye protección anti-sobrescritura tras reinstalar (igual que Inútil Music):
-/// nunca sube un estado vacío antes de completar la restauración inicial.
+/// Protección anti-sobrescritura tras reinstalar: jamás sube un estado vacío
+/// antes de completar la restauración inicial.
 class InutilTvCloudBackupService extends ChangeNotifier {
   InutilTvCloudBackupService._();
   static final InutilTvCloudBackupService instance =
       InutilTvCloudBackupService._();
 
+  static const int schemaVersion = 2;
   static const Duration _pushDebounce = Duration(seconds: 20);
   static const Duration _autoPushInterval = Duration(minutes: 30);
 
@@ -36,6 +43,7 @@ class InutilTvCloudBackupService extends ChangeNotifier {
   static const String _watchedEpsKey = 'inutiltv_watched_episodes_v1';
   static const String _favChannelsKey = 'inutiltv_favorite_channels';
   static const String _recentChannelsKey = 'inutiltv_recent_channels_v1';
+  static const String _tasteKey = TvTasteProfileService.prefsKey;
 
   static const Set<String> _backedSettingKeys = {
     'inutiltv_hw_acceleration_v1',
@@ -46,6 +54,7 @@ class InutilTvCloudBackupService extends ChangeNotifier {
     'inutiltv_appearance_accent_v3',
     'inutiltv_appearance_surface_v3',
     'inutiltv_appearance_theme_v3',
+    'inutiltv_preferred_audio_lang_v1',
   };
 
   final _auth = InutilAuthService.instance;
@@ -55,9 +64,11 @@ class InutilTvCloudBackupService extends ChangeNotifier {
   bool _pulling = false;
   bool _initialPullCompleted = false;
   DateTime? _lastPushAt;
+  DateTime? _lastRestoreAt;
   String _lastError = '';
 
   DateTime? get lastPushAt => _lastPushAt;
+  DateTime? get lastRestoreAt => _lastRestoreAt;
   String get lastError => _lastError;
   bool get isBusy => _pushing || _pulling;
 
@@ -84,7 +95,7 @@ class InutilTvCloudBackupService extends ChangeNotifier {
     _debounce = null;
   }
 
-  /// Sube el respaldo de InútilTV a `users/{uid}/data/tv_backup`.
+  /// Sube el respaldo completo de InútilTV a `users/{uid}/data/tv_backup`.
   Future<String> pushNow({bool force = false}) async {
     if (_pushing) return 'Respaldo en curso…';
     if (!canSync) return 'Inicia sesión para respaldar en la nube.';
@@ -92,19 +103,27 @@ class InutilTvCloudBackupService extends ChangeNotifier {
     notifyListeners();
     try {
       final uid = _auth.currentUser!.uid;
+
+      // Garantizar que el perfil de gustos esté volcado a disco antes de leer
+      await TvTasteProfileService.instance.persistNow(triggerBackup: false);
+
       final sp = await SharedPreferences.getInstance();
 
       final myListRaw = sp.getString(_myListKey) ?? '[]';
       final histRaw = sp.getString(_historyKey) ?? '[]';
       final epsRaw = sp.getString(_watchedEpsKey) ?? '{}';
+      final tasteRaw = sp.getString(_tasteKey) ?? '';
       final favChannels = sp.getStringList(_favChannelsKey) ?? const <String>[];
       final recentChannels =
           sp.getStringList(_recentChannelsKey) ?? const <String>[];
 
       final myList = _safeDecodeList(myListRaw);
       final history = _safeDecodeList(histRaw);
-      final hasLocalData =
-          myList.isNotEmpty || history.isNotEmpty || favChannels.isNotEmpty;
+      final hasTaste = TvTasteProfileService.instance.events.isNotEmpty;
+      final hasLocalData = myList.isNotEmpty ||
+          history.isNotEmpty ||
+          favChannels.isNotEmpty ||
+          hasTaste;
 
       // Protección anti-borrado tras reinstalar (igual que Inútil Music):
       if (!force && !_initialPullCompleted && !hasLocalData) {
@@ -120,9 +139,11 @@ class InutilTvCloudBackupService extends ChangeNotifier {
       }
 
       final payload = <String, dynamic>{
+        'schemaVersion': schemaVersion,
         'myListJson': myListRaw,
         'watchHistoryJson': histRaw,
         'watchedEpisodesJson': epsRaw,
+        'tasteProfileJson': tasteRaw,
         'favoriteChannels': favChannels,
         'recentChannels': recentChannels,
         'settings': settings,
@@ -137,6 +158,7 @@ class InutilTvCloudBackupService extends ChangeNotifier {
 
       await InutilTvWrappedService.instance.persistNow();
       await InutilTvWrappedService.instance.syncCurrentYearToCloud();
+      unawaited(TvDailyUsageService.instance.flushRichAnalytics());
 
       _lastPushAt = DateTime.now();
       _lastError = ok ? '' : 'No se pudo completar el respaldo en Firestore.';
@@ -153,7 +175,8 @@ class InutilTvCloudBackupService extends ChangeNotifier {
     }
   }
 
-  /// Restaura desde `users/{uid}/data/tv_backup` fusionando sin borrar datos locales.
+  /// Restaura exactamente el estado del usuario desde `users/{uid}/data/tv_backup`
+  /// fusionando por recencia (`updatedAt`) y unión de conjuntos sin borrar progreso.
   Future<String> pullAndRestoreIfEmpty({bool mergeOverwrite = false}) async {
     if (_pulling) return 'Restauración en curso…';
     if (!canSync) return 'Inicia sesión para restaurar tu respaldo.';
@@ -175,63 +198,98 @@ class InutilTvCloudBackupService extends ChangeNotifier {
       }
 
       var restoredCount = 0;
+      final localHistBefore = _safeDecodeList(sp.getString(_historyKey) ?? '[]');
+      final localMyListBefore = _safeDecodeList(sp.getString(_myListKey) ?? '[]');
+      final localFavsBefore =
+          sp.getStringList(_favChannelsKey) ?? const <String>[];
+      final isFreshInstall = localHistBefore.isEmpty &&
+          localMyListBefore.isEmpty &&
+          localFavsBefore.isEmpty;
 
-      // 1. Mi Lista (fusiona si local está vacío o si se pidió restauración manual)
-      final remoteMyListRaw = (doc['myListJson'] ?? '').toString();
-      final localMyList = _safeDecodeList(sp.getString(_myListKey) ?? '[]');
-      final remoteMyList = _safeDecodeList(remoteMyListRaw);
-      if (remoteMyList.isNotEmpty && (localMyList.isEmpty || mergeOverwrite)) {
-        final merged = _mergeById(localMyList, remoteMyList);
-        await sp.setString(_myListKey, jsonEncode(merged));
-        restoredCount += remoteMyList.length;
+      // 1. Mi Lista (fusión por ID sin perder elementos locales ni remotos)
+      final remoteMyList =
+          _safeDecodeList((doc['myListJson'] ?? '').toString());
+      if (remoteMyList.isNotEmpty) {
+        final merged = _mergeById(localMyListBefore, remoteMyList);
+        if (merged.length != localMyListBefore.length ||
+            mergeOverwrite ||
+            localMyListBefore.isEmpty) {
+          await sp.setString(_myListKey, jsonEncode(merged));
+          restoredCount += remoteMyList.length;
+        }
       }
 
-      // 2. Historial de reproducción
-      final remoteHistRaw = (doc['watchHistoryJson'] ?? '').toString();
-      final localHist = _safeDecodeList(sp.getString(_historyKey) ?? '[]');
-      final remoteHist = _safeDecodeList(remoteHistRaw);
-      if (remoteHist.isNotEmpty && (localHist.isEmpty || mergeOverwrite)) {
-        final merged = _mergeById(localHist, remoteHist);
+      // 2. Historial exacto "Seguir viendo" (gana el `updatedAt` más reciente)
+      final remoteHist =
+          _safeDecodeList((doc['watchHistoryJson'] ?? '').toString());
+      if (remoteHist.isNotEmpty) {
+        final merged = _mergeByIdNewest(
+          localHistBefore,
+          remoteHist,
+          preferRemoteOnTie: mergeOverwrite || isFreshInstall,
+        );
         await sp.setString(_historyKey, jsonEncode(merged));
         restoredCount += remoteHist.length;
       }
 
-      // 3. Episodios vistos
+      // 3. Episodios vistos (unión exacta por `seriesId`, jamás borra capítulos)
       final remoteEpsRaw = (doc['watchedEpisodesJson'] ?? '').toString();
-      if (remoteEpsRaw.length > 2 &&
-          ((sp.getString(_watchedEpsKey) ?? '').length <= 2 || mergeOverwrite)) {
-        await sp.setString(_watchedEpsKey, remoteEpsRaw);
+      if (remoteEpsRaw.length > 2) {
+        final mergedEps = _mergeWatchedEpisodes(
+          sp.getString(_watchedEpsKey) ?? '{}',
+          remoteEpsRaw,
+        );
+        if (mergedEps.isNotEmpty) {
+          await sp.setString(_watchedEpsKey, jsonEncode(mergedEps));
+          restoredCount += 1;
+        }
       }
 
-      // 4. Canales favoritos y recientes
+      // 4. Perfil de gustos / afinidad (`TvTasteProfileService`)
+      final remoteTasteRaw = (doc['tasteProfileJson'] ?? '').toString();
+      if (remoteTasteRaw.isNotEmpty) {
+        final mergedTaste = await TvTasteProfileService.instance
+            .mergeFromJsonString(remoteTasteRaw, overwrite: mergeOverwrite);
+        if (mergedTaste) restoredCount += 1;
+      }
+
+      // 5. Canales favoritos y recientes (unión ordenada sin duplicados)
       final remoteFavs = (doc['favoriteChannels'] as List?)
               ?.map((e) => e.toString())
+              .where((e) => e.isNotEmpty)
               .toList() ??
           const <String>[];
-      final localFavs = sp.getStringList(_favChannelsKey) ?? const <String>[];
-      if (remoteFavs.isNotEmpty && (localFavs.isEmpty || mergeOverwrite)) {
-        final mergedFavs = {...localFavs, ...remoteFavs}.toList();
+      if (remoteFavs.isNotEmpty) {
+        final mergedFavs = {...localFavsBefore, ...remoteFavs}.toList();
         await sp.setStringList(_favChannelsKey, mergedFavs);
-        restoredCount += remoteFavs.length;
+        if (mergedFavs.length > localFavsBefore.length || isFreshInstall) {
+          restoredCount += remoteFavs.length;
+        }
       }
 
       final remoteRecs = (doc['recentChannels'] as List?)
               ?.map((e) => e.toString())
+              .where((e) => e.isNotEmpty)
               .toList() ??
           const <String>[];
       final localRecs =
           sp.getStringList(_recentChannelsKey) ?? const <String>[];
-      if (remoteRecs.isNotEmpty && localRecs.isEmpty) {
-        await sp.setStringList(_recentChannelsKey, remoteRecs);
+      if (remoteRecs.isNotEmpty) {
+        final mergedRecs = <String>[
+          ...localRecs,
+          for (final r in remoteRecs)
+            if (!localRecs.contains(r)) r,
+        ].take(10).toList();
+        await sp.setStringList(_recentChannelsKey, mergedRecs);
       }
 
-      // 5. Ajustes de apariencia y motor (solo claves que aún no existan)
+      // 6. Preferencias de reproductor, idioma y apariencia
       final settings = doc['settings'];
       if (settings is Map) {
         for (final entry in settings.entries) {
           final k = entry.key.toString();
           if (!_backedSettingKeys.contains(k)) continue;
-          if (!mergeOverwrite && sp.containsKey(k)) continue;
+          if (!mergeOverwrite && !isFreshInstall && sp.containsKey(k)) continue;
           final v = entry.value;
           if (v is String) {
             await sp.setString(k, v);
@@ -239,17 +297,22 @@ class InutilTvCloudBackupService extends ChangeNotifier {
             await sp.setBool(k, v);
           } else if (v is int) {
             await sp.setInt(k, v);
+          } else if (v is num) {
+            await sp.setInt(k, v.toInt());
           }
         }
       }
 
-      // Recargar singletons en memoria
+      // Recargar todos los singletons en memoria y recalcular Home al instante
       await Future.wait([
         AppSettingsService.instance.load(force: true),
         MyListService.instance.reloadFromDisk(),
         WatchHistory().reloadFromDisk(),
+        TvTasteProfileService.instance.reloadFromDisk(),
       ]);
+      XuperService().rebuildRecommendations();
 
+      _lastRestoreAt = DateTime.now();
       _lastError = '';
       return restoredCount > 0
           ? 'Respaldo restaurado ($restoredCount elementos recuperados).'
@@ -271,6 +334,38 @@ class InutilTvCloudBackupService extends ChangeNotifier {
     List<Map<String, dynamic>> remote,
   ) =>
       _mergeById(local, remote);
+
+  /// Helper puro para fusionar historial por `id` eligiendo el `updatedAt` más nuevo.
+  @visibleForTesting
+  static List<Map<String, dynamic>> mergeByIdNewestForTest(
+    List<Map<String, dynamic>> local,
+    List<Map<String, dynamic>> remote, {
+    bool preferRemoteOnTie = false,
+  }) =>
+      _mergeByIdNewest(
+        local,
+        remote,
+        preferRemoteOnTie: preferRemoteOnTie,
+      );
+
+  /// Helper puro para fusionar episodios vistos por unión de conjuntos.
+  @visibleForTesting
+  static Map<String, List<String>> mergeWatchedEpisodesForTest(
+    String localRaw,
+    String remoteRaw,
+  ) =>
+      _mergeWatchedEpisodes(localRaw, remoteRaw);
+
+  @visibleForTesting
+  void resetForTest() {
+    stopAutoSync();
+    _pushing = false;
+    _pulling = false;
+    _initialPullCompleted = false;
+    _lastPushAt = null;
+    _lastRestoreAt = null;
+    _lastError = '';
+  }
 
   static List<Map<String, dynamic>> _safeDecodeList(String raw) {
     try {
@@ -298,5 +393,73 @@ class InutilTvCloudBackupService extends ChangeNotifier {
       }
     }
     return out;
+  }
+
+  /// Fusiona historial de reproducción eligiendo por cada `id` la entrada con
+  /// `updatedAt` más reciente (o mayor progreso si empatan) y ordena descendente.
+  static List<Map<String, dynamic>> _mergeByIdNewest(
+    List<Map<String, dynamic>> local,
+    List<Map<String, dynamic>> remote, {
+    bool preferRemoteOnTie = false,
+  }) {
+    final byId = <String, Map<String, dynamic>>{};
+    int tsOf(Map<String, dynamic> m) => (m['updatedAt'] as num?)?.toInt() ?? 0;
+    double posOf(Map<String, dynamic> m) =>
+        (m['positionSec'] as num?)?.toDouble() ?? 0.0;
+
+    for (final m in local) {
+      final id = (m['id'] ?? '').toString();
+      if (id.isNotEmpty) byId[id] = m;
+    }
+    for (final m in remote) {
+      final id = (m['id'] ?? '').toString();
+      if (id.isEmpty) continue;
+      final cur = byId[id];
+      if (cur == null) {
+        byId[id] = m;
+        continue;
+      }
+      final rTs = tsOf(m);
+      final lTs = tsOf(cur);
+      if (rTs > lTs ||
+          (rTs == lTs &&
+              (preferRemoteOnTie || posOf(m) > posOf(cur)))) {
+        byId[id] = m;
+      }
+    }
+
+    final merged = byId.values.toList()
+      ..sort((a, b) => tsOf(b).compareTo(tsOf(a)));
+    return merged.take(120).toList();
+  }
+
+  static Map<String, List<String>> _mergeWatchedEpisodes(
+    String localRaw,
+    String remoteRaw,
+  ) {
+    final merged = <String, Set<String>>{};
+    void absorb(String raw) {
+      if (raw.trim().length <= 2) return;
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is! Map) return;
+        decoded.forEach((k, v) {
+          final seriesId = k.toString();
+          if (seriesId.isEmpty || v is! List) return;
+          final set = merged.putIfAbsent(seriesId, () => <String>{});
+          for (final ep in v) {
+            final epStr = ep.toString();
+            if (epStr.isNotEmpty) set.add(epStr);
+          }
+        });
+      } catch (_) {}
+    }
+
+    absorb(localRaw);
+    absorb(remoteRaw);
+    return merged.map((k, v) {
+      final list = v.toList()..sort();
+      return MapEntry(k, list);
+    });
   }
 }

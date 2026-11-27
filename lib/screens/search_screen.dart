@@ -1,16 +1,20 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/models.dart';
 import '../services/artwork_cache_service.dart';
 import '../services/play_target.dart';
+import '../services/tv_mode_service.dart';
 import '../services/tv_remote_service.dart';
+import '../services/tv_taste_profile_service.dart';
 import '../services/vod_catalog_service.dart';
 import '../services/xuper_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_ui.dart';
 import '../theme/inutil_icons.dart';
 import '../widgets/fast_artwork.dart';
+import '../widgets/inutil_tv_keyboard.dart';
 import '../widgets/poster_card.dart';
 import '../widgets/tv_focusable.dart';
 import '../widgets/vod_detail_modal.dart';
@@ -55,7 +59,17 @@ class _SearchScreenState extends State<SearchScreen> {
   final _catalog = VodCatalogService();
   final _xuper = XuperService();
   final _controller = TextEditingController();
-  late final FocusNode _searchFocus = TvFocusable.createTextFieldFocusNode();
+  final _firstFilterFocus = FocusNode(debugLabel: 'searchFirstFilter');
+  late final FocusNode _searchFocus = TvFocusable.createTextFieldFocusNode(
+    controller: _controller,
+    onDoneKey: () {
+      if (!_tvKeyboardVisible) {
+        setState(() => _tvKeyboardVisible = true);
+      }
+    },
+  );
+  bool _tvKeyboardVisible = false;
+  bool _tvKeyboardInitialized = false;
 
   List<VodItem> _matchedVod = [];
   List<Channel> _allChannels = [];
@@ -105,10 +119,23 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_tvKeyboardInitialized) {
+      _tvKeyboardInitialized = true;
+      _tvKeyboardVisible = TvModeService.of(context);
+      if (_tvKeyboardVisible) {
+        SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+      }
+    }
+  }
+
+  @override
   void dispose() {
     _debounce?.cancel();
     _controller.dispose();
     _searchFocus.dispose();
+    _firstFilterFocus.dispose();
     if (_SearchScreenState._activeInstance == this) {
       _SearchScreenState._activeInstance = null;
     }
@@ -171,6 +198,14 @@ class _SearchScreenState extends State<SearchScreen> {
         _matchedVod = vodResults;
         _searching = false;
       });
+      if (q.length >= 2) {
+        unawaited(
+          TvTasteProfileService.instance.recordSearch(
+            q,
+            topResults: vodResults,
+          ),
+        );
+      }
       unawaited(
         ArtworkCacheService.instance.prefetchUrls(
           vodResults.map((e) => e.poster),
@@ -243,6 +278,9 @@ class _SearchScreenState extends State<SearchScreen> {
     final subColor = AppColors.contentSubtitleFor(context);
     final headingColor = AppColors.contentHeadingFor(context);
 
+    final isTv = TvModeService.of(context);
+    final useOnScreenKeyboard = isTv || _tvKeyboardVisible;
+
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
@@ -265,7 +303,14 @@ class _SearchScreenState extends State<SearchScreen> {
             child: TextField(
               controller: _controller,
               focusNode: _searchFocus,
-              autofocus: true,
+              autofocus: !useOnScreenKeyboard,
+              readOnly: useOnScreenKeyboard,
+              showCursor: true,
+              onTap: () {
+                if (isTv && !_tvKeyboardVisible) {
+                  setState(() => _tvKeyboardVisible = true);
+                }
+              },
               onChanged: _onSearchChanged,
               style: TextStyle(color: headingColor, fontSize: 13.5),
               decoration: InputDecoration(
@@ -280,8 +325,11 @@ class _SearchScreenState extends State<SearchScreen> {
                     color: subColor,
                   ),
                 ),
-                suffixIcon: _searching
-                    ? Padding(
+                suffixIcon: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_searching)
+                      Padding(
                         padding: const EdgeInsets.all(12),
                         child: SizedBox(
                           width: 14,
@@ -292,19 +340,39 @@ class _SearchScreenState extends State<SearchScreen> {
                           ),
                         ),
                       )
-                    : _controller.text.isNotEmpty
-                        ? IconButton(
-                            icon: Icon(
-                              Icons.close_rounded,
-                              color: subColor,
-                              size: 18,
-                            ),
-                            onPressed: () {
-                              _controller.clear();
-                              _onSearchChanged('');
-                            },
-                          )
-                        : null,
+                    else if (_controller.text.isNotEmpty)
+                      IconButton(
+                        icon: Icon(
+                          Icons.close_rounded,
+                          color: subColor,
+                          size: 18,
+                        ),
+                        onPressed: () {
+                          _controller.clear();
+                          _onSearchChanged('');
+                        },
+                      ),
+                    IconButton(
+                      tooltip: _tvKeyboardVisible
+                          ? 'Ocultar teclado en pantalla'
+                          : 'Teclado para control remoto',
+                      icon: Icon(
+                        _tvKeyboardVisible
+                            ? Icons.keyboard_hide_rounded
+                            : Icons.keyboard_alt_outlined,
+                        color: _tvKeyboardVisible ? accent : subColor,
+                        size: 19,
+                      ),
+                      onPressed: () {
+                        setState(() => _tvKeyboardVisible = !_tvKeyboardVisible);
+                        if (_tvKeyboardVisible) {
+                          SystemChannels.textInput
+                              .invokeMethod<void>('TextInput.hide');
+                        }
+                      },
+                    ),
+                  ],
+                ),
                 border: InputBorder.none,
                 contentPadding: const EdgeInsets.symmetric(vertical: 10),
               ),
@@ -315,6 +383,23 @@ class _SearchScreenState extends State<SearchScreen> {
       body: ListView(
         padding: const EdgeInsets.only(bottom: 36),
         children: [
+          if (_tvKeyboardVisible)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                appPagePaddingHorizontal,
+                4,
+                appPagePaddingHorizontal,
+                8,
+              ),
+              child: InutilTvKeyboard(
+                controller: _controller,
+                mode: InutilTvKeyboardMode.search,
+                autofocusFirstKey: true,
+                onChanged: _onSearchChanged,
+                onSubmit: () => _firstFilterFocus.requestFocus(),
+                onMoveDownToResults: () => _firstFilterFocus.requestFocus(),
+              ),
+            ),
           SizedBox(
             height: 46,
             child: ListView.builder(
@@ -328,6 +413,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 final f = _filters[idx];
                 final isSelected = _selectedFilter == f;
                 return TvFocusable(
+                  focusNode: idx == 0 ? _firstFilterFocus : null,
                   onTap: () => setState(() => _selectedFilter = f),
                   borderRadius: BorderRadius.circular(18),
                   margin: const EdgeInsets.only(right: 8),

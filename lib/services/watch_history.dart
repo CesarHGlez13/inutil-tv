@@ -120,7 +120,7 @@ class WatchHistory extends ChangeNotifier {
 
   static const _key = 'inutiltv_watch_history_v1';
   static const _watchedEpsKey = 'inutiltv_watched_episodes_v1';
-  static const _maxEntries = 30;
+  static const _maxEntries = 120;
 
   List<WatchProgress> _cache = [];
   Map<String, Set<String>> _watchedEpisodes = {};
@@ -128,6 +128,12 @@ class WatchHistory extends ChangeNotifier {
 
   /// Historial ordenado del más reciente al más antiguo.
   List<WatchProgress> get items => List.unmodifiable(_cache);
+
+  /// Copia de solo lectura de episodios marcados como vistos por `seriesId`.
+  Map<String, Set<String>> get watchedEpisodesSnapshot => {
+        for (final e in _watchedEpisodes.entries)
+          e.key: Set<String>.unmodifiable(e.value),
+      };
 
   Future<void> load() async {
     if (_loaded) return;
@@ -141,6 +147,8 @@ class WatchHistory extends ChangeNotifier {
             .toList();
         list.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
         _cache = list.take(_maxEntries).toList();
+      } else {
+        _cache = [];
       }
       final rawEps = sp.getString(_watchedEpsKey);
       if (rawEps != null && rawEps.isNotEmpty) {
@@ -148,6 +156,8 @@ class WatchHistory extends ChangeNotifier {
         _watchedEpisodes = map.map(
           (k, v) => MapEntry(k, (v as List).map((e) => e.toString()).toSet()),
         );
+      } else {
+        _watchedEpisodes = {};
       }
     } catch (_) {
       _cache = [];

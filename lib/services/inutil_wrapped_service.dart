@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'firebase_auth_service.dart';
 import 'firebase_firestore_service.dart';
+import 'tv_taste_profile_service.dart';
 import 'watch_history.dart';
 
 @immutable
@@ -398,9 +399,24 @@ class InutilTvWrappedService {
       if (bucket.totalSeconds == 0 && bucket.totalSessions == 0) return;
       final uid = InutilAuthService.instance.currentUser!.uid;
       bucket.prune(_maxStoredTitles);
+      final payload = bucket.toMap();
+      final taste = TvTasteProfileService.instance.computeSummary();
+      if (taste.hasSignals) {
+        payload['topGenres'] = [
+          for (final g in taste.topGenres(6))
+            {
+              'id': g.key,
+              'label': TvTasteProfileService.labelForGenre(g.key),
+              'weight': g.value,
+            },
+        ];
+        payload['formatRatio'] = taste.formatRatio;
+        payload['completionRate'] = taste.completionRate;
+        payload['preferredAudio'] = taste.preferredAudio;
+      }
       await InutilFirestoreService.instance.setDocument(
         'users/$uid/data/tv_wrapped_$targetYear',
-        bucket.toMap(),
+        payload,
       );
     } catch (e) {
       debugPrint('[TvWrapped] Cloud push err: $e');

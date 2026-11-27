@@ -269,8 +269,15 @@ class InutilFirestoreService {
     var response = await _sendWithRelayFallback(
       label: 'GET $path',
       urlBuilder: () => Uri.parse('${FirebaseConfig.firestoreBaseUrl}/$path'),
-      send: (url) => http
-          .get(url, headers: _headers(overrideToken: overrideToken))
+      send: (url) => (_httpClient != null
+              ? _httpClient!.get(
+                  url,
+                  headers: _headers(overrideToken: overrideToken),
+                )
+              : http.get(
+                  url,
+                  headers: _headers(overrideToken: overrideToken),
+                ))
           .timeout(const Duration(seconds: 10)),
     );
     if (response.statusCode == 401 && overrideToken == null) {
@@ -281,8 +288,15 @@ class InutilFirestoreService {
           label: 'GET $path (reauth)',
           urlBuilder: () =>
               Uri.parse('${FirebaseConfig.firestoreBaseUrl}/$path'),
-          send: (url) => http
-              .get(url, headers: _headers(overrideToken: overrideToken))
+          send: (url) => (_httpClient != null
+                  ? _httpClient!.get(
+                      url,
+                      headers: _headers(overrideToken: overrideToken),
+                    )
+                  : http.get(
+                      url,
+                      headers: _headers(overrideToken: overrideToken),
+                    ))
               .timeout(const Duration(seconds: 10)),
         );
       }
@@ -336,12 +350,17 @@ class InutilFirestoreService {
     var response = await _sendWithRelayFallback(
       label: 'PATCH $path',
       urlBuilder: () => buildPatchUri(path, data.keys, merge: merge),
-      send: (url) => http
-          .patch(
-            url,
-            headers: _headers(overrideToken: overrideToken),
-            body: body,
-          )
+      send: (url) => (_httpClient != null
+              ? _httpClient!.patch(
+                  url,
+                  headers: _headers(overrideToken: overrideToken),
+                  body: body,
+                )
+              : http.patch(
+                  url,
+                  headers: _headers(overrideToken: overrideToken),
+                  body: body,
+                ))
           .timeout(const Duration(seconds: 10)),
     );
     if (response.statusCode == 401 && overrideToken == null) {
@@ -351,12 +370,17 @@ class InutilFirestoreService {
         response = await _sendWithRelayFallback(
           label: 'PATCH $path (reauth)',
           urlBuilder: () => buildPatchUri(path, data.keys, merge: merge),
-          send: (url) => http
-              .patch(
-                url,
-                headers: _headers(overrideToken: overrideToken),
-                body: body,
-              )
+          send: (url) => (_httpClient != null
+                  ? _httpClient!.patch(
+                      url,
+                      headers: _headers(overrideToken: overrideToken),
+                      body: body,
+                    )
+                  : http.patch(
+                      url,
+                      headers: _headers(overrideToken: overrideToken),
+                      body: body,
+                    ))
               .timeout(const Duration(seconds: 10)),
         );
       }
