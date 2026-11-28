@@ -152,12 +152,23 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
   );
   final FocusNode _eyeSkipFocus = FocusNode(skipTraversal: true);
   final FocusNode _copyIdSkipFocus = FocusNode(skipTraversal: true);
+  final FocusNode _reloadQrFocus = FocusNode();
 
   TvQrPairingSession? _qrSession;
   bool _qrLoading = false;
+  bool _qrNeedsReload = false;
   String? _qrStatusMessage;
   Timer? _qrPollTimer;
+  Timer? _qrCountdownTimer;
+  int _qrRemainingSec = 0;
   bool _qrPolling = false;
+
+  static String _formatQrCountdown(int totalSec) {
+    final safe = totalSec < 0 ? 0 : totalSec;
+    final m = (safe ~/ 60).toString().padLeft(2, '0');
+    final s = (safe % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
 
   late final AnimationController _glowAnim = AnimationController(
     vsync: this,
@@ -174,6 +185,7 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
 
   Future<void> _startQrPairing() async {
     _qrPollTimer?.cancel();
+    _qrCountdownTimer?.cancel();
     final oldCode = _qrSession?.code;
     if (oldCode != null) {
       unawaited(TvQrPairingService.instance.cleanupTvSession(oldCode));
@@ -181,23 +193,53 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
     if (!mounted) return;
     setState(() {
       _qrLoading = true;
+      _qrNeedsReload = false;
       _qrStatusMessage = null;
       _qrSession = null;
+      _qrRemainingSec = 0;
     });
     final session = await TvQrPairingService.instance.createTvSession();
     if (!mounted) return;
     if (session == null) {
       setState(() {
         _qrLoading = false;
+        _qrNeedsReload = true;
         _qrStatusMessage = 'No se pudo generar el QR. Revisa tu conexión.';
       });
       return;
     }
+    final initialLeft =
+        session.expiresAt.difference(DateTime.now()).inSeconds.clamp(0, 3600);
     setState(() {
       _qrLoading = false;
+      _qrNeedsReload = false;
       _qrSession = session;
+      _qrRemainingSec = initialLeft;
       _qrStatusMessage = null;
     });
+
+    _qrCountdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || _qrSession == null) return;
+      final left = _qrSession!.expiresAt.difference(DateTime.now()).inSeconds;
+      if (left <= 0) {
+        final expiredCode = _qrSession?.code;
+        _qrPollTimer?.cancel();
+        _qrCountdownTimer?.cancel();
+        if (expiredCode != null) {
+          unawaited(TvQrPairingService.instance.cleanupTvSession(expiredCode));
+        }
+        setState(() {
+          _qrSession = null;
+          _qrNeedsReload = true;
+          _qrRemainingSec = 0;
+          _qrStatusMessage =
+              'El código QR expiró. Pulsa «Recargar código QR».';
+        });
+      } else if (left != _qrRemainingSec) {
+        setState(() => _qrRemainingSec = left);
+      }
+    });
+
     _qrPollTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
       if (_qrPolling || !mounted || _qrSession == null) return;
       _qrPolling = true;
@@ -207,14 +249,26 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
         if (!mounted || res == null) return;
         if (res == 'OK') {
           _qrPollTimer?.cancel();
+          _qrCountdownTimer?.cancel();
         } else if (res == 'EXPIRED') {
           _qrPollTimer?.cancel();
+          _qrCountdownTimer?.cancel();
           setState(() {
-            _qrStatusMessage = 'El código expiró. Pulsa para generar uno nuevo.';
+            _qrSession = null;
+            _qrNeedsReload = true;
+            _qrRemainingSec = 0;
+            _qrStatusMessage =
+                'El código QR expiró. Pulsa «Recargar código QR».';
           });
         } else {
           _qrPollTimer?.cancel();
-          setState(() => _qrStatusMessage = res);
+          _qrCountdownTimer?.cancel();
+          setState(() {
+            _qrSession = null;
+            _qrNeedsReload = true;
+            _qrRemainingSec = 0;
+            _qrStatusMessage = res;
+          });
         }
       } finally {
         _qrPolling = false;
@@ -225,6 +279,7 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
   @override
   void dispose() {
     _qrPollTimer?.cancel();
+    _qrCountdownTimer?.cancel();
     final pendingCode = _qrSession?.code;
     if (pendingCode != null && !InutilAuthService.instance.isAuthenticated) {
       unawaited(TvQrPairingService.instance.cleanupTvSession(pendingCode));
@@ -237,6 +292,7 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
     _passwordFocus.dispose();
     _eyeSkipFocus.dispose();
     _copyIdSkipFocus.dispose();
+    _reloadQrFocus.dispose();
     _glowAnim.dispose();
     super.dispose();
   }
@@ -629,8 +685,8 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
                           children: [
                             if (_qrLoading)
                               const SizedBox(
-                                width: 148,
-                                height: 148,
+                                width: 136,
+                                height: 136,
                                 child: Center(
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2.5,
@@ -638,9 +694,10 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
                                 ),
                               )
                             else if (_qrSession != null &&
-                                !_qrSession!.isExpired)
+                                !_qrSession!.isExpired &&
+                                !_qrNeedsReload)
                               Container(
-                                padding: const EdgeInsets.all(10),
+                                padding: const EdgeInsets.all(8),
                                 decoration: BoxDecoration(
                                   color: Colors.white,
                                   borderRadius: BorderRadius.circular(14),
@@ -648,7 +705,7 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
                                 child: QrImageView(
                                   data: _qrSession!.qrUri,
                                   version: QrVersions.auto,
-                                  size: 144,
+                                  size: 132,
                                   eyeStyle: const QrEyeStyle(
                                     eyeShape: QrEyeShape.square,
                                     color: Color(0xFF070709),
@@ -660,21 +717,23 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
                                 ),
                               )
                             else
-                              SizedBox(
-                                width: 156,
-                                height: 120,
+                              Container(
+                                width: 136,
+                                height: 96,
+                                decoration: BoxDecoration(
+                                  color: elevated,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: border),
+                                ),
                                 child: Center(
-                                  child: OutlinedButton.icon(
-                                    onPressed: _startQrPairing,
-                                    icon: const Icon(
-                                      Icons.refresh_rounded,
-                                      size: 18,
-                                    ),
-                                    label: const Text('Generar QR'),
+                                  child: Icon(
+                                    Icons.qr_code_2_rounded,
+                                    size: 46,
+                                    color: sub,
                                   ),
                                 ),
                               ),
-                            const SizedBox(height: 10),
+                            const SizedBox(height: 8),
                             Text(
                               _qrStatusMessage ??
                                   'Escanea desde Inutix TV en tu celular',
@@ -683,21 +742,119 @@ class _InutilAuthScreenState extends State<InutilAuthScreen>
                                 color: _qrStatusMessage != null
                                     ? Colors.amberAccent
                                     : heading,
-                                fontSize: 12,
+                                fontSize: 11.5,
                                 fontWeight: FontWeight.w800,
                               ),
                             ),
                             const SizedBox(height: 3),
                             Text(
-                              _qrSession != null
-                                  ? 'Código ${_qrSession!.displayCode} · 1 celular + 1 TV'
-                                  : 'Ajustes → Vincular Smart TV',
+                              _qrSession != null && !_qrNeedsReload
+                                  ? 'Código ${_qrSession!.displayCode} · ${_formatQrCountdown(_qrRemainingSec)}'
+                                  : 'Ajustes → Vincular Smart TV · 1 celular + 1 TV',
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 color: sub,
                                 fontSize: 10.5,
                                 fontWeight: FontWeight.w600,
                               ),
+                            ),
+                            const SizedBox(height: 10),
+                            SizedBox(
+                              width: double.infinity,
+                              child: (_qrSession == null ||
+                                      _qrSession!.isExpired ||
+                                      _qrNeedsReload)
+                                  ? ElevatedButton.icon(
+                                      focusNode: _reloadQrFocus,
+                                      onPressed:
+                                          _qrLoading ? null : _startQrPairing,
+                                      style: ButtonStyle(
+                                        backgroundColor:
+                                            WidgetStatePropertyAll(accent),
+                                        foregroundColor:
+                                            WidgetStatePropertyAll(onAccent),
+                                        padding: const WidgetStatePropertyAll(
+                                          EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 10,
+                                          ),
+                                        ),
+                                        side: WidgetStateProperty.resolveWith(
+                                          (states) => states
+                                                  .contains(WidgetState.focused)
+                                              ? const BorderSide(
+                                                  color: Colors.white,
+                                                  width: 2.5,
+                                                )
+                                              : BorderSide.none,
+                                        ),
+                                        shape: WidgetStatePropertyAll(
+                                          RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                          ),
+                                        ),
+                                      ),
+                                      icon: const Icon(
+                                        Icons.refresh_rounded,
+                                        size: 16,
+                                      ),
+                                      label: const Text(
+                                        'Generar nuevo QR',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    )
+                                  : OutlinedButton.icon(
+                                      focusNode: _reloadQrFocus,
+                                      onPressed:
+                                          _qrLoading ? null : _startQrPairing,
+                                      style: ButtonStyle(
+                                        foregroundColor:
+                                            WidgetStatePropertyAll(heading),
+                                        backgroundColor:
+                                            WidgetStateProperty.resolveWith(
+                                          (states) => states
+                                                  .contains(WidgetState.focused)
+                                              ? accent.withValues(alpha: 0.22)
+                                              : Colors.transparent,
+                                        ),
+                                        side: WidgetStateProperty.resolveWith(
+                                          (states) => states
+                                                  .contains(WidgetState.focused)
+                                              ? BorderSide(
+                                                  color: accent,
+                                                  width: 2.2,
+                                                )
+                                              : BorderSide(color: border),
+                                        ),
+                                        padding: const WidgetStatePropertyAll(
+                                          EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 8,
+                                          ),
+                                        ),
+                                        shape: WidgetStatePropertyAll(
+                                          RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                          ),
+                                        ),
+                                      ),
+                                      icon: const Icon(
+                                        Icons.refresh_rounded,
+                                        size: 15,
+                                      ),
+                                      label: const Text(
+                                        'Recargar código QR',
+                                        style: TextStyle(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
                             ),
                           ],
                         ),

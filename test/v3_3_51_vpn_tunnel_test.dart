@@ -278,7 +278,7 @@ void main() {
     expect(net.mpvProxyUrl, isNull);
   });
 
-  group('v3.3.58 — Changelog y versión sincronizados', () {
+  group('v3.3.59 — Changelog y versión sincronizados', () {
     const forbiddenTerms = [
       'pelisflix',
       'jkanime',
@@ -311,14 +311,14 @@ void main() {
           RegExp(r'^version:\s*(\d+\.\d+\.\d+)\+(\d+)', multiLine: true)
               .firstMatch(pubspec);
       expect(match, isNotNull);
-      expect(match!.group(1), '3.3.58');
-      expect(match.group(2), '107');
-      expect(AppInfo.appVersion, '3.3.58');
+      expect(match!.group(1), '3.3.59');
+      expect(match.group(2), '108');
+      expect(AppInfo.appVersion, '3.3.59');
 
       final full = File('CHANGELOG.md').readAsStringSync();
-      final start = full.indexOf('## 3.3.58');
+      final start = full.indexOf('## 3.3.59');
       expect(start, greaterThan(0));
-      final end = full.indexOf('## 3.3.57', start);
+      final end = full.indexOf('## 3.3.58', start);
       expect(end, greaterThan(start));
       final entry = full.substring(start, end).toLowerCase();
       final highlights = AppInfo.whatsNewHighlights.join('\n').toLowerCase();

@@ -613,11 +613,119 @@ class InutilAuthService extends ChangeNotifier {
   Future<bool> ensureFreshIdToken({bool force = false}) =>
       _ensureFreshIdToken(force: force);
 
+  /// `true` cuando un token pertenece a la autenticación nativa de Inutix Relay
+  /// (`inutix_ses_*` / `inutix_ref_*`) y no a Firebase Auth REST.
+  static bool isInutixToken(String token) =>
+      token.trim().startsWith('inutix_');
+
+  /// Hook opcional para pruebas unitarias de refresco de sesión Inutix.
+  @visibleForTesting
+  static Future<Map<String, dynamic>?> Function(String refreshToken)?
+      inutixRefreshOverrideForTest;
+
+  static List<String> _inutixAuthBaseCandidates() {
+    final bases = <String>[];
+    if (FirebaseConfig.relayUsable && FirebaseConfig.relayHost.isNotEmpty) {
+      bases.add(
+        'http://${FirebaseConfig.relayHost}:${FirebaseConfig.relayPort}',
+      );
+    }
+    final cloudHost = FirebaseConfig.cloudRelayHost.trim().isNotEmpty
+        ? FirebaseConfig.cloudRelayHost.trim()
+        : 'api.inutix.com';
+    final cloudBase = 'https://$cloudHost';
+    if (!bases.contains(cloudBase)) {
+      bases.add(cloudBase);
+    }
+    return bases;
+  }
+
+  /// Intercambia un `inutix_ref_*` contra `POST /auth/refresh` de Inutix Relay
+  /// (probando primero relay LAN si está disponible y luego `api.inutix.com`).
+  static Future<Map<String, dynamic>?> _exchangeInutixRefreshToken(
+    String refreshToken,
+  ) async {
+    final override = inutixRefreshOverrideForTest;
+    if (override != null) {
+      return await override(refreshToken);
+    }
+    for (final base in _inutixAuthBaseCandidates()) {
+      final isLan = base.startsWith('http://');
+      try {
+        final res = await http
+            .post(
+              Uri.parse('$base/auth/refresh'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({'refreshToken': refreshToken}),
+            )
+            .timeout(Duration(seconds: isLan ? 4 : 10));
+        if (res.statusCode == 200) {
+          final decoded = _tryDecode(res.body);
+          final idToken = (decoded['idToken'] as String? ?? '').trim();
+          if (idToken.isNotEmpty) return decoded;
+        }
+        // Si respondió 401/403 definitivo (token revocado/inválido), no insistir.
+        if (res.statusCode == 401 || res.statusCode == 403) {
+          return null;
+        }
+      } catch (e) {
+        debugPrint('[InutilAuth] /auth/refresh fallo en $base: $e');
+      }
+    }
+    return null;
+  }
+
+  /// Recupera el `uid` desde `GET /v1/auth/license-check` cuando la TV recibió
+  /// un token Inutix sin `uidHint`.
+  static Future<String> _lookupInutixUid(String idToken) async {
+    for (final base in _inutixAuthBaseCandidates()) {
+      final isLan = base.startsWith('http://');
+      try {
+        final res = await http
+            .get(
+              Uri.parse('$base/v1/auth/license-check'),
+              headers: {'Authorization': 'Bearer $idToken'},
+            )
+            .timeout(Duration(seconds: isLan ? 4 : 8));
+        if (res.statusCode == 200) {
+          final decoded = _tryDecode(res.body);
+          final uid = (decoded['uid'] as String? ?? '').trim();
+          if (uid.isNotEmpty && uid != 'admin') return uid;
+        }
+      } catch (_) {}
+    }
+    return '';
+  }
+
   /// Intercambio de `refreshToken` por un `idToken` nuevo.
   Future<bool> _ensureFreshIdToken({bool force = false}) async {
     final user = _currentUser;
     if (user == null || user.refreshToken.isEmpty) return false;
-    if (testSkipOnlineValidation) return _idTokenValid(user.idToken);
+    if (testSkipOnlineValidation) {
+      if (isInutixToken(user.idToken)) return true;
+      return _idTokenValid(user.idToken);
+    }
+
+    // Sesiones nativas Inutix (`inutix_ses_*` / `inutix_ref_*`): vigencia de
+    // 30 días en el servidor propio y refresco vía `/auth/refresh` (nunca
+    // contra `securetoken.googleapis.com`).
+    if (isInutixToken(user.idToken) || isInutixToken(user.refreshToken)) {
+      if (!force && user.idToken.startsWith('inutix_ses_')) return true;
+      if (!isInutixToken(user.refreshToken)) return false;
+      final refreshed = await _exchangeInutixRefreshToken(user.refreshToken);
+      if (refreshed == null) return false;
+      final idToken = (refreshed['idToken'] as String? ?? '').trim();
+      if (idToken.isEmpty) return false;
+      _currentUser = user.copyWith(
+        idToken: idToken,
+        refreshToken:
+            (refreshed['refreshToken'] as String?) ?? user.refreshToken,
+      );
+      await _saveSession();
+      notifyListeners();
+      return true;
+    }
+
     if (!force && _idTokenValid(user.idToken)) return true;
     try {
       final url = Uri.parse(
@@ -1227,65 +1335,93 @@ class InutilAuthService extends ChangeNotifier {
   /// Inicia sesión automáticamente en la Smart TV usando un `refreshToken`
   /// recibido mediante el flujo de vinculación QR cifrado desde el celular.
   ///
+  /// Soporta tanto sesiones nativas de Inutix Relay (`inutix_ref_*` vía
+  /// `POST /auth/refresh`) como sesiones de Firebase Auth (`securetoken`).
   /// Devuelve `null` si todo salió bien, o un mensaje legible si falló.
   Future<String?> signInWithPairedRefreshToken(
     String refreshToken, {
+    String uidHint = '',
     String emailHint = '',
     String displayNameHint = '',
   }) async {
     final token = refreshToken.trim();
     if (token.isEmpty) return 'La sesión enviada desde el celular está vacía.';
     try {
-      final tokenUrl = Uri.parse(
-        '${FirebaseConfig.secureTokenUrl}?${FirebaseConfig.keyParam}',
-      );
-      final tokenRes = await http
-          .post(
-            tokenUrl,
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'grant_type': 'refresh_token',
-              'refresh_token': token,
-            }),
-          )
-          .timeout(const Duration(seconds: 12));
-      if (tokenRes.statusCode != 200) {
-        return 'El celular debe tener sesión activa vigente para vincular la TV.';
-      }
-      final data = _tryDecode(tokenRes.body);
-      final idToken = data['id_token'] as String? ?? '';
-      final uid = data['user_id'] as String? ?? '';
-      final newRefresh = (data['refresh_token'] as String?) ?? token;
-      if (idToken.isEmpty || uid.isEmpty) {
-        return 'No se pudo validar la sesión recibida.';
-      }
-
-      // Recuperar correo y nombre reales desde Firebase Identity Toolkit.
+      var idToken = '';
+      var uid = uidHint.trim();
+      var newRefresh = token;
       var email = emailHint.trim();
       var displayName = displayNameHint.trim();
-      try {
-        final lookupUrl = Uri.parse(
-          '${FirebaseConfig.authBaseUrl}/accounts:lookup?${FirebaseConfig.keyParam}',
-        );
-        final lookupRes = await http
-            .post(
-              lookupUrl,
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode({'idToken': idToken}),
-            )
-            .timeout(const Duration(seconds: 8));
-        if (lookupRes.statusCode == 200) {
-          final lData = _tryDecode(lookupRes.body);
-          final users = lData['users'] as List?;
-          if (users != null && users.isNotEmpty && users.first is Map) {
-            final u = users.first as Map;
-            final e = (u['email'] ?? '').toString().trim();
-            final d = (u['displayName'] ?? '').toString().trim();
-            if (e.isNotEmpty) email = e;
-            if (d.isNotEmpty) displayName = d;
-          }
+
+      if (isInutixToken(token)) {
+        // Sesión nativa Inutix (`inutix_ref_*`): canjear en Inutix Relay
+        // (`/auth/refresh`), nunca en `securetoken.googleapis.com`.
+        final data = await _exchangeInutixRefreshToken(token);
+        if (data == null) {
+          return 'El celular debe tener sesión activa vigente para vincular la TV.';
         }
-      } catch (_) {}
+        idToken = (data['idToken'] as String? ?? '').trim();
+        newRefresh = (data['refreshToken'] as String?)?.trim().isNotEmpty == true
+            ? (data['refreshToken'] as String).trim()
+            : token;
+        final respUid = (data['uid'] as String? ?? '').trim();
+        if (uid.isEmpty && respUid.isNotEmpty) uid = respUid;
+        if (uid.isEmpty && idToken.isNotEmpty) {
+          uid = await _lookupInutixUid(idToken);
+        }
+        if (idToken.isEmpty || uid.isEmpty) {
+          return 'No se pudo validar la sesión recibida.';
+        }
+      } else {
+        final tokenUrl = Uri.parse(
+          '${FirebaseConfig.secureTokenUrl}?${FirebaseConfig.keyParam}',
+        );
+        final tokenRes = await http
+            .post(
+              tokenUrl,
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'grant_type': 'refresh_token',
+                'refresh_token': token,
+              }),
+            )
+            .timeout(const Duration(seconds: 12));
+        if (tokenRes.statusCode != 200) {
+          return 'El celular debe tener sesión activa vigente para vincular la TV.';
+        }
+        final data = _tryDecode(tokenRes.body);
+        idToken = data['id_token'] as String? ?? '';
+        uid = (data['user_id'] as String? ?? '').trim();
+        newRefresh = (data['refresh_token'] as String?) ?? token;
+        if (idToken.isEmpty || uid.isEmpty) {
+          return 'No se pudo validar la sesión recibida.';
+        }
+
+        // Recuperar correo y nombre reales desde Firebase Identity Toolkit.
+        try {
+          final lookupUrl = Uri.parse(
+            '${FirebaseConfig.authBaseUrl}/accounts:lookup?${FirebaseConfig.keyParam}',
+          );
+          final lookupRes = await http
+              .post(
+                lookupUrl,
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode({'idToken': idToken}),
+              )
+              .timeout(const Duration(seconds: 8));
+          if (lookupRes.statusCode == 200) {
+            final lData = _tryDecode(lookupRes.body);
+            final users = lData['users'] as List?;
+            if (users != null && users.isNotEmpty && users.first is Map) {
+              final u = users.first as Map;
+              final e = (u['email'] ?? '').toString().trim();
+              final d = (u['displayName'] ?? '').toString().trim();
+              if (e.isNotEmpty) email = e;
+              if (d.isNotEmpty) displayName = d;
+            }
+          }
+        } catch (_) {}
+      }
 
       final isAdmin = isBootstrapAdminEmail(email);
       final baseUser = InutilUser(
@@ -1305,8 +1441,10 @@ class InutilAuthService extends ChangeNotifier {
       _kickedOutReason = '';
       _inactivityPaused = false;
       await _saveSession();
-      await _bootstrapSession(createIfMissing: true);
-      if (!testSkipOnlineValidation) _startValidationTimer();
+      if (!testSkipOnlineValidation) {
+        await _bootstrapSession(createIfMissing: true);
+        _startValidationTimer();
+      }
       notifyListeners();
       return null;
     } catch (e) {

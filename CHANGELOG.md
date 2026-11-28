@@ -1,5 +1,9 @@
 # Changelog — Inutix TV
 
+## 3.3.59 — 2026-11-27
+- **Vinculación por código QR en Smart TV reparada:** Corrige el error al enlazar tu televisor desde el celular cuando iniciaste sesión con Google, manteniendo tu cuenta y tu acceso sincronizados al instante.
+- **Botón para recargar código QR en pantalla:** Ahora la Smart TV muestra cuánto tiempo le queda al código (5 minutos) e incluye un botón directo navegable con el control remoto para generar un nuevo QR si expira o ocurre cualquier error.
+
 ## 3.3.58 — 2026-11-27
 - **Audio en Español Latino siempre prioritario en series:** Los episodios ahora respetan Latino como preferencia principal y mantienen el mismo idioma al pasar de un capítulo al siguiente (incluyendo la precarga automática), evitando saltos inesperados a inglés.
 - **Control remoto desde el celular sin movimientos fantasma:** Corrige el desplazamiento accidental a la derecha al usar el control móvil y mejora la precisión del panel táctil.

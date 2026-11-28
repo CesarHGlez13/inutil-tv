@@ -56,7 +56,7 @@ class TvQrPairingService {
   static final TvQrPairingService instance = TvQrPairingService._();
 
   static const String _alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  static const Duration sessionTtl = Duration(minutes: 3);
+  static const Duration sessionTtl = Duration(minutes: 5);
 
   // ---------------------------------------------------------------------------
   // 1. CRIPTOGRAFÍA E2E (AES-256-CBC + PKCS7 + HMAC-SHA256)
@@ -265,10 +265,12 @@ class TvQrPairingService {
       }
 
       final refreshToken = (payload['refreshToken'] ?? '').toString();
+      final uid = (payload['uid'] ?? '').toString();
       final email = (payload['email'] ?? '').toString();
       final displayName = (payload['displayName'] ?? '').toString();
       final err = await InutilAuthService.instance.signInWithPairedRefreshToken(
         refreshToken,
+        uidHint: uid,
         emailHint: email,
         displayNameHint: displayName,
       );
@@ -300,13 +302,17 @@ class TvQrPairingService {
     }
 
     final auth = InutilAuthService.instance;
-    final user = auth.currentUser;
-    if (user == null || user.refreshToken.isEmpty) {
+    final initialUser = auth.currentUser;
+    if (initialUser == null || initialUser.refreshToken.isEmpty) {
       return 'Necesitas tener sesión iniciada en tu celular para vincular la TV.';
     }
     if (!auth.isAccessAllowed) {
       return 'Tu cuenta debe estar activa para vincular una Smart TV.';
     }
+    if (!InutilAuthService.isInutixToken(initialUser.refreshToken)) {
+      await auth.ensureFreshIdToken();
+    }
+    final user = auth.currentUser ?? initialUser;
 
     try {
       final existing = await InutilFirestoreService.instance.getDocument(
@@ -359,13 +365,17 @@ class TvQrPairingService {
     }
 
     final auth = InutilAuthService.instance;
-    final user = auth.currentUser;
-    if (user == null || user.refreshToken.isEmpty) {
+    final initialUser = auth.currentUser;
+    if (initialUser == null || initialUser.refreshToken.isEmpty) {
       return 'Necesitas tener sesión iniciada en tu celular para vincular la TV.';
     }
     if (!auth.isAccessAllowed) {
       return 'Tu cuenta debe estar activa para vincular una Smart TV.';
     }
+    if (!InutilAuthService.isInutixToken(initialUser.refreshToken)) {
+      await auth.ensureFreshIdToken();
+    }
+    final user = auth.currentUser ?? initialUser;
 
     try {
       final existing = await InutilFirestoreService.instance.getDocument(
